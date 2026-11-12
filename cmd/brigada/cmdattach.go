@@ -21,6 +21,7 @@ import (
 	"github.com/Blackfire-AI/brigada/internal/adapter/codex"
 	"github.com/Blackfire-AI/brigada/internal/adapter/kimi"
 	"github.com/Blackfire-AI/brigada/internal/adapter/opencode"
+	"github.com/Blackfire-AI/brigada/internal/adapter/qwencode"
 	"github.com/Blackfire-AI/brigada/internal/api"
 	"github.com/Blackfire-AI/brigada/internal/engine"
 	"github.com/Blackfire-AI/brigada/internal/foreman"
@@ -176,6 +177,11 @@ func defaultAdapterForAttach(harness string) (adapter.Adapter, bool) {
 		// continues the session by id; the write-back rides the adapter's
 		// SessionWriteback.
 		return &opencode.Adapter{}, true
+	case "qwen-code":
+		// The foreman's turn carries the bridge through --mcp-config, and
+		// the TUI forks the resumed session onto the client's minted id,
+		// as claude's does: no write-back to settle.
+		return &qwencode.Adapter{}, true
 	}
 	return nil, false
 }

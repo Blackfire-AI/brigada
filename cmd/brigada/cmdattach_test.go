@@ -700,6 +700,19 @@ func TestDefaultAdapterForAttachCodexIsInteractive(t *testing.T) {
 			t.Errorf("defaultAdapterForAttach(kimi) returned an interactive adapter (%T)", ad)
 		}
 	}
+
+	// qwen-code carries an attached chat and forks onto the minted id, as
+	// claude does: no write-back of its own.
+	ad, ok = defaultAdapterForAttach("qwen-code")
+	if !ok {
+		t.Fatal("defaultAdapterForAttach(qwen-code) = unavailable, want available")
+	}
+	if _, ok := ad.(adapter.Interactive); !ok {
+		t.Fatalf("defaultAdapterForAttach(qwen-code) returned %T, want adapter.Interactive", ad)
+	}
+	if _, ok := ad.(adapter.SessionWriteback); ok {
+		t.Errorf("defaultAdapterForAttach(qwen-code) returned %T, a SessionWriteback; want the minted id", ad)
+	}
 }
 
 // TestAttachFailsOutsideAProjectsRepo covers the project's absences

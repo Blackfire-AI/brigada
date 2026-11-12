@@ -13,7 +13,7 @@
 
 You may pay for more than one AI coding subscription. brigada sits above their official command-line tools (Claude Code, Codex CLI, Kimi CLI, opencode, dsh, DeepSeek's CLI, and qwen-code, Alibaba's Qwen Code CLI) and uses them as workers:
 
-- the **foreman**, one of those CLIs (claude, codex or opencode; [GUIDE section 11](docs/GUIDE.md#11-the-foremans-harness-claude-codex-or-opencode) lists what a foreman harness must do), turns what you ask for into a plan of tasks with dependencies between them. It lives in a brigada-owned session: you talk to it with `brigada attach`, and it acts headless while you are away;
+- the **foreman**, one of those CLIs (claude, codex or opencode; [GUIDE section 11](docs/GUIDE.md#11-the-foremans-harness) lists what a foreman harness must do), turns what you ask for into a plan of tasks with dependencies between them. It lives in a brigada-owned session: you talk to it with `brigada attach`, and it acts headless while you are away;
 - the **dispatcher** gives each task to the agent with the best measured record for that kind of task on *your* repo, among the agents that still have quota;
 - every task's own **check** (tests, lint, any command) runs on the result, so "done" is not taken on trust;
 - a **reviewer** from another model family than the author's when one is available (`review.family=prefer`, the default; required with `review.family=require`) reads the change;

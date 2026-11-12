@@ -3,7 +3,13 @@
 // session id when the job carries one. The CLI's own login state — its
 // tokens, its configuration — is the ambient environment's business;
 // brigada adds nothing of its own to it and takes the runner's share back
-// out. The adapter is worker-only: no review policy, no attach.
+// out. It can be the foreman's harness (design §4.1): a foreman turn
+// carries the `brigada mcp` bridge through --mcp-config with
+// --strict-mcp-config, resumes the project's session headless with
+// --resume, and the attach (AttachCommand) runs the TUI forked onto the
+// client's session id. Its limits: no read-only review policy, no effort
+// control, and a foreman turn keeps --dangerously-skip-permissions, so
+// the foreman's read-only confinement is not enforced.
 package qwencode
 
 import (
@@ -28,6 +34,10 @@ type Adapter struct {
 }
 
 var _ adapter.Adapter = (*Adapter)(nil)
+
+// The qwen CLI carries the attach too (§4.2 item 1): its TUI resumes a
+// session forked onto the client's --session-id, so no SessionWriteback.
+var _ adapter.Interactive = (*Adapter)(nil)
 
 // DefaultModel is the agent's name for the CLI's own default model: the
 // one the CLI picks when no -m names another. The adapter's answer to it
@@ -68,13 +78,16 @@ func (a *Adapter) ProbeCommand(ctx context.Context) *exec.Cmd {
 // the CLI, running in workdir. The environment is the runner's ambient set
 // minus every BRIGADA_-prefixed variable (§5.1).
 //
+// A job that carries an MCP config is a foreman turn (§12.2): the bridge
+// rides --mcp-config, and --strict-mcp-config keeps every other server
+// out, as claude's headless turn does. The turn keeps auto-approve: qwen
+// offers no read-only scope brigada maps the foreman's onto, so the
+// foreman's confinement (§4) is not enforced by the harness.
+//
 // job.ReadDirs and job.Tools are ignored for now: reading extra
 // directories and mapping a tool scope onto qwen's permission rules are
 // follow-ups.
 func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*exec.Cmd, error) {
-	if job.MCPConfig != "" {
-		return nil, errors.New("qwen-code: the adapter wires no MCP-config flag; a job carrying an MCP config cannot run on it")
-	}
 	if job.Review {
 		return nil, errors.New("qwen-code: no read-only review policy yet; review jobs cannot run on it")
 	}
@@ -86,6 +99,9 @@ func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*ex
 		args = append(args, "-m", job.Model)
 	}
 	args = append(args, autoApproveFlag, settingSourcesFlag, settingSourcesValue)
+	if job.MCPConfig != "" {
+		args = append(args, "--mcp-config", job.MCPConfig, "--strict-mcp-config")
+	}
 	if resumeSessionID != "" {
 		args = append(args, "--resume", resumeSessionID)
 	}
@@ -96,6 +112,77 @@ func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*ex
 	cmd.Dir = workdir
 	cmd.Env = workerEnv(os.Environ())
 	return cmd, nil
+}
+
+// AttachCommand implements adapter.Interactive (§4.2 item 1): the CLI's
+// TUI — no -p, no stream to parse — with the opening prompt through -i,
+// which runs it and stays interactive. The session flags are the
+// write-back made possible: a resume forks the key's session onto the
+// client's --session-id (--resume <old> --fork-session --session-id
+// <new>), and a first session starts under the client's id alone, so
+// nobody reads the CLI's own session files. UNVERIFIED: the fork
+// combination has not been run against a live CLI.
+//
+// The session runs in workdir, the foreman's reading checkout. The
+// bridge is added with --mcp-config but without --strict-mcp-config, so
+// the user's own MCP servers load as in any session of theirs (as
+// claude's attach does); the headless turn alone is strict. No
+// auto-approve flag: the TUI asks the user at the terminal. The status
+// bar rides --settings as inline JSON, for this session alone.
+//
+// The streams are the caller's to wire.
+func (a *Adapter) AttachCommand(job adapter.Job, workdir, resumeSessionID, newSessionID string) (*exec.Cmd, error) {
+	if newSessionID == "" {
+		return nil, errors.New("qwen-code: the attach generates the new session id; an empty one cannot be named to the CLI")
+	}
+	if job.MCPConfig == "" {
+		return nil, errors.New("qwen-code: an attached foreman runs with the bridge: the job carries no MCP config")
+	}
+	if err := adapter.ValidateEffort("qwen-code", job.Effort); err != nil {
+		return nil, fmt.Errorf("qwen-code: %w", err)
+	}
+	var args []string
+	if job.Prompt != "" {
+		args = append(args, "-i", job.Prompt)
+	}
+	if resumeSessionID != "" {
+		args = append(args, "--resume", resumeSessionID, "--fork-session")
+	}
+	args = append(args, "--session-id", newSessionID)
+	if job.Model != "" && job.Model != DefaultModel {
+		args = append(args, "-m", job.Model)
+	}
+	args = append(args, settingSourcesFlag, settingSourcesValue, "--mcp-config", job.MCPConfig)
+	if job.StatusLine != "" {
+		settings, err := statusLineSettings(job.StatusLine)
+		if err != nil {
+			return nil, fmt.Errorf("qwen-code: %w", err)
+		}
+		args = append(args, "--settings", settings)
+	}
+	cmd := exec.Command(a.binary(), args...)
+	if cmd.Err != nil {
+		return nil, cmd.Err
+	}
+	cmd.Dir = workdir
+	cmd.Env = workerEnv(os.Environ())
+	return cmd, nil
+}
+
+// statusLineSettings renders the attach's --settings: the claude-compatible
+// statusLine entry qwen renders as the bottom line, inline JSON.
+func statusLineSettings(command string) (string, error) {
+	type statusLine struct {
+		Type    string `json:"type"`
+		Command string `json:"command"`
+	}
+	data, err := json.Marshal(struct {
+		StatusLine statusLine `json:"statusLine"`
+	}{statusLine{Type: "command", Command: command}})
+	if err != nil {
+		return "", fmt.Errorf("render the status-line settings: %w", err)
+	}
+	return string(data), nil
 }
 
 // envPrefix marks brigada's own variables, none of which is the worker's

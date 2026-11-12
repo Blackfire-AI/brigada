@@ -277,6 +277,10 @@ var ResumeCapableHarnesses = map[string]bool{
 	// bridge rides an adapter-written config in a directory OPENCODE_CONFIG_DIR
 	// names, the attach the TUI's own `-s <id>` (its session-id write-back
 	// through SessionWriteback).
+	"qwen-code": true, // Qwen Code CLI: `qwen -p --resume <id>` resumes headless;
+	// the bridge rides --mcp-config with --strict-mcp-config, the attach the
+	// TUI forked onto the client-minted id (--resume --fork-session
+	// --session-id).
 	"fake": true, // the scripted test adapter
 	// kimi is absent although its CLI resumes headless (`kimi --session
 	// <id>`): this set gates the foreman's harness, whose turns carry the
