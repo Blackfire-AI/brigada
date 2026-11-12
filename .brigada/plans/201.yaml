@@ -53,7 +53,7 @@ tasks:
     deps: ["docs-decisions"]
     base: "docs-decisions"
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-763"
     rounds: 0
   - id: 764
