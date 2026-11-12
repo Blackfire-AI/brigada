@@ -150,7 +150,7 @@ tasks:
     effort: medium
     review_tier: standard
     skills: ["schema-migration", "cli-flag"]
-    state: ready
+    state: running
     branch: ""
     rounds: 0
   - id: 772
@@ -162,7 +162,7 @@ tasks:
     effort: medium
     review_tier: standard
     skills: ["config-setting"]
-    state: ready
+    state: running
     branch: ""
     rounds: 0
   - id: 773
