@@ -21,6 +21,13 @@ func TestMessage(t *testing.T) {
 			ok:    true,
 		},
 		{
+			name:  "approval signature wanted",
+			ev:    Event{Kind: KindApprovalWanted, Reason: "signature wanted out of band to approve plan #9 at version 2 (request #5, challenge 0123456789abcdef0123456789abcdef, expires 2026-11-13T10:05:00Z)"},
+			title: "brigada",
+			body:  "approval needs you: signature wanted out of band to approve plan #9 at version 2 (request #5, challenge 0123456789abcdef0123456789abcdef, expires 2026-11-13T10:05:00Z)",
+			ok:    true,
+		},
+		{
 			name:  "plan done",
 			ev:    Event{Kind: KindPlanDone, PlanID: 7, PlanTitle: "Fix the parser"},
 			title: "brigada",

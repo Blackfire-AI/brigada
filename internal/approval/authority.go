@@ -107,8 +107,12 @@ type Authority struct {
 }
 
 // New returns an Authority over store.
-func New(store *Store) *Authority {
-	return &Authority{store: store, now: time.Now, keygen: "ssh-keygen", spent: map[string]time.Time{}}
+func New(store *Store) *Authority { return NewWithClock(store, time.Now) }
+
+// NewWithClock is New with the caller's clock, so an engine under a test
+// clock issues and expires challenges by it.
+func NewWithClock(store *Store, now func() time.Time) *Authority {
+	return &Authority{store: store, now: now, keygen: "ssh-keygen", spent: map[string]time.Time{}}
 }
 
 // Issue makes a challenge for act, good for ttl (DefaultTTL when ttl is

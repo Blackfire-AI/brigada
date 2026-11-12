@@ -447,6 +447,12 @@ func (e *Engine) status(ctx context.Context, project int64, withText, all bool) 
 			return err
 		}
 		info.NeedsYou = append(info.NeedsYou, budgetItems...)
+		// An act waiting for the user's signature (§12.2) is the user's.
+		approvalItems, err := statusApprovalItemsTx(tx, project, now)
+		if err != nil {
+			return err
+		}
+		info.NeedsYou = append(info.NeedsYou, approvalItems...)
 		if info.Cooling, err = statusCoolingTx(tx, now); err != nil {
 			return err
 		}

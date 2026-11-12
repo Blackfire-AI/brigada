@@ -32,6 +32,9 @@ const (
 	// KindPlanAwaitingApproval: a plan is over the approval limit and
 	// waits for the user's yes (§6.3, §10).
 	KindPlanAwaitingApproval = "plan_awaiting_approval"
+	// KindApprovalWanted: a gated act (a plan, a landing or a push) waits
+	// for the user's signature, out of band (§12.2).
+	KindApprovalWanted = "approval_signature_wanted"
 )
 
 // title is the notification's bold line: the one name every banner
@@ -159,6 +162,11 @@ func Message(ev Event) (t, body string, ok bool) {
 		// paths); the user answers with approve or reject.
 		return title, oneLine(fmt.Sprintf("plan #%d needs your approval: %s: `brigada plan approve %d` or `brigada plan reject %d`",
 			ev.PlanID, ev.Reason, ev.PlanID, ev.PlanID), bodyLimit), true
+	case ev.Kind == KindApprovalWanted:
+		// Reason is the needs-you entry's own words: the act, the
+		// request and its challenge, and that the signature comes from
+		// outside.
+		return title, oneLine("approval needs you: "+ev.Reason, bodyLimit), true
 	case ev.Kind == KindPlanUnattended:
 		reason := ev.Reason
 		if reason == "" {
