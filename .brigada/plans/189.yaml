@@ -53,8 +53,8 @@ tasks:
     tier: light
     effort: medium
     skills: ["surface-parity", "docs-change"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-726-r1"
     rounds: 0
   - id: 727
     name: "qwen-smoke"
