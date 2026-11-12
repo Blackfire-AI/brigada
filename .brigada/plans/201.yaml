@@ -67,8 +67,8 @@ tasks:
     review_tier: standard
     review_effort: high
     skills: ["surface-parity"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-764"
     rounds: 0
   - id: 765
     name: "approval-surfaces"
