@@ -42,17 +42,20 @@ func TestCommand(t *testing.T) {
 	const prompt = "the task spec\nverbatim"
 	dir := t.TempDir()
 	base := []string{"-p", prompt, "-o", "stream-json"}
+	// The flags every run carries, as `qwen --help` (1.0.0-preview.1) names
+	// them: auto-approve, and the repository's own settings skipped.
+	tail := []string{"--dangerously-skip-permissions", "--setting-sources", "user"}
 	cases := []struct {
 		name   string
 		job    adapter.Job
 		resume string
 		want   []string
 	}{
-		{"fresh", adapter.Job{Prompt: prompt}, "", append(slicesClone(base), autoApproveFlag)},
-		{"default model omits -m", adapter.Job{Prompt: prompt, Model: DefaultModel}, "", append(slicesClone(base), autoApproveFlag)},
-		{"model", adapter.Job{Prompt: prompt, Model: "qwen-subscription/qwen3.8-flash"}, "", append(slicesClone(base), "-m", "qwen-subscription/qwen3.8-flash", autoApproveFlag)},
-		{"resume", adapter.Job{Prompt: prompt}, "sess-1", append(slicesClone(base), autoApproveFlag, "--resume", "sess-1")},
-		{"read dirs and tools ignored", adapter.Job{Prompt: prompt, ReadDirs: []string{"/x"}, Tools: []string{"Bash(go test:*)"}}, "", append(slicesClone(base), autoApproveFlag)},
+		{"fresh", adapter.Job{Prompt: prompt}, "", append(slicesClone(base), tail...)},
+		{"default model omits -m", adapter.Job{Prompt: prompt, Model: DefaultModel}, "", append(slicesClone(base), tail...)},
+		{"model", adapter.Job{Prompt: prompt, Model: "qwen-subscription/qwen3.8-flash"}, "", append(append(slicesClone(base), "-m", "qwen-subscription/qwen3.8-flash"), tail...)},
+		{"resume", adapter.Job{Prompt: prompt}, "sess-1", append(append(slicesClone(base), tail...), "--resume", "sess-1")},
+		{"read dirs and tools ignored", adapter.Job{Prompt: prompt, ReadDirs: []string{"/x"}, Tools: []string{"Bash(go test:*)"}}, "", append(slicesClone(base), tail...)},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -155,7 +158,7 @@ func TestParseNormal(t *testing.T) {
 			events = append(events, ev)
 		}
 	}
-	kinds := []adapter.EventKind{adapter.EvSession, adapter.EvToolStart, adapter.EvToolEnd, adapter.EvMessage, adapter.EvSession}
+	kinds := []adapter.EventKind{adapter.EvSession, adapter.EvMessage, adapter.EvToolStart, adapter.EvToolEnd, adapter.EvToolStart, adapter.EvToolEnd, adapter.EvMessage, adapter.EvSession}
 	if len(events) != len(kinds) {
 		t.Fatalf("got %d events: %+v", len(events), events)
 	}
@@ -164,19 +167,20 @@ func TestParseNormal(t *testing.T) {
 			t.Errorf("event %d kind = %q, want %q", i, events[i].Kind, k)
 		}
 	}
-	if events[0].SessionID != "sess-0001" {
+	const session = "4bd8be37-d417-483f-80fa-6a3b99eeaf5b"
+	if events[0].SessionID != session {
 		t.Errorf("init session = %q", events[0].SessionID)
 	}
-	if events[1].Text != "read_file" || events[1].Args == "" {
-		t.Errorf("tool start = %+v", events[1])
+	if events[2].Text != "Write" || events[2].Args == "" {
+		t.Errorf("tool start = %+v", events[2])
 	}
-	if events[2].Text != "call-1" {
-		t.Errorf("tool end = %+v", events[2])
+	if events[3].Text != "call_92a561522cdc4830865427a8" {
+		t.Errorf("tool end = %+v", events[3])
 	}
-	if events[4].SessionID != "sess-0001" {
-		t.Errorf("result session = %q", events[4].SessionID)
+	if events[7].SessionID != session {
+		t.Errorf("result session = %q", events[7].SessionID)
 	}
-	if got := a.ResultText(events); got != "All done." {
+	if got := a.ResultText(events); got != "done" {
 		t.Errorf("ResultText = %q", got)
 	}
 }

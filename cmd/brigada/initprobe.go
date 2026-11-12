@@ -20,9 +20,10 @@ func harnessBinary(harness string) string {
 	return harness
 }
 
-// initHarnessLabel is how init names a harness in lists: dsh is experimental.
+// initHarnessLabel is how init names a harness in lists: dsh and qwen-code are
+// experimental.
 func initHarnessLabel(harness string) string {
-	if harness == "dsh" {
+	if harness == "dsh" || harness == "qwen-code" {
 		return harness + " (experimental)"
 	}
 	return harness
