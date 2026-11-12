@@ -15,7 +15,7 @@ Nothing is written or started until you confirm at the end.
 Signed in: claude, codex, opencode (2 providers, opencode providers list).
 kimi: init can't check sign-in.
 dsh (experimental): init can't check sign-in.
-qwen-code: init can't check sign-in.
+qwen-code (experimental): init can't check sign-in.
 
 Step 1 of 4: the foreman
   The foreman plans the work and decides what happens when a task needs
@@ -86,7 +86,7 @@ Step 2 of 4: workers
   dsh's own credential store.
     Use dsh? [y/N]:
 
-  qwen-code: version 1.0.0-preview.1, sign-in can't be checked
+  qwen-code (experimental): version 1.0.0-preview.1, sign-in can't be checked
     Use qwen-code? [y/N]:
     qwen-code runs with auto-approve: when it writes code it can run any
     command on this machine without asking. It does not review.

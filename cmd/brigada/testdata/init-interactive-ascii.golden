@@ -15,7 +15,7 @@
 Signed in: claude, codex, opencode (2 providers, opencode providers list).
 kimi: init can't check sign-in.
 dsh (experimental): init can't check sign-in.
-qwen-code: init can't check sign-in.
+qwen-code (experimental): init can't check sign-in.
 
 [1m== Step 1 of 4 - the foreman[0m
 [90m  The foreman plans the work and decides what happens when a task needs[0m
@@ -85,7 +85,7 @@ qwen-code: init can't check sign-in.
   dsh's own credential store.[0m
 [1m    Use dsh? [0m[36m[y/N][0m[1m:[0m
 
-  [1mqwen-code[0m  [33m? sign-in can't be checked[0m
+  [1mqwen-code[0m  [90mexperimental - [0m[33m? sign-in can't be checked[0m
 [1m    Use qwen-code? [0m[36m[y/N][0m[1m:[0m
     [33m! qwen-code runs with auto-approve: when it writes code it can run any
     command on this machine without asking. It does not review.[0m
