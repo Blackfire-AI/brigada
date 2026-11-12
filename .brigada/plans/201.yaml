@@ -5,9 +5,9 @@
 plan: 201
 title: "#228 implementation: harness-owned permissions, runner-only push, approval authority"
 repo: "github.com/Blackfire-AI/brigada"
-state: needs_foreman
+state: reviewing
 created: 2026-11-12T21:47:35.965112Z
-updated: 2026-11-12T21:48:12.898191Z
+updated: 2026-11-12T21:48:16.18547Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -55,6 +55,44 @@ tasks:
     tier: heavy
     effort: medium
     skills: ["surface-parity"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 764
+    name: "approval-gates"
+    title: "Approval authority: gate the API's approval acts on a verified signature"
+    class: "implement"
+    deps: ["approval-core", "push-path"]
+    base: "approval-core"
+    continue: "approval-core"
+    tier: heavy
+    effort: medium
+    review_tier: heavy
+    skills: ["surface-parity"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 765
+    name: "approval-surfaces"
+    title: "Approval authority: the CLI and coordinator half of the signature"
+    class: "implement"
+    deps: ["approval-gates"]
+    base: "approval-gates"
+    continue: "approval-gates"
+    effort: medium
+    skills: ["cli-flag"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 766
+    name: "permission-config"
+    title: "`permission=` per agent, with `tools=` and `worker_tools` as deprecated aliases"
+    class: "implement"
+    deps: ["push-path"]
+    base: "push-path"
+    tier: heavy
+    effort: medium
+    skills: ["config-setting"]
     state: pending
     branch: ""
     rounds: 0
