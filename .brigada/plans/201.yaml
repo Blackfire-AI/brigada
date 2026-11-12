@@ -215,8 +215,8 @@ tasks:
     review_tier: standard
     review_effort: medium
     skills: ["surface-parity"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-776"
     rounds: 0
   - id: 777
     name: "adapter-dsh-kimi-qwen"
