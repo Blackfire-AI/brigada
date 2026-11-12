@@ -65,6 +65,6 @@ tasks:
     effort: medium
     caps: {restart: 0}
     skills: ["bugfix", "docs-change"]
-    state: reviewing
+    state: running
     branch: "brigada/task-727"
-    rounds: 0
+    rounds: 1
