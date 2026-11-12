@@ -137,8 +137,8 @@ tasks:
     effort: medium
     review_tier: standard
     review_effort: high
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-770"
     rounds: 0
   - id: 771
     name: "approval-state"
