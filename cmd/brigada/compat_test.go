@@ -44,11 +44,24 @@ var commonFlagNames = []string{"state-dir", "config"}
 // 1.0 does not freeze, each with a one-line reason. A flag the CLI registers
 // must be documented as frozen or be named here, so a new flag forces the
 // choice.
-var unfrozenFlags = map[string][]string{}
+var unfrozenFlags = map[string][]string{
+	// The user's signed approval (§12.2) is new and experimental: the two
+	// flags that answer a pending request. The compatibility document
+	// freezes them when it lists them.
+	"plan approve": {"request", "signature"},
+	"plan reject":  {"request", "signature"},
+	"land approve": {"request", "signature"},
+	"land reject":  {"request", "signature"},
+	"push approve": {"request", "signature"},
+}
 
 // unfrozenToolArgs names arguments a tool's schema offers that the document
 // does not list, by tool, each with a reason.
-var unfrozenToolArgs = map[string][]string{}
+var unfrozenToolArgs = map[string][]string{
+	// The same signed approval as the flags above, new and experimental.
+	"plan_approve": {"request_id", "signature"},
+	"plan_reject":  {"request_id", "signature"},
+}
 
 var (
 	tokenRE   = regexp.MustCompile("`([^`]+)`")

@@ -137,6 +137,14 @@ func planDecisionProperties(extra map[string]any) map[string]any {
 			"type":        "integer",
 			"description": "the plan version the user was shown, as status shows it",
 		},
+		"request_id": map[string]any{
+			"type":        "integer",
+			"description": "the pending approval request this call answers, as the refusal named it; leave it out on the first call, which asks and returns the challenge for the user to sign out of band",
+		},
+		"signature": map[string]any{
+			"type":        "string",
+			"description": "the user's signature of that request's challenge: the whole text of the file ssh-keygen -Y sign wrote (<file>.sig), which the user made with their own key; never sign it yourself",
+		},
 	}
 	for k, v := range extra {
 		props[k] = v
@@ -281,6 +289,17 @@ type planDecisionArgs struct {
 	Plan          int64  `json:"plan"`
 	Version       int64  `json:"version"`
 	AndStopAsking bool   `json:"and_stop_asking"`
+	RequestID     int64  `json:"request_id"`
+	Signature     string `json:"signature"`
+}
+
+// approvalRefusal words an approval_required refusal as the tool's error,
+// the same text the CLI prints; any other error passes through.
+func approvalRefusal(err error) error {
+	if pending, ok := api.ApprovalOf(err); ok {
+		return fmt.Errorf("%s\nthat is, call this tool again with request_id %d and signature set to the text of <file>.sig", pending.Text(), pending.RequestID)
+	}
+	return err
 }
 
 func readPlanDecision(args json.RawMessage) (planDecisionArgs, error) {
@@ -304,9 +323,9 @@ func callPlanApprove(ctx context.Context, c *api.Client, args json.RawMessage) (
 	if err != nil {
 		return "", err
 	}
-	res, err := c.ApprovePlanVersion(ctx, a.RepoURL, a.Plan, a.Version, a.AndStopAsking)
+	res, err := c.WithApproval(api.ApprovalProof{RequestID: a.RequestID, Signature: a.Signature}).ApprovePlanVersion(ctx, a.RepoURL, a.Plan, a.Version, a.AndStopAsking)
 	if err != nil {
-		return "", err
+		return "", approvalRefusal(err)
 	}
 	text := fmt.Sprintf("plan %d approved (state %s): %d tasks queued", res.PlanID, res.State, len(res.Tasks))
 	for _, t := range res.Tasks {
@@ -326,9 +345,9 @@ func callPlanReject(ctx context.Context, c *api.Client, args json.RawMessage) (s
 	if err != nil {
 		return "", err
 	}
-	res, err := c.RejectPlanVersion(ctx, a.RepoURL, a.Plan, a.Version)
+	res, err := c.WithApproval(api.ApprovalProof{RequestID: a.RequestID, Signature: a.Signature}).RejectPlanVersion(ctx, a.RepoURL, a.Plan, a.Version)
 	if err != nil {
-		return "", err
+		return "", approvalRefusal(err)
 	}
 	return fmt.Sprintf("plan %d rejected (state %s): its tasks are cancelled", res.PlanID, res.State), nil
 }

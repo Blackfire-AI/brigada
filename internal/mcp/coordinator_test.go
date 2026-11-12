@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/Blackfire-AI/brigada/internal/api"
+	"github.com/Blackfire-AI/brigada/internal/approval"
 	"github.com/Blackfire-AI/brigada/internal/engine"
 )
 
@@ -207,7 +208,12 @@ func TestCoordinatorApproveRefusals(t *testing.T) {
 	}
 
 	// The version the user was shown last goes through.
-	got, isErr := call(103, "plan_approve", map[string]any{"repo_url": coordRepo, "plan": plan, "version": 2})
+	// It also needs the user's signature, made out of band (§12.2).
+	signer := newToolSigner(t)
+	if err := approval.NewStore(e.keys).Add(approval.Key{Label: "me", PublicKey: signer.public}); err != nil {
+		t.Fatal(err)
+	}
+	got, isErr := signedTool(t, e, s, signer, 200, "plan_approve", map[string]any{"repo_url": coordRepo, "plan": plan, "version": 2})
 	if isErr || !strings.Contains(got, "approved") {
 		t.Fatalf("plan_approve at the current version = %q (error %v)", got, isErr)
 	}
@@ -221,7 +227,7 @@ func TestCoordinatorApproveRefusals(t *testing.T) {
 
 	// Reject at the current version cancels the plan.
 	other := waitingPlan(t, e, "b")
-	got, isErr = call(105, "plan_reject", map[string]any{"repo_url": coordRepo, "plan": other, "version": 1})
+	got, isErr = signedTool(t, e, s, signer, 210, "plan_reject", map[string]any{"repo_url": coordRepo, "plan": other, "version": 1})
 	if isErr || !strings.Contains(got, "rejected") {
 		t.Fatalf("plan_reject at the current version = %q (error %v)", got, isErr)
 	}

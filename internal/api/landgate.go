@@ -28,35 +28,37 @@ func (s *Server) handleTaskLandDecision(approve bool) handler {
 		if !ok {
 			return
 		}
-		var stopAsking bool
-		if approve {
-			var req struct {
-				AndStopAsking bool `json:"and_stop_asking"`
-			}
-			if body, ok := readBody(w, r); ok {
-				if len(bytes.TrimSpace(body)) > 0 {
-					if err := json.Unmarshal(body, &req); err != nil {
-						writeError(w, http.StatusBadRequest, codeBadRequest, "malformed JSON body: "+err.Error())
-						return
-					}
-				}
-			} else {
-				return
-			}
-			stopAsking = req.AndStopAsking
+		var req struct {
+			AndStopAsking bool `json:"and_stop_asking"`
+			ApprovalProof
 		}
-		var (
-			res engine.LandDecision
-			err error
-		)
-		if approve {
-			res, err = s.eng.LandApprove(r.Context(), project, taskID, stopAsking)
+		if body, ok := readBody(w, r); ok {
+			if len(bytes.TrimSpace(body)) > 0 {
+				if err := json.Unmarshal(body, &req); err != nil {
+					writeError(w, http.StatusBadRequest, codeBadRequest, "malformed JSON body: "+err.Error())
+					return
+				}
+			}
 		} else {
-			res, err = s.eng.LandReject(r.Context(), project, taskID)
+			return
+		}
+		// The role was checked by the route; the landing's yes or no
+		// needs the user's signature for this task (§12.2).
+		act := engine.GatedActRequest{Action: engine.GatedLandReject, Project: project, Task: taskID}
+		if approve {
+			act = engine.GatedActRequest{Action: engine.GatedLandApprove, Project: project, Task: taskID, StopAsking: req.AndStopAsking}
+		}
+		gated, written, err := s.runGated(w, r, act, req.ApprovalProof)
+		if written {
+			return
 		}
 		if err != nil {
 			writeError(w, http.StatusBadRequest, codeBadRequest, err.Error())
 			return
+		}
+		var res engine.LandDecision
+		if gated.Land != nil {
+			res = *gated.Land
 		}
 		writeJSON(w, http.StatusOK, res)
 	}
@@ -71,14 +73,24 @@ func (s *Server) handlePushApprove(w http.ResponseWriter, r *http.Request, id id
 	}
 	var req struct {
 		RepoURL string `json:"repo_url"`
+		ApprovalProof
 	}
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	res, err := s.eng.PushApprove(r.Context(), req.RepoURL)
+	// The role was checked by the route; the push's yes needs the user's
+	// signature for this project (§12.2).
+	gated, written, err := s.runGated(w, r, engine.GatedActRequest{Action: engine.GatedPushApprove, RepoURL: req.RepoURL}, req.ApprovalProof)
+	if written {
+		return
+	}
 	if err != nil {
 		writeError(w, http.StatusBadRequest, codeBadRequest, err.Error())
 		return
+	}
+	var res engine.PushApproveResult
+	if gated.Push != nil {
+		res = *gated.Push
 	}
 	writeJSON(w, http.StatusOK, res)
 }

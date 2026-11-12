@@ -40,11 +40,16 @@ func runPushApprove(ctx context.Context, args []string, stdout, stderr io.Writer
 	)
 	fs.StringVar(&repo, "repo", "", "the repository URL (default: the working directory's origin)")
 	fs.BoolVar(&noStart, "no-start", false, "do not start the engine on demand; fail when none is running")
+	approvalFlags := addApprovalFlags(fs)
 	if code, stop := common.parse(stdout, stderr, args); stop {
 		return code
 	}
 	if len(fs.Args()) != 0 {
 		return usagef(stderr, "push approve takes no positional arguments")
+	}
+	proof, code := approvalFlags.proof(stderr)
+	if code != 0 {
+		return code
 	}
 	if repo == "" {
 		dir, err := os.Getwd()
@@ -63,7 +68,7 @@ func runPushApprove(ctx context.Context, args []string, stdout, stderr io.Writer
 	if code != 0 {
 		return code
 	}
-	return printPushApprove(ctx, client, repo, stdout, stderr)
+	return printPushApprove(ctx, client.WithApproval(proof), repo, stdout, stderr)
 }
 
 func printPushApprove(ctx context.Context, client pushApprover, repo string, stdout, stderr io.Writer) int {

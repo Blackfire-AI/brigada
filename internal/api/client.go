@@ -28,6 +28,19 @@ type Client struct {
 	http        *http.Client
 	token       string
 	readProject int64
+	// approval answers a pending request on the gated calls (§12.2): the
+	// plan, landing and push decisions carry it in their body.
+	approval ApprovalProof
+}
+
+// WithApproval returns a client whose gated calls (a plan's, a landing's
+// and a push's decision) carry proof: the pending request they answer and
+// the signature of its challenge. Without it they ask, and the engine
+// answers with the challenge to sign out of band.
+func (c *Client) WithApproval(proof ApprovalProof) *Client {
+	cp := *c
+	cp.approval = proof
+	return &cp
 }
 
 // NewClient builds a client for the engine's Unix socket, bearing the

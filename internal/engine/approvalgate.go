@@ -128,7 +128,7 @@ func (e *Engine) approvalAuthority() *approval.Authority {
 //
 // The caller has checked the token's role; this checks the signature.
 func (e *Engine) GatedAct(ctx context.Context, act GatedActRequest, requestID int64, signature []byte) (GatedResult, error) {
-	bound, err := e.bindGated(ctx, act)
+	bound, err := e.bindGated(ctx, act, requestID == 0)
 	if err != nil {
 		return GatedResult{}, err
 	}
@@ -188,7 +188,11 @@ func (e *Engine) GatedAct(ctx context.Context, act GatedActRequest, requestID in
 // bindGated resolves the rows a request names and builds the act's
 // identity, which carries the project, the plan version and the options,
 // so a signature covers exactly that and nothing else.
-func (e *Engine) bindGated(ctx context.Context, act GatedActRequest) (gatedAct, error) {
+//
+// ask is true for the call that makes the request: it alone checks that
+// the act could run now. An answer skips the check, so a replay of a
+// spent request reads as reused and not as a plan that moved on.
+func (e *Engine) bindGated(ctx context.Context, act GatedActRequest, ask bool) (gatedAct, error) {
 	b := gatedAct{req: act}
 	stop := 0
 	if act.StopAsking && (act.Action == GatedPlanApprove || act.Action == GatedLandApprove) {
@@ -209,9 +213,22 @@ func (e *Engine) bindGated(ctx context.Context, act GatedActRequest) (gatedAct, 
 			if b.version == 0 {
 				b.version = have
 			}
+			// A request is made only for an act that could run now: a plan
+			// amended past the version named, or not waiting, is refused
+			// here as the plain call refuses it, with no challenge.
 			verb := "approve"
 			if act.Action == GatedPlanReject {
 				verb = "reject"
+			}
+			if ask {
+				if act.Action == GatedPlanReject {
+					_, err = awaitingPlanTx(tx, b.project, act.Plan, b.version)
+				} else {
+					_, _, err = approvablePlanTx(tx, b.project, act.Plan, b.version)
+				}
+				if err != nil {
+					return err
+				}
 			}
 			b.kind = approval.KindPlan
 			b.identity = fmt.Sprintf("%s:project=%d:plan=%d:v=%d:stop=%d", verb, b.project, act.Plan, b.version, stop)
@@ -222,6 +239,11 @@ func (e *Engine) bindGated(ctx context.Context, act GatedActRequest) (gatedAct, 
 			}
 			if err != nil {
 				return fmt.Errorf("read task %d: %w", act.Task, err)
+			}
+			if ask {
+				if _, err := landHoldTaskTx(tx, b.project, act.Task); err != nil {
+					return err
+				}
 			}
 			verb := "land-approve"
 			if act.Action == GatedLandReject {
