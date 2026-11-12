@@ -5,9 +5,9 @@
 plan: 201
 title: "#228 implementation: harness-owned permissions, runner-only push, approval authority"
 repo: "github.com/Blackfire-AI/brigada"
-state: needs_foreman
+state: reviewing
 created: 2026-11-12T21:47:35.965112Z
-updated: 2026-11-12T22:59:09.028835Z
+updated: 2026-11-12T23:07:16.486913Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -121,8 +121,9 @@ tasks:
     name: "docs-followups"
     title: "Docs close of #228: GUIDE, SECURITY, README, COMPATIBILITY, CHANGELOG"
     class: "implement"
-    deps: ["adapter-dsh-kimi-qwen"]
+    deps: ["approval-surfaces", "permission-cli", "adapter-dsh-kimi-qwen"]
     base: "adapter-dsh-kimi-qwen"
+    continue: "adapter-dsh-kimi-qwen"
     effort: medium
     skills: ["docs-change"]
     state: pending
