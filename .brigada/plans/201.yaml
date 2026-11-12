@@ -67,7 +67,7 @@ tasks:
     review_tier: standard
     review_effort: high
     skills: ["surface-parity"]
-    state: ready
+    state: running
     branch: ""
     rounds: 0
   - id: 765
@@ -174,7 +174,7 @@ tasks:
     effort: medium
     review_tier: standard
     skills: ["config-setting"]
-    state: ready
+    state: running
     branch: ""
     rounds: 0
   - id: 774
