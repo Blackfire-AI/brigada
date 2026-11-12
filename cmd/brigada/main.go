@@ -114,6 +114,9 @@ Commands:
 	                (--and-stop-asking changes the rule that held it).
 	plan reject <id>
 	                Reject such a plan and cancel its tasks.
+	approval add <public-key-file>
+	                Enroll an approval key, public half only (--label);
+	                approval list and approval remove <label> manage them.
 	budget [--repo URL] [--wakes N]
 	                Show the project's foreman wake budget: today's use
 	                and the reset time; --wakes sets it.
@@ -175,6 +178,7 @@ var commands = map[string]command{
 	"agent":        {name: "agent", run: runAgent, subcommands: agentCommands},
 	"agents":       {name: "agents", run: runAgents},
 	"plan":         {name: "plan", run: runPlan, subcommands: planCommands},
+	"approval":     {name: "approval", run: runApproval, subcommands: approvalCommands},
 	"budget":       {name: "budget", run: runBudget},
 	"recover":      {name: "recover", run: runRecover},
 	"diff":         {name: "diff", run: runDiff},

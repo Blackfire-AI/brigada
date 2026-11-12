@@ -102,7 +102,8 @@ func TestConfigResolveChecksTheSocketAndFillsDefaults(t *testing.T) {
 		t.Fatalf("resolve: %v", err)
 	}
 	if p.Socket != filepath.Join(dir, "brigada.sock") || p.Store != filepath.Join(dir, "store.db") ||
-		p.Lock != filepath.Join(dir, "engine.lock") || p.Tokens != filepath.Join(dir, "tokens") {
+		p.Lock != filepath.Join(dir, "engine.lock") || p.Tokens != filepath.Join(dir, "tokens") ||
+		p.ApprovalKeys != filepath.Join(dir, "approval-keys") {
 		t.Errorf("paths = %+v, want everything inside the state dir", p)
 	}
 	if cfg.Idle != defaultIdle {

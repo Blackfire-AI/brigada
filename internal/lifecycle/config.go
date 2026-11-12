@@ -36,25 +36,29 @@ func DefaultStateDir() string {
 
 // Paths are the engine's files inside one state directory: the store,
 // the API's socket, the single-instance lock beside the store (§13), the
-// token file (§6.4) and the log a detached engine writes.
+// token file (§6.4), the approval keys enrolled beside it (§12.2: public
+// keys and labels only, the same 0600 discipline) and the log a detached
+// engine writes.
 type Paths struct {
-	StateDir string
-	Store    string
-	Socket   string
-	Lock     string
-	Tokens   string
-	Log      string
+	StateDir     string
+	Store        string
+	Socket       string
+	Lock         string
+	Tokens       string
+	ApprovalKeys string
+	Log          string
 }
 
 // PathsOf derives every path from stateDir.
 func PathsOf(stateDir string) Paths {
 	return Paths{
-		StateDir: stateDir,
-		Store:    filepath.Join(stateDir, "store.db"),
-		Socket:   filepath.Join(stateDir, "brigada.sock"),
-		Lock:     filepath.Join(stateDir, "engine.lock"),
-		Tokens:   filepath.Join(stateDir, "tokens"),
-		Log:      filepath.Join(stateDir, "engine.log"),
+		StateDir:     stateDir,
+		Store:        filepath.Join(stateDir, "store.db"),
+		Socket:       filepath.Join(stateDir, "brigada.sock"),
+		Lock:         filepath.Join(stateDir, "engine.lock"),
+		Tokens:       filepath.Join(stateDir, "tokens"),
+		ApprovalKeys: filepath.Join(stateDir, "approval-keys"),
+		Log:          filepath.Join(stateDir, "engine.log"),
 	}
 }
 

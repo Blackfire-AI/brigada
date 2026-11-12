@@ -289,6 +289,7 @@ State lives in the state directory: `~/.local/state/brigada`, or `$XDG_STATE_HOM
 - `engine.lock`, `engine.log` and `runner.log`;
 - `artifacts/`: transcripts and check logs, one file each (the store only points to them);
 - `tokens`: the credentials the roles use to talk to the engine, readable by you only; keep it that way;
+- `approval-keys`: the public keys you enrolled as your approval authority ([section 7](#approval-keys)), readable by you only, like `tokens`;
 - `runner/`: the runner's `mirrors/` of your repos, and a `worktrees/` directory per running job.
 
 The socket path is limited to 104 bytes; a state directory that is too deep is refused with a message that says so.
@@ -822,6 +823,28 @@ On a running plan, `brigada plan approve` releases the tasks a rule holds alone,
 **The push gate** (`gate_push`, `auto` by default) decides what follows a successful landing: `auto` pushes the target, `ask` holds the push until `brigada push approve` releases every waiting landing of the project, and `never` leaves the push to you. Both gates, their needs-you entries and `after_land` are described in [section 5](#5-finishing-the-land-job). A held task blocks nothing but its dependents' landings: work on the rest of the plan goes on.
 
 Only you can decide: no foreman tool approves a plan or passes a gate.
+
+### Approval keys
+
+A token is not you. Any process running as you — a task worker, a foreman with a shell — can read the state directory and use the client token, and an agent with a shell can type into a terminal as you, so neither a token nor a prompt proves that you approved something. Your approval authority is an SSH key instead: you enroll its public half, and an approval is a signature by it over a challenge the engine issues for one act — the plan, landing, push or import it names, a random nonce and an expiry five minutes out. A signature made for one act approves no other, a signature answers one challenge once, and an expired challenge answers nothing. The gates above still decide what waits for you; the key is what releases it.
+
+```sh
+brigada approval add --label yubikey ~/.ssh/id_ed25519_sk.pub
+brigada approval list
+brigada approval remove yubikey
+```
+
+`add` takes a `.pub` file or one `authorized_keys` line, of type ed25519, ECDSA, RSA (2048 bits or more) or a security key's `ed25519-sk` or `ecdsa-sk`; the label defaults to the key's comment. A private key is refused: brigada never holds one. `list` prints each key's label, type and SHA256 fingerprint, the one `ssh-keygen -l` prints, and `remove` takes either. The keys live in `approval-keys` in the state directory, mode 0600; a looser mode is refused rather than read.
+
+A challenge is signed with OpenSSH's own tool, under the `brigada-approval` namespace, so no signature made for git or anything else counts:
+
+```sh
+ssh-keygen -Y sign -n brigada-approval -f ~/.ssh/id_ed25519_sk challenge.txt
+```
+
+Choose a key your own processes cannot use: a security key, whose signature needs your touch and is refused without it, or a key on another device. A key file in `~/.ssh` that any process running as you can read stands no higher than the token. And since `approval-keys` is a file you own, a process running as you could add its own key to it: check `brigada approval list` names only yours.
+
+Nothing is approved by a key yet: `brigada plan approve`, `land approve` and `push approve` work as described above, and asking them for the signature is the next step.
 
 ### The plan file
 

@@ -14,4 +14,5 @@
 - `messages`
 - `questions`
 - `tokens` (hashed)
+- `approval_requests` (§12.2: the act's kind and subject, nonce, the exact challenge text, created and expires at, state `pending`|`approved`|`expired`, the approving key's fingerprint and the signature's digest; the enrolled keys live in the state directory's `approval-keys` file, not here)
 - `artifacts` (transcripts, check logs).
