@@ -53,8 +53,8 @@ tasks:
     deps: ["docs-decisions"]
     base: "docs-decisions"
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-763"
     rounds: 0
   - id: 764
     name: "approval-gates"
