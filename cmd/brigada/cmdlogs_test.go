@@ -134,6 +134,20 @@ stderr: dsh: AUTH: bad key
 	}
 }
 
+func TestLogsRendersQwenTranscript(t *testing.T) {
+	transcript := `{"type":"system","subtype":"init","session_id":"sess-9"}
+{"type":"assistant","message":{"content":[{"type":"text","text":"looking"}]}}
+{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","id":"tool-1","input":{"file_path":"README.md"}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tool-1"}]}}
+{"type":"result","session_id":"sess-9","result":"done"}
+`
+	got := strings.Join(renderTranscript([]byte(transcript)), "|")
+	want := "message looking|tool_start Read|tool_end tool-1"
+	if got != want {
+		t.Errorf("rendered %q, want %q", got, want)
+	}
+}
+
 func TestLogsTaskPicksTheLatestJob(t *testing.T) {
 	stub := newStubLogs()
 	// The flag path resolves the task's latest job before printing.

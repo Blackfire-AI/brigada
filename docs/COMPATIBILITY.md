@@ -102,6 +102,7 @@ These may change in any release, including a patch release:
 - the format of log output and status output;
 - the text of the prompts and the foreman's instructions;
 - the dsh adapter, which is experimental and may change in any release;
+- the qwen-code adapter, which is experimental and may change in any release;
 - the time caps: the engine's hard caps on jobs by kind and the runner's per-class time and tool caps. They are experimental, not frozen until 2.0;
 - how the adapters handle the versions of the vendors' CLIs. The vendors own those, and brigada follows them.
 
