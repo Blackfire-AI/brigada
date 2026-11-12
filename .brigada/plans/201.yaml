@@ -162,8 +162,8 @@ tasks:
     effort: medium
     review_tier: standard
     skills: ["config-setting"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-772"
     rounds: 0
   - id: 773
     name: "permission-plumbing"
