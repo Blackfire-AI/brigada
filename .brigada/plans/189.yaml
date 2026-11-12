@@ -65,6 +65,6 @@ tasks:
     effort: medium
     caps: {restart: 0}
     skills: ["bugfix", "docs-change"]
-    state: ready
+    state: running
     branch: ""
     rounds: 0
