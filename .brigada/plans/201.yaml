@@ -187,7 +187,7 @@ tasks:
     tier: light
     effort: low
     skills: ["config-setting"]
-    state: running
+    state: needs_foreman
     branch: ""
     rounds: 0
   - id: 775
