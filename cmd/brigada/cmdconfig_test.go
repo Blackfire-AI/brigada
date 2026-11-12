@@ -81,6 +81,11 @@ func TestConfigSavedAgentsAndRunningRunnerOutsideRepo(t *testing.T) {
 		"codex gpt-6.1-sol effort: low (codex default) writes code, reviews",
 		"kimi kimi-code/k3 effort: high (kimi config) reviews only",
 		"account: work", "tools: none", "agent-file: reviewer.md",
+		// Resolved per agent: the saved tools=none alias, the file's
+		// tools.claude/sonnet alias, then the harness defaults.
+		"permission: none", "warning: --agent tools=: tools is deprecated; use permission= instead",
+		"permission: codex's own",
+		"permission.<harness>/<model> = the harness default",
 		fmt.Sprintf("runner: running (pid %d) · after a reboot: brigada start", os.Getpid()),
 		"saved in:",
 		"This project: run inside a repository brigada knows (brigada init)",

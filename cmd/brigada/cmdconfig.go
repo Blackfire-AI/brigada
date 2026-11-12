@@ -73,6 +73,16 @@ func runConfig(ctx context.Context, args []string, stdout, stderr io.Writer) int
 			}
 			printInitWrapped(stdout, "    tools: ", "      ", tools)
 		}
+		// The resolved value: the saved flag over the config file over the
+		// harness default, so the line shows what a job will be granted.
+		permission, _ := s.resolve(rt.file)
+		if permission == "" {
+			permission = s.harness + "'s own"
+		}
+		printInitWrapped(stdout, "    permission: ", "      ", permission)
+		for _, w := range s.warnings() {
+			printInitWrapped(stdout, "    warning: ", "      ", w)
+		}
 	}
 	if len(agents.specs) == 0 {
 		fmt.Fprintln(stdout, "  no saved agents; run brigada init")
@@ -266,6 +276,7 @@ func printConfigMachine(rt *runtime, flagStateDir string, stdout, stderr io.Writ
 		{"caps.account.<label>", "no cap"}, {"caps.model.<model>", "no cap"},
 		{"cost.<harness>/<model>", "1"}, {"tier.<harness>/<model>", "from the model name"},
 		{"tools.claude/<model>", claude.ScopeText(nil)},
+		{"permission.<harness>/<model>", "the harness default (tools.claude/<model> is its deprecated alias)"},
 	}
 	// The loader already validated this file. No accepted key holds a secret;
 	// do not read harness config or credential files into this map.
