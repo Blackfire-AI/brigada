@@ -5,9 +5,9 @@
 plan: 189
 title: "qwen-code adapter: the Qwen Code CLI as a worker-only harness (#224)"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: done
 created: 2026-11-12T10:01:08.719721Z
-updated: 2026-11-12T12:18:48.09092Z
+updated: 2026-11-12T12:48:15.347385Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
