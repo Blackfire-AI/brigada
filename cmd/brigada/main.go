@@ -92,6 +92,9 @@ Commands:
 	push approve [--repo URL]
 	                Release the push gate and queue the waiting landings'
 	                pushes.
+	approver add|list|remove
+	                Enroll, list or remove the public keys your approvals
+	                are signed with (add: --label, --public-key FILE).
 	logs <job-id>   Show what a job's worker did: the transcript as
 	                readable lines (--check, --tail N, --follow, --task N).
 	stats           Show attempts, successes, rate and confidence per
@@ -180,6 +183,7 @@ var commands = map[string]command{
 	"diff":         {name: "diff", run: runDiff},
 	"land":         {name: "land", run: runLand},
 	"push":         {name: "push", run: runPush, subcommands: pushCommands},
+	"approver":     {name: "approver", run: runApprover, subcommands: approverCommands},
 	"logs":         {name: "logs", run: runLogs},
 	"version":      {name: "version", run: runVersion},
 }

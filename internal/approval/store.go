@@ -168,6 +168,9 @@ func (s *Store) write(keys []Key) error {
 	for _, k := range keys {
 		fmt.Fprintf(&body, "%s %s\n", k.Label, k.PublicKey)
 	}
+	if err := os.MkdirAll(filepath.Dir(s.path), 0o700); err != nil {
+		return fmt.Errorf("write the approval key file %s: %w", s.path, err)
+	}
 	tmp, err := os.CreateTemp(filepath.Dir(s.path), ".approval-keys-")
 	if err != nil {
 		return fmt.Errorf("write the approval key file %s: %w", s.path, err)

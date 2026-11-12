@@ -1482,6 +1482,7 @@ A command's flags go after its name and before its positional arguments (`diff`,
 - `brigada land <task-id>... [--onto BRANCH] [--repo URL] [--landed ID]... [--no-check]`: the hand-driven squash of approved tasks onto the checked-out branch, one commit each, in dependency order; rerun the default check; print the push command and stop. See [section 5](#5-finishing-the-land-job).
 - `brigada land approve <task>`, `brigada land reject <task>`: your decision on a landing held at the land gate; approve queues its land job, reject cancels the landing and leaves the branch; `--and-stop-asking` also changes the rule that held it. See [section 5](#gates-and-holds).
 - `brigada push approve [--repo URL]`: release the push gate; every waiting landing of the project gets its push queued. See [section 5](#gates-and-holds).
+- `brigada approver add --label L --public-key FILE`, `brigada approver list`, `brigada approver remove --label L`: enroll, list and remove the public keys your approvals are signed with. The keys live in `approval_keys` in the state directory, mode 0600, public halves only: brigada never reads or stores a private key. The settings `gate_plan`, `gate_land`, `gate_push` and `approval_tiers` keep deciding what waits; this is the authority behind a gate, and it asks for `ssh-keygen` to verify a signature. No gate asks for a signature yet.
 
 ### Deciding
 
