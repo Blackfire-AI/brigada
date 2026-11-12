@@ -30,6 +30,6 @@ tasks:
     tier: heavy
     effort: medium
     skills: ["docs-change"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-751"
     rounds: 0
