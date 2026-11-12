@@ -1,0 +1,75 @@
+# Brigada plan file (§6.4): a mirror of the engine's store, which stays
+# authoritative. The engine rewrites this file on every plan change; edits
+# here are overwritten. It holds the graph, the task states, the branches
+# and the open questions — never transcripts.
+plan: 196
+title: "qwen-code foreman capability: bridge, headless resume and attach (#226)"
+repo: "github.com/Blackfire-AI/brigada"
+state: reviewing
+created: 2026-11-12T15:49:06.207966Z
+updated: 2026-11-12T15:49:06.207966Z
+# §6.1: the graph. A task waits (pending) until every task named in deps is
+# done; its work starts from the branch of base, one of deps — the continued
+# dep when base is empty and continue is set, else the default branch; merge a
+# task after its base. A task with continue, one of deps, starts in the
+# session of the dep's author.
+# States are the engine's (§6.1), rounds the fix and review rounds
+# spent (§7), question the worker's open question (§3), when it has one.
+# Optional tier (light, standard, heavy) and effort (low, medium, high, max)
+# describe the model needed and how hard it should think (§6.1);
+# review_tier and review_effort do the same for its reviews (§7, §8); caps
+# override the task's fix_rounds, review_rounds and restart budgets (§6.1);
+# skills name the project's skills the task carries, in order (§5.10).
+tasks:
+  - id: 739
+    name: "qwen-foreman-adapter"
+    title: "feat(adapter/qwencode): qwen-code as a foreman harness: MCP bridge, headless resume, attach"
+    class: "implement"
+    deps: []
+    base: ""
+    tier: heavy
+    effort: medium
+    review_tier: heavy
+    caps: {restart: 2}
+    skills: ["surface-parity", "docs-change"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 740
+    name: "qwen-attach-client"
+    title: "feat(attach): brigada attach drives a qwen-code foreman; folder-trust docs"
+    class: "implement"
+    deps: ["qwen-foreman-adapter"]
+    base: "qwen-foreman-adapter"
+    effort: medium
+    caps: {restart: 2}
+    skills: ["surface-parity", "docs-change"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 741
+    name: "qwen-init-parity"
+    title: "feat(init): offer qwen-code as a foreman harness, still experimental"
+    class: "implement"
+    deps: ["qwen-attach-client"]
+    base: "qwen-attach-client"
+    tier: light
+    effort: medium
+    caps: {restart: 2}
+    skills: ["surface-parity", "docs-change"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 742
+    name: "qwen-foreman-live"
+    title: "test(adapter/qwencode): live foreman turn, fork-session check and attach"
+    class: "implement"
+    deps: ["qwen-init-parity"]
+    base: "qwen-init-parity"
+    tier: light
+    effort: medium
+    caps: {fix_rounds: 2, restart: 0}
+    skills: ["bugfix", "docs-change"]
+    state: pending
+    branch: ""
+    rounds: 0
