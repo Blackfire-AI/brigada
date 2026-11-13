@@ -5,9 +5,9 @@
 plan: 201
 title: "#228 implementation: harness-owned permissions, runner-only push, approval authority"
 repo: "github.com/Blackfire-AI/brigada"
-state: needs_foreman
+state: active
 created: 2026-11-12T21:47:35.965112Z
-updated: 2026-11-13T03:03:15.972398Z
+updated: 2026-11-13T03:03:33.228207Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
