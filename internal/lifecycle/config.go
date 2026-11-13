@@ -439,7 +439,7 @@ func setTools(cfg *FileConfig, key, value string) error {
 // cost.<harness>/<model> or tier.<harness>/<model>. Tier values are checked
 // against the tier vocabulary; other values are non-negative integers. A key
 // the file never names leaves the layer uncapped — or, for cost, the
-// weight at its default of 1, or the tier from the model-name table.
+// weight at its default of 1, or the tier from the model table.
 func setCap(l *caps.Limits, key, value string) error {
 	if rest, ok := strings.CutPrefix(key, "tier."); ok {
 		harness, model, ok := strings.Cut(rest, "/")

@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -183,5 +185,23 @@ func TestInitForemanOnlyAgent(t *testing.T) {
 	}
 	if saved, err := runnerstate.LoadForeman(filepath.Join(state, "runner")); err != nil || saved != "codex/default" {
 		t.Errorf("saved foreman = %q, %v", saved, err)
+	}
+}
+
+func TestInitEligibleEntriesLeavesOutSuperseded(t *testing.T) {
+	source := initModelSource{entries: []initModelEntry{
+		{id: 1, name: "gpt-6.1-sol", value: "gpt-6.1-sol"},
+		{id: 2, name: "gpt-6-sol", value: "gpt-6-sol"},
+		{id: 3, name: "gpt-5.6-luna", value: "gpt-5.6-luna", isCurrent: true},
+		{id: 4, name: "gpt-6-luna", value: "gpt-6-luna"},
+	}}
+	got := initEligibleEntries("codex", source)
+	var pairs []string
+	for _, entry := range got {
+		pairs = append(pairs, fmt.Sprintf("%d %s", entry.id, entry.value))
+	}
+	// A saved superseded model stays; the rest are numbered without a gap.
+	if want := []string{"1 gpt-6.1-sol", "2 gpt-5.6-luna", "3 gpt-6-luna"}; !slices.Equal(pairs, want) {
+		t.Errorf("entries = %q, want %q", pairs, want)
 	}
 }

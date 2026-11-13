@@ -1610,11 +1610,11 @@ func assertInitAgentTable(t *testing.T, out string, longModels bool) {
 	if !ok {
 		t.Fatal("missing review summary after agents")
 	}
-	kimiRole, kimiFastTier := "reviews only", "standard"
+	kimiRole, kimiFastTier := "reviews only", "light"
 	opencodeModel, opencodeTier := "zai-coding-plan/glm-5.3", "standard"
 	if longModels {
-		kimiRole, kimiFastTier = "writes code, reviews", "light"
-		opencodeModel, opencodeTier = opencodeModel+"-highspeed", "light"
+		kimiRole, kimiFastTier = "writes code, reviews", "standard"
+		opencodeModel, opencodeTier = opencodeModel+"-highspeed", "standard"
 	}
 	want := []string{
 		"claude sonnet Anthropic standard writes code, reviews",
@@ -1633,13 +1633,13 @@ func assertInitAgentTable(t *testing.T, out string, longModels bool) {
 	}
 	if !longModels {
 		want = append(want,
-			"qwen-code qwen-subscription/qwen3.8-max Alibaba heavy writes code, reviews",
+			"qwen-code qwen-subscription/qwen3.8-max Alibaba standard writes code, reviews",
 			"qwen-code qwen-subscription/qwen3.8-flash Alibaba light writes code, reviews")
 	}
 	if longModels {
 		want = append(want,
 			"dsh deepseek-flash DeepSeek light writes code, reviews",
-			"dsh deepseek-v4-pro DeepSeek heavy writes code, reviews")
+			"dsh deepseek-v4-pro DeepSeek standard writes code, reviews")
 	}
 	var rows []string
 	familyColumn, tierColumn, families := -1, -1, 0
@@ -1826,11 +1826,11 @@ opencode/deepseek-v3
 	// model, uses kimi review-only, picks OpenCode model 1 and declines only
 	// the final apply. The long-model variant types Codex as the foreman with
 	// its second effort, and lets Kimi write code too.
-	// The approved transcript keeps Kimi's fixture models at standard tier.
-	// Exercise the supported override for highspeed; the long-name variant
-	// retains its name-based light tier.
+	// A highspeed serving keeps its model's standard tier from the table;
+	// the golden exercises the config override by setting it light, and the
+	// long-name variant keeps the table's tier.
 	if !longModels {
-		writeInitModelFixture(t, lifecycle.DefaultConfigPath(), "tier.kimi/kimi-code/kimi-for-coding-highspeed = standard\n")
+		writeInitModelFixture(t, lifecycle.DefaultConfigPath(), "tier.kimi/kimi-code/kimi-for-coding-highspeed = light\n")
 	}
 	state := filepath.Join(os.Getenv("HOME"), ".local", "state", "brigada")
 	// The golden leaves dsh out (Enter at "Use dsh? [y/N]") and confirms
@@ -1958,7 +1958,7 @@ func TestInitUnconfirmedUseQuestions(t *testing.T) {
 			fakeInitPATH(t, initHarnessesNoDsh...)
 			// A CLI with models but no documented authentication status remains
 			// unconfirmed, so init must ask rather than assume it is signed in.
-			script := "#!/bin/sh\ncase \"$*\" in\n --help) echo '  opencode models [provider]' ;;\n models) printf 'zai-coding-plan/glm-5.3\\nzai-coding-plan/glm-5.2\\n' ;;\n *) exit 89 ;;\nesac\n"
+			script := "#!/bin/sh\ncase \"$*\" in\n --help) echo '  opencode models [provider]' ;;\n models) printf 'zai-coding-plan/glm-5.3\\nzai-coding-plan/glm-4.5-air\\n' ;;\n *) exit 89 ;;\nesac\n"
 			if err := os.WriteFile(filepath.Join(os.Getenv("PATH"), "opencode"), []byte(script), 0755); err != nil {
 				t.Fatal(err)
 			}
@@ -1981,7 +1981,7 @@ func TestInitUnconfirmedUseQuestions(t *testing.T) {
 			if !tc.confirmed && !strings.Contains(out, "  opencode: init can't check sign-in. If you're not signed in, run\n  `opencode auth login` first, or leave opencode out.") {
 				t.Errorf("missing OpenCode sign-in guidance:\n%s", out)
 			}
-			if tc.include && !strings.Contains(out, "opencode  zai-coding-plan/glm-5.2") {
+			if tc.include && !strings.Contains(out, "opencode  zai-coding-plan/glm-4.5-air") {
 				t.Errorf("number did not pick the second OpenCode model:\n%s", out)
 			}
 		})

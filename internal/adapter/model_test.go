@@ -92,9 +92,15 @@ var modelTierExamples = []struct {
 	tier   string
 	models []string
 }{
-	{TierHeavy, []string{"fable", "claude-fable-5-1[1m]", "fablenext", "provider/CLAUDE-FABLE-5-1[1M]", "gpt-6-astra", "gpt-6-astra-mini", "opus", "claude-opus-4", "anthropic/claude-opus-4[1m]", "gemini-2.5-pro", "deepseek-v4-pro", "o3-pro", "grok-4-max", "gpt-5-ultra", "provider/CLAUDE-OPUS-4[1M]", "opusnext", "mini-opus", "qwen-subscription/qwen3.8-max"}},
-	{TierLight, []string{"gpt-6-luna", "gpt-5.6-luna", "provider/GPT-6-LUNA[1M]", "haiku", "claude-haiku-4", "gpt-5.4-mini", "o4-mini", "gemini-2.5-flash", "deepseek-flash", "glm-5.3-highspeed", "zai-coding-plan/glm-5.3-highspeed", "kimi-code/kimi-for-coding-highspeed", "opencode/space-bunny-free", "qwen-3-lite", "qwen-subscription/qwen3.8-flash", "gpt-5-nano", "haikunext", "provider/HAIKU[1m]"}},
-	{TierStandard, []string{"gpt-6-sol", "gpt-5.6-terra", "gpt-6-astral", "gpt-6-lunar", "astra/provider/gpt-6-sol", "luna/provider/gpt-6-sol", "sonnet", "claude-sonnet-4[1m]", "gpt-6.1-sol", "gpt-5", "kimi-code/k3", "kimi-code/k3-256k", "zai-coding-plan/glm-5.3", "deepseek-v3", "default", "maximal-coder", "freedom-7", "pro/provider/gpt-5", "flash/provider/sonnet", "professional", "minify", ""}},
+	{TierHeavy, []string{"fable", "claude-fable-5-1[1m]", "provider/CLAUDE-FABLE-5-1[1M]", "gpt-6-astra", "gpt-6-astra-mini", "opus", "claude-opus-4", "anthropic/claude-opus-4[1m]", "o3-pro", "gpt-5-pro", "provider/CLAUDE-OPUS-4[1M]", "kimi-k3.1-pro"}},
+	{TierLight, []string{"gpt-6-luna", "gpt-5.6-luna", "provider/GPT-6-LUNA[1M]", "haiku", "claude-haiku-4", "gpt-5.4-mini", "o4-mini", "gemini-2.5-flash", "deepseek-flash", "opencode/space-bunny-free", "qwen-3-lite", "qwen-subscription/qwen3.8-flash", "gpt-5-nano", "provider/HAIKU[1m]", "zai-coding-plan/glm-5.3-flash", "mini-opus"}},
+	{TierStandard, []string{"gpt-6-sol", "gpt-5.6-terra", "gpt-6-astral", "gpt-6-lunar", "astra/provider/gpt-6-sol", "luna/provider/gpt-6-sol", "sonnet", "claude-sonnet-4[1m]", "gpt-6.1-sol", "gpt-5", "kimi-code/k3", "kimi-code/k3-256k", "zai-coding-plan/glm-5.3", "deepseek-v3", "default", "maximal-coder", "freedom-7", "pro/provider/gpt-5", "flash/provider/sonnet", "professional", "minify", "",
+		// No family row makes these heavy or light: pro is heavy only for
+		// openai and moonshot, and max, ultra and highspeed carry no tier.
+		"gemini-2.5-pro", "deepseek-v4-pro", "qwen-subscription/qwen3.8-max", "grok-4-max", "gpt-5-ultra",
+		"glm-5.3-highspeed", "zai-coding-plan/glm-5.3-highspeed", "kimi-code/kimi-for-coding-highspeed",
+		// A family's line word does not reach a name of unknown family.
+		"opusnext", "fablenext", "haikunext"}},
 }
 
 func TestModelTier(t *testing.T) {
@@ -119,6 +125,55 @@ func TestAgentTier(t *testing.T) {
 					}
 				})
 			}
+		}
+	}
+}
+
+func TestAgentTierUsesHarnessFamily(t *testing.T) {
+	// The name alone does not identify kimi-code/k3.1-pro as Moonshot's;
+	// the kimi harness does, and Moonshot's pro is heavy.
+	if got := ModelTier("kimi-code/k3.1-pro"); got != TierStandard {
+		t.Errorf("ModelTier = %q, want standard", got)
+	}
+	if got := AgentTier("kimi", "kimi-code/k3.1-pro"); got != TierHeavy {
+		t.Errorf("AgentTier(kimi) = %q, want heavy", got)
+	}
+	if got := AgentTier("opencode", "deepseek/deepseek-v4-pro"); got != TierStandard {
+		t.Errorf("AgentTier(opencode, deepseek-v4-pro) = %q, want standard", got)
+	}
+}
+
+func TestSuperseded(t *testing.T) {
+	got := Superseded([]string{
+		"gpt-6.1-sol", "gpt-6-sol", "gpt-5.6-sol", "gpt-6.1-terra", "gpt-5.6-terra",
+		"gpt-6-luna", "gpt-5.6-luna", "gpt-6-astra", "gpt-5", "gpt-5.5",
+		"claude-fable-5-1[1m]", "claude-fable-5-2[1m]", "claude-fable-5-1",
+		"claude-opus-4-20250514", "claude-opus-4-1-20250805", "claude-sonnet-4-20250514", "claude-sonnet-4-20250601",
+		"opus", "sonnet", "default",
+		"qwen-subscription/qwen3.7-max", "qwen-subscription/qwen3.8-max", "qwen3.6-max",
+		"opencode/deepseek-v4.1-flash-free", "opencode/deepseek-v4-flash-free", "deepseek/deepseek-v4-pro", "deepseek/deepseek-flash",
+		"opencode/nemotron-3.5-super-vl-free", "opencode/nemotron-3-super-vl-free", "opencode/nemotron-3.5-lightning-free",
+		"o3", "o4-mini", "o3-mini",
+	})
+	want := map[string]string{
+		"gpt-6-sol":                         "gpt-6.1-sol",
+		"gpt-5.6-sol":                       "gpt-6.1-sol",
+		"gpt-5.6-terra":                     "gpt-6.1-terra",
+		"gpt-5.6-luna":                      "gpt-6-luna",
+		"gpt-5":                             "gpt-5.5",
+		"claude-fable-5-1[1m]":              "claude-fable-5-2[1m]",
+		"claude-opus-4-20250514":            "claude-opus-4-1-20250805",
+		"qwen-subscription/qwen3.7-max":     "qwen-subscription/qwen3.8-max",
+		"opencode/deepseek-v4-flash-free":   "opencode/deepseek-v4.1-flash-free",
+		"opencode/nemotron-3-super-vl-free": "opencode/nemotron-3.5-super-vl-free",
+		"o3-mini":                           "o4-mini",
+	}
+	if len(got) != len(want) {
+		t.Errorf("got %d superseded, want %d: %v", len(got), len(want), got)
+	}
+	for model, newer := range want {
+		if got[model] != newer {
+			t.Errorf("Superseded[%q] = %q, want %q", model, got[model], newer)
 		}
 	}
 }

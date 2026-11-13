@@ -84,7 +84,7 @@ Before step 1, init checks the installed CLIs in order (`claude`, `codex`, `kimi
 
    `--foreman HARNESS/MODEL[@EFFORT]` answers both questions; without `@EFFORT` an interactive run still asks the effort. With `--yes` or `--probe`, the foreman must be among the usable `--agent` models, and its agent effort is used unless `@EFFORT` overrides it. The step ends with how to change the choice later: `brigada project foreman --harness H --model M --effort E`, or run `brigada init` again.
 
-2. **Workers.** Each agent CLI can run tasks, and init offers every model the CLI knows. For each task the foreman says how heavy a model it needs (light, standard or heavy) and how hard it should think, and brigada picks the model of that tier with the best record on this repo. The tier comes from the model's name, unless the local config sets `tier.HARNESS/MODEL`. For each installed CLI, in order, init prints its sign-in line and then asks:
+2. **Workers.** Each agent CLI can run tasks, and init offers every model the CLI knows. For each task the foreman says how heavy a model it needs (light, standard or heavy) and how hard it should think, and brigada picks the model of that tier with the best record on this repo. The tier comes from brigada's model table, unless the local config sets `tier.HARNESS/MODEL`. Init leaves out a model that a newer version of the same line in the CLI's list replaces, such as `gpt-5.6-sol` beside `gpt-6.1-sol`, unless it is already saved. For each installed CLI, in order, init prints its sign-in line and then asks:
 
    - Claude and Codex: `Use claude's models for tasks (opus, sonnet, haiku)? [Y/n]:`. The parenthesis lists the models heaviest tier first when there are at most three, else the first model and `and N more`. Enter is yes; a rerun defaults to whether that CLI had saved agents. Yes makes every model one agent.
    - Kimi: the unchecked sign-in text and `Use kimi? [y/N]:`, then the warning that Kimi has no sandbox (when writing code it can run any command on this machine without asking; its reviews are not read-only either, [section 8](#permissions-per-agent)) and `Let kimi write code too, not only review? [y/N]:`. Enter or no gives every configured Kimi model `classes=review`; yes also allows implementation and answers. A rerun defaults to the saved classes. Kimi's configured effort stays in `~/.kimi-code/config.toml`.
@@ -121,7 +121,7 @@ Before step 1, init checks the installed CLIs in order (`claude`, `codex`, `kimi
 The `Plan` block then shows:
 
 - `Foreman:`, which names the chosen model and its effort, as `claude/sonnet, effort medium` (no effort suffix when none is recorded). Configured defaults use their resolved names when available, otherwise `CLI default`.
-- `Agents (every model of each CLI; the foreman picks the tier per task):`, with each harness, model (and `@high`, for example, when an `--agent` set an effort), family, tier and role. The tier is the model's name-based tier unless a `tier.` config key overrides it. The role is `writes code, reviews`, `reviews only` or `foreman only`; a long role wraps within its column. Family labels include `Anthropic`, `OpenAI`, `Moonshot` and `Zhipu (GLM)`.
+- `Agents (every model of each CLI; the foreman picks the tier per task):`, with each harness, model (and `@high`, for example, when an `--agent` set an effort), family, tier and role. The tier is the model table's unless a `tier.` config key overrides it. The role is `writes code, reviews`, `reviews only` or `foreman only`; a long role wraps within its column. Family labels include `Anthropic`, `OpenAI`, `Moonshot` and `Zhipu (GLM)`.
 - `Reviews:`, which counts the review-capable model families and says what reviews do under the effective `review.family`: with `prefer` (the default) and one family they prefer another family and fall back to the same family or the same agent; with `require` they wait for another family.
 - `At once:`, with the machine limit and each usable account's cap.
 - `Check:`, which names the check and reminds you that init does not run it and that you can edit `.brigada/project.yaml`, or shows `none (work goes straight to review)`.
@@ -920,15 +920,16 @@ The fields of an `--agent` value:
 | `read-scope=<true\|false>` | `false` turns the read-scope hook off for this agent; default on (see [Permissions](#permissions-per-agent)). |
 | `tools=<p1>+<p2>` | Deprecated alias of `permission=`, removed in the next major version (see [Worker tools (claude)](#worker-tools-claude)). |
 
-Each agent serves one tier, derived from its model name:
+Each agent serves one tier, from brigada's model table. A row applies only to models of its family, so a word means a tier only where that vendor uses it for a model line:
 
-| Tier | Model-name patterns |
-|---|---|
-| `heavy` | `opus`, `fable` segment prefixes, or whole `pro`, `max`, `ultra`, `astra` segments (`-pro`, `-max`, `-ultra`, `-astra`). |
-| `light` | `haiku` segment prefix, or whole `mini`, `nano`, `flash`, `lite`, `highspeed`, `free`, `luna` segments (`-mini`, `-nano`, `-flash`, `-lite`, `-highspeed`, `-free`, `-luna`). |
-| `standard` | Everything else, including agents configured as `model=default`. |
+| Family | `heavy` | `light` |
+|---|---|---|
+| Anthropic | `fable`, `opus` segment prefixes | `haiku` segment prefix |
+| OpenAI | whole `astra`, `pro` segments | whole `luna` segment |
+| Moonshot | whole `pro` segment | |
+| any | | whole `mini`, `nano`, `flash`, `lite`, `free` segments |
 
-Segments are separated by hyphens; provider prefixes and context suffixes such as `[1m]` are removed, and matching ignores case. Heavy matches win. `tier.<harness>/<model>` in the config file overrides the tier for every agent of that harness/model. The runner's startup line shows the name-based tier; stats and capacity include the engine's override.
+Everything else is `standard`: Sonnet, GPT Sol and Terra, GLM, Qwen Max, DeepSeek Pro, Gemini Pro, a model of unknown family, and agents configured as `model=default`. A `-highspeed` model is a faster serving of its model and has that model's tier. Segments are separated by hyphens; provider prefixes and context suffixes such as `[1m]` are removed, and matching ignores case. Heavy matches win. The family is the one the name identifies, else the one the harness serves (kimi serves Moonshot). `tier.<harness>/<model>` in the config file overrides the tier for every agent of that harness/model, and every place that shows a tier — init, `brigada agents`, the runner's startup line, stats, capacity and top — shows the overridden one.
 
 Without `--agent`, the shorthand flags `--harness`, `--model`, `--classes` and `--agent-file` describe one agent; there `--classes` is comma-separated (`implement,review`). The two forms cannot be mixed. Other flags:
 
@@ -970,7 +971,7 @@ Letting Kimi write code is an opt-in. Init warns that Kimi has no sandbox: when 
 
 The agents file (`runner/agents` in the state directory) is written by `brigada init`, one `--agent` line per agent. A model a CLI starts offering afterwards is not registered, and nothing registers it for you: a new model can spend a paid account.
 
-`brigada agents` is read-only. It runs the same cheap model listings init uses (the claude, codex and opencode CLIs; none makes a model call) and compares them with the agents file. It prints the models offered but not registered, each with the tier its name gives and the account it would share, and the registered agents whose model the CLI no longer lists. A model is reported as gone only when the CLI's list is whole: claude's aliases are not a complete list, so claude agents are never reported as gone, and a codex or opencode list that left out a model of unknown family reports none. The tier printed is a guess from the name: correct a wrong one with `tier.<harness>/<model>` in the config file (for example a `-highspeed` model is a faster serving of the same model, not a light one).
+`brigada agents` is read-only. It runs the same cheap model listings init uses (the claude, codex and opencode CLIs; none makes a model call) and compares them with the agents file. It prints the models offered but not registered, each with its tier and the account it would share, the registered agents whose model the CLI no longer lists, and the registered agents whose model is superseded: the same CLI offers a newer version of the same line (the name with only its version numbers changed, such as `claude-fable-5-1[1m]` and `claude-fable-5-2[1m]`). A superseded model is left out of the unregistered list. To retire a superseded agent, remove its line from the agents file and restart the runner; nothing is removed for you. A model is reported as gone only when the CLI's list is whole: claude's aliases are not a complete list, so claude agents are never reported as gone, and a codex or opencode list that left out a model of unknown family reports none. The tier printed is the model table's: correct a wrong one with `tier.<harness>/<model>` in the config file.
 
 `brigada agents add <harness>/<model> [--classes CLASSES] [--effort LEVEL] [--now]` appends one line to the agents file and keeps every other line, comments included. For opencode, the model is `provider/model`, so `brigada agents add opencode/zai-coding-plan/glm-5.3-flash` names the harness before the first slash. `--classes` is comma-separated (default `implement,review,answer`; `none` for a foreman-only agent). The line carries the account the harness's registered agents use when that is not the harness name, so the agent shares the account the report named. The line is checked as the runner checks it at startup, so an unknown harness, an unsupported effort or a duplicate is refused and the file stays as it was. A model already registered is refused. A running runner is handed a restart request it honours between jobs: it finishes its running jobs, exits, and the fresh runner serves the new agent — no job is cut. `--now` cuts the running jobs instead, and with no runner running `brigada start` serves the line.
 
@@ -1243,7 +1244,7 @@ With `headroom = true` (the default), task workers on the account that serves yo
 AGENT  TIER  CLASS  SKILLS  ATTEMPTS  SUCCESSES  RATE  CONFIDENCE  INPUT  OUTPUT  CACHED  REASONING  TOKENS  CALLS  CALLS/JOB  CALLS/SUCCESS  USD  WALL(s)  COST/SUCCESS
 ```
 
-- **Tier** is the model-name table label (`light`, `standard` or `heavy`), corrected by any `tier.<harness>/<model>` config override, and determines which task tier the agent serves. The record stays keyed by repo, class and agent; changing the tier label keeps the agent's existing outcomes.
+- **Tier** is the model table's label (`light`, `standard` or `heavy`), corrected by any `tier.<harness>/<model>` config override, and determines which task tier the agent serves. The record stays keyed by repo, class and agent; changing the tier label keeps the agent's existing outcomes.
 - **Skills** is how many skills the tasks of the row carried ([design.md](design.md) §5.10). A row is one agent, class and skill count, so tasks with one skill and tasks with two are never pooled, and each row's rate comes from its own attempts. The dispatcher ranks on the sum over the skill counts. `status` shows a task's skills beside it as `skills:a,b`; the JSON `stats` rows, from the API and the MCP tool, carry the same number as `skills`.
 - **Attempts and successes** are counted when a task ends, for the agent that wrote the final change, in the task's class.
   - A success is a task whose check passed and, for `implement` tasks, whose review approved within the allowed rounds. Tasks of other classes succeed when the run is done with its check passed, with no review.
@@ -1415,7 +1416,7 @@ The config file is optional. Its format:
 | `caps.account.<label>` | integer, 0 or more | no cap | Most parallel jobs on one account label ([section 8](#capacity)). |
 | `caps.model.<model>` | integer, 0 or more | no cap | Most parallel jobs on one model. |
 | `cost.<harness>/<model>` | integer, 0 or more | `1` | Relative cost weight of an agent, shown to the foreman. Dispatch ranks the agents of a tier by weight / p, p being a draw from the agent's success record, so a higher weight is picked less often. `0` means free: ranked before every agent with a positive weight. |
-| `tier.<harness>/<model>` | `light`, `standard` or `heavy` | from the model name | Override the tier for every agent of this harness/model, shown in stats and capacity. |
+| `tier.<harness>/<model>` | `light`, `standard` or `heavy` | from the model table | Override the tier for every agent of this harness/model, shown wherever a tier is. |
 | `tools.claude/<model>` | `+`-separated Claude Code tool patterns, or `none` | none: the claude default `bypassPermissions` applies | Deprecated alias of `permission.claude/<model>`: it stores the same value for the claude agent on that model and warns, and it is removed in the next major version; `--agent ...,tools=` is the agent-level alias ([section 8](#worker-tools-claude)). Other harnesses are refused. |
 | `permission.<harness>/<model>` | a permission mode: one token, no spaces or commas (claude: a `--permission-mode` value) | claude `bypassPermissions`; other harnesses none | Permission mode brigada passes to that agent's harness; `--agent ...,permission=` overrides it ([section 8](#permissions-per-agent)). The runner advertises the resolved value and every job grant of the agent carries it to the adapter. |
 | `read_scope.<harness>/<model>` | `true` or `false` | `true` (on) | Whether the read-scope hook is on for that agent; `--agent ...,read-scope=` overrides it. Off installs no read-scope hook in a claude foreman session's settings ([section 8](#permissions-per-agent)). |
@@ -1500,7 +1501,7 @@ A command's flags go after its name and before its positional arguments (`diff`,
 
 - `brigada config`: show agents, runner state, foreman, project settings with provenance, and machine config-file values and defaults, with their locations and commands to change them. See [section 1](#changing-your-setup-later).
 - `brigada status [--line] [--all]`: the engine, jobs, plans and the needs-you queue, plus a hint when your CLIs offer unregistered models. See [section 4](#4-while-work-runs).
-- `brigada agents`: the models your CLIs offer that no agent registers, with their name-based tier and account, and registered models a CLI no longer lists; read-only. See [section 8](#models-added-later).
+- `brigada agents`: the models your CLIs offer that no agent registers, with their tier and account, registered models a CLI no longer lists, and registered models a newer version replaces; read-only. See [section 8](#models-added-later).
 - `brigada agents add <harness>/<model> [--classes CLASSES] [--effort LEVEL] [--now]`: register one model by appending its line to the agents file; restart a running runner to serve it, waiting out its running jobs, or cutting them with `--now`. See [section 8](#models-added-later).
 - `brigada history [--task N] [--job N] [--limit N] [--all] [--raw]`: the timeline in plain words; bare, a table of the last 50 events, or every event with `--all`; `--raw` prints the internal form. See [section 4](#history-diffs-and-logs).
 - `brigada diff <task-id> [--stat] [--repo URL]`: what a task changed, as `git diff base...branch`; run inside the repo. See [section 4](#history-diffs-and-logs).
@@ -1545,7 +1546,7 @@ A command's flags go after its name and before its positional arguments (`diff`,
 
 ## 15. Known limits
 
-- Model-name tier patterns can go stale as vendors rename models; correct them with `tier.<harness>/<model>` in the config file.
+- The model table can go stale as vendors add or rename model lines; correct a tier with `tier.<harness>/<model>` in the config file.
 - Every tier bump spends a restart, including a second bump after the bumped attempt fails; earlier retries can exhaust the cap before a task reaches heavy.
 - Read-only extra repositories are a convention, not a sandbox ([section 7](#another-repository-to-read)).
 - A repository whose `.mcp.json` still carries an older init's `brigada` entry must drop it (rerun `brigada init` or run `brigada remove`), or the two `brigada` servers clash in an attached chat ([section 2](#attach)).

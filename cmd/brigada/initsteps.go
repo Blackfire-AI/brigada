@@ -76,11 +76,23 @@ func parseInitForeman(value string) (spec agentSpec, hasEffort, ok bool) {
 	return agentSpec{harness: harness, model: model, effort: effort}, hasEffort, true
 }
 
-// initEligibleEntries are a CLI's models whose family init can tell.
+// initEligibleEntries are a CLI's models whose family init can tell, less
+// those a newer version of the same line in the listing replaces
+// (adapter.Superseded), unless the model is already saved. They are numbered
+// again from 1, so a menu of them has no gap.
 func initEligibleEntries(harness string, source initModelSource) []initModelEntry {
+	var values []string
+	for _, entry := range source.entries {
+		values = append(values, entry.value)
+	}
+	superseded := adapter.Superseded(values)
 	var entries []initModelEntry
 	for _, entry := range source.entries {
+		if superseded[entry.value] != "" && !entry.isCurrent {
+			continue
+		}
 		if _, err := initModelFamily(harness, entry.value); err == nil {
+			entry.id = len(entries) + 1
 			entries = append(entries, entry)
 		}
 	}
