@@ -63,7 +63,7 @@ A developer who pays for two or more AI coding subscriptions (Claude, Codex, Gem
 
 1. API callers (the CLI, the foreman's MCP tools, other harnesses) talk to the engine **only through its API**, never the store directly, even on localhost.
 2. Runners talk to the engine **only through the lease protocol** (lease, heartbeat, complete). The local runner is just a runner on the same host.
-3. **Tokens from day one,** even locally: a client token and a runner token. A token authenticates its caller; approving a plan, a landing or a push is your act, and no token carries it ([design.md](design.md) §12.2).
+3. **Tokens from day one,** even locally: a client token and a runner token. A token authenticates its caller; approving a plan, a landing or a push is your act, and the foreman's token cannot make it ([design.md](design.md) §12.2).
 4. **No host-local assumptions in task data:** repos are identified by URL plus ref, not by laptop paths; results are pushed branches, not files on disk. A task's repo must have a remote to fetch from and push to; a local-only repo is rejected with a clear error.
 5. **Runners register and advertise their adapters.** The dispatcher picks only from that registry; health and quota attach to it. A remote runner joins without touching dispatch.
 6. **Runners materialize their own workspace:** clone or fetch from the repo URL with their own git credentials, push result branches to the remote, and send check logs with the lease-complete call. Never an engine-side checkout path or a shared disk.

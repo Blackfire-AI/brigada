@@ -27,7 +27,7 @@ brigada drives the vendors' **unmodified** CLIs, each signed in with your own ac
 
 > **Before you start.** brigada is local-first: one Go binary and a SQLite store on your machine. Workers run in git worktrees, not containers, under the permissions of your own harness, which brigada passes through per agent instead of setting a scope of its own: an agent's `permission=` reaches its CLI as that CLI's own permission flag or argument, for a review as for a work job. Claude runs `bypassPermissions` unless you set another mode, codex and dsh take a sandbox mode, opencode an `OPENCODE_PERMISSION` rule, kimi `--yolo` or nothing, and qwen-code an approval mode or, by default, its auto-approve flag. The agent's `tools=` and the project's `worker_tools` are deprecated aliases of `permission=`. The scope per harness is in [GUIDE section 8](docs/GUIDE.md#scope-per-harness). Workers inherit your environment minus the credential scrub, so a check command, a test run or a worker whose harness grants a shell can still reach your credentials and network. Do not point brigada at a repository you do not trust ([design §5.7](docs/design/05-workers.md#57-an-environment-for-checks-and-reviews)).
 >
-> The runner is the only path that pushes: a task worktree carries no push URL, so a worker cannot push its own branch, though git run as you against an explicit URL still pushes with whatever your account holds. Approving a plan, a landing or a push takes your signature from a key you enrolled, beyond any token; a private key that is an ordinary file your OS user can read lets an agent with a shell sign, so keep it where signing needs you. See [SECURITY.md](SECURITY.md).
+> The runner is the only path that pushes: a task worktree carries no push URL, so a worker cannot push its own branch, though git run as you against an explicit URL still pushes with whatever your account holds. Approving a plan, a landing or a push is your decision by convention: the role checks keep the foreman token out of it, but it is not a boundary against a process that runs as you with a shell. See [SECURITY.md](SECURITY.md).
 
 ## Ask your coding agent to set it up
 
@@ -167,9 +167,9 @@ Rerun `brigada init` to change agents, the foreman model and effort, or tasks at
 ## The first five minutes
 
 1. Install brigada (above) and run `brigada init` in your repository (above).
-2. Open your coding agent in the repository and tell it to read `.brigada/operator.md`. Then tell it, for example, "ask brigada to fix #12". Your agent is the operator: it passes the request to the foreman through the CLI and reports back; it approves nothing.
+2. Open your coding agent in the repository and tell it to read `.brigada/operator.md`. Then tell it, for example, "ask brigada to fix #12". Your agent is the operator: it passes the request to the foreman through the CLI and reports back; approvals stay yours.
 3. Watch `brigada top`: your live view of the meters, what needs you, plans, agents and events.
-4. Approve what the needs-you queue holds. A plan over your size limit, a landing a rule holds, and a push wait for you, with `brigada plan approve`, `brigada land approve` and `brigada push approve`. Each approval is your signature, made with a key you enrolled once (`brigada approver add`), beyond any token, so a token alone does not approve; the operator tells you when something waits, and the decision is yours ([signing an approval](docs/GUIDE.md#approving-by-signature)).
+4. Approve what the needs-you queue holds. A plan over your size limit, a landing a rule holds, and a push wait for you, with `brigada plan approve`, `brigada land approve` and `brigada push approve`. The operator tells you when something waits, and the decision is yours.
 
 ```sh
 brigada status              # engine, jobs, plans, what needs you

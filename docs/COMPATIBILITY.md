@@ -6,7 +6,7 @@ What brigada 1.0 promises until 2.0.
 
 ## What is covered
 
-**The CLI commands and their subcommands.** The top-level commands are `init`, `remove`, `instructions`, `attach`, `ask`, `review`, `engine`, `runner`, `start`, `pause`, `resume`, `config`, `stop`, `mcp`, `status`, `task`, `project`, `history`, `stats`, `capacity`, `top`, `cancel`, `agent`, `agents`, `plan`, `budget`, `recover`, `diff`, `land`, `push`, `approver`, `logs`, `version` and `help`. The subcommands are `instructions diff`; `task submit` and `task retire`; `project foreman`, `project list`, `project set`, `project show` and `project import`; `agent reset`; `agents add`; `plan approve` and `plan reject`; `land approve` and `land reject`; `push approve`; `approver add`, `approver list` and `approver remove`; and `hold yield` and `hold confirm`, which stay as no-ops that always exit 0. A bare `brigada` is `attach`. Their names and subcommand names keep working.
+**The CLI commands and their subcommands.** The top-level commands are `init`, `remove`, `instructions`, `attach`, `ask`, `review`, `engine`, `runner`, `start`, `pause`, `resume`, `config`, `stop`, `mcp`, `status`, `task`, `project`, `history`, `stats`, `capacity`, `top`, `cancel`, `agent`, `agents`, `plan`, `budget`, `recover`, `diff`, `land`, `push`, `logs`, `version` and `help`. The subcommands are `instructions diff`; `task submit` and `task retire`; `project foreman`, `project list`, `project set`, `project show` and `project import`; `agent reset`; `agents add`; `plan approve` and `plan reject`; `land approve` and `land reject`; `push approve`; and `hold yield` and `hold confirm`, which stay as no-ops that always exit 0. A bare `brigada` is `attach`. Their names and subcommand names keep working.
 
 **The CLI flags.** Every command takes `--state-dir DIR` and `--config PATH`. A command's other flags are frozen only where they are listed here; anything else its `--help` prints may change. The frozen flags:
 
@@ -17,7 +17,7 @@ What brigada 1.0 promises until 2.0.
 - `review`: `--branch` (required), `--repo`, `--no-start`.
 - `engine`: `--idle-minutes`.
 - `runner`: `--harness`, `--model`, `--worker-script`, `--agent-file`, `--classes`, `--labels`, `--max-parallel`, `--agent` (repeatable), `--no-start`.
-- `start`, `config`, `version`, `agents`, `approver list`, `hold yield`, `hold confirm`: no flags beyond the common two.
+- `start`, `config`, `version`, `agents`, `hold yield`, `hold confirm`: no flags beyond the common two.
 - `pause`, `resume`: `--repo`, `--no-start`. An empty `--repo` (and its absence) is the engine's scope.
 - `stop`: `--engine`, `--drain` (which needs `--engine`: pause the engine and wait out its running jobs before stopping).
 - `mcp`: `--coordinator`, `--client`, `--socket`.
@@ -41,7 +41,6 @@ What brigada 1.0 promises until 2.0.
 - `diff`: `--stat`, `--repo`, `--no-start`.
 - `land`: `--onto`, `--repo`, `--landed` (repeatable), `--no-check`, `--no-start`; `land approve`: `--and-stop-asking`, `--no-start`; `land reject`: `--no-start`. The command and flag names are frozen; the land gate's holds and the land job's internals are experimental.
 - `push approve`: `--repo`, `--no-start`. The push gate's mechanics are experimental.
-- `approver add`: `--label`, `--public-key`; `approver remove`: `--label`. The approval authority behind them is experimental.
 - `logs`: `--check`, `--follow`, `--tail`, `--task`, `--no-start`.
 
 **The project file, `.brigada/project.yaml`, schema 1.** The file starts with `schema: 1`. The engine reads only that version. A file with any other schema number is refused with an error that names the version, so an old binary never guesses at a newer file. The format is the flat subset: top-level `key: value` entries whose value is a scalar, a flow list or a block list; the `instructions` role map is the supported nested-map exception. Schema 1's keys, and nothing else:
