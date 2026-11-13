@@ -186,8 +186,8 @@ tasks:
     base: "permission-plumbing"
     effort: medium
     skills: ["config-setting"]
-    state: running
-    branch: "brigada/task-774-r1"
+    state: reviewing
+    branch: "brigada/task-774-r2"
     rounds: 0
   - id: 775
     name: "approval-api-gates"
