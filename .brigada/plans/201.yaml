@@ -252,7 +252,7 @@ tasks:
     review_tier: standard
     caps: {fix_rounds: 3, review_rounds: 2, restart: 2}
     skills: ["surface-parity"]
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 780
@@ -277,7 +277,7 @@ tasks:
     effort: medium
     caps: {fix_rounds: 3, review_rounds: 2, restart: 2}
     skills: ["surface-parity", "docs-change"]
-    state: reviewing
+    state: done
     branch: "brigada/task-781"
     rounds: 1
   - id: 782
