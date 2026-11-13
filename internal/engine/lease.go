@@ -800,6 +800,19 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 				return nil, fmt.Errorf("read the permission of agent %d: %w", agent, err)
 			}
 		}
+		if agentHarness == "claude" && (j.Kind == KindWork || j.Kind == KindFix) {
+			// worker_tools, the project's deprecated alias of permission=
+			// (§5.2), still scopes the project's claude code workers: set,
+			// it stands in for the agent's own value, as it replaced the
+			// worker's default scope before permission= existed.
+			workerTools, err := projectWorkerToolsTx(tx, j.ProjectID)
+			if err != nil {
+				return nil, err
+			}
+			if workerTools != "" {
+				permission = workerTools
+			}
+		}
 		resume, reviewSince := "", ""
 		if j.Kind == KindReview && j.Mode == ModeSession && j.TaskID != 0 {
 			// A re-review (§7) resumes the session of the review it answers,

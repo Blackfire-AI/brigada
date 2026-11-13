@@ -37,3 +37,51 @@ func TestLeaseGrantCarriesTheAgentsPermission(t *testing.T) {
 		t.Errorf("re-registered permission = %q, want plan", got)
 	}
 }
+
+// TestLeaseGrantWorkerToolsScopesClaudeCodeWorkers: the project's
+// deprecated worker_tools (§5.2) stands in for a claude agent's permission
+// on a work or fix job, as it replaced the worker's scope before
+// permission= existed; a review, an agent of another harness and a
+// project that sets none keep the agent's own value.
+func TestLeaseGrantWorkerToolsScopesClaudeCodeWorkers(t *testing.T) {
+	for _, tc := range []struct {
+		name, harness, permission, workerTools string
+		kind                                   Kind
+		want                                   string
+	}{
+		{"claude work", "claude", "bypassPermissions", "Bash(go test:*)+Read", KindWork, "Bash(go test:*)+Read"},
+		{"claude fix", "claude", "bypassPermissions", "none", KindFix, "none"},
+		{"claude review", "claude", "bypassPermissions", "Bash(go test:*)+Read", KindReview, "bypassPermissions"},
+		{"claude unset", "claude", "bypassPermissions", "", KindWork, "bypassPermissions"},
+		{"codex work", "codex", "workspace-write", "none", KindWork, "workspace-write"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEnv(t)
+			runner, err := e.eng.Register(e.ctx, "scoped", 0, []AgentAdvert{
+				{Adapter: tc.harness, Harness: tc.harness, Model: "m", Family: "f", Account: "work",
+					Classes: []string{"implement", "review"}, Permission: tc.permission},
+			})
+			if err != nil {
+				t.Fatalf("register: %v", err)
+			}
+			if tc.workerTools != "" {
+				e.set(map[string]string{SettingWorkerTools: tc.workerTools})
+			}
+			job := e.work()
+			job.Kind = tc.kind
+			if tc.kind == KindReview {
+				job.TaskID = 0
+				job.Key = "review:standalone"
+				job.Branch = "feature"
+			}
+			e.submit(job)
+			g := e.lease(runner, []string{tc.harness}, nil)
+			if g == nil {
+				t.Fatal("the agented runner found no job")
+			}
+			if g.Permission != tc.want {
+				t.Errorf("grant Permission = %q, want %q", g.Permission, tc.want)
+			}
+		})
+	}
+}
