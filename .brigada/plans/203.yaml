@@ -5,9 +5,9 @@
 plan: 203
 title: "#228 docs: the approval signature's trust boundary, stated plainly"
 repo: "github.com/Blackfire-AI/brigada"
-state: needs_foreman
+state: reviewing
 created: 2026-11-13T06:56:58.039812Z
-updated: 2026-11-13T06:59:02.065375Z
+updated: 2026-11-13T06:59:20.877096Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
