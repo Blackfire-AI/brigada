@@ -226,9 +226,9 @@ tasks:
     continue: "adapter-codex-opencode"
     effort: medium
     skills: ["surface-parity"]
-    state: reviewing
+    state: running
     branch: "brigada/task-777-r1"
-    rounds: 0
+    rounds: 1
   - id: 778
     name: "leftovers-permission"
     title: "Leftovers of the permission pass-through: the dead kimi read-only wiring, the retired qwen-code review reason, TERMS.md rule 2"
