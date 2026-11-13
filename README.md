@@ -147,7 +147,7 @@ brigada init
 Init walks you through four steps:
 
 1. Pick the foreman model from the signed-in Claude, Codex, OpenCode and qwen-code CLIs, then how hard it should think. `--foreman claude/sonnet@medium` supplies both.
-2. Choose which CLIs' models may run tasks. Opencode offers a menu with multiple picks. Two model families give cross-family reviews (preferred; required with `review.family=require`); Kimi reviews only unless you let it write code; qwen-code writes code and answers but never reviews.
+2. Choose which CLIs' models may run tasks. Opencode offers a menu with multiple picks. Two model families give cross-family reviews (preferred; required with `review.family=require`); Kimi reviews only unless you let it write code.
 3. Set tasks at once on this machine (or pass `--parallel N`). Enter keeps the saved limit, else half the cores, at least 1 and at most 4.
 4. Confirm the check suggested by your build files, type your own command, or enter `-` for none. Init never runs the check and derives no worker permission from it: each Claude agent without one of its own is saved with the harness default as its `permission=`.
 

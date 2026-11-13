@@ -248,7 +248,7 @@ func TestInitKimiWriteOptIn(t *testing.T) {
 			if code != 1 || errOut != "" || !strings.Contains(out, "Declined") {
 				t.Fatalf("init = %d\n%s\n%s", code, out, errOut)
 			}
-			warning := "    kimi has no sandbox: when it writes code it can run any command on this\n    machine without asking. As a reviewer it only reads.\n    Let kimi write code too, not only review? [y/N]:\n"
+			warning := "    kimi has no sandbox: when it writes code it can run any command on this\n    machine without asking. Its reviews are not read-only either.\n    Let kimi write code too, not only review? [y/N]:\n"
 			if !strings.Contains(out, "    Use codex's models for tasks (CLI default)? [Y/n]:\n\n  kimi: signed in\n"+warning+"\n  opencode:") {
 				t.Fatalf("writing question is not right after Kimi sign-in:\n%s", out)
 			}
@@ -975,7 +975,8 @@ func TestInitWorkerPermissions(t *testing.T) {
 				"    claude    " + tc.permissions + "\n" +
 				"    codex     edit files and run commands inside codex's sandbox\n" +
 				"    kimi      edit files and run any command without asking\n" +
-				"    opencode  edit files; run only the commands of the worker tools scope\n"
+				"    opencode  edit files and run commands under OpenCode's rules for the\n" +
+				"              agent's permission=\n"
 			if !strings.Contains(out, want) {
 				t.Errorf("permissions table missing:\n%s", out)
 			}
@@ -1632,8 +1633,8 @@ func assertInitAgentTable(t *testing.T, out string, longModels bool) {
 	}
 	if !longModels {
 		want = append(want,
-			"qwen-code qwen-subscription/qwen3.8-max Alibaba heavy writes code, answers questions",
-			"qwen-code qwen-subscription/qwen3.8-flash Alibaba light writes code, answers questions")
+			"qwen-code qwen-subscription/qwen3.8-max Alibaba heavy writes code, reviews",
+			"qwen-code qwen-subscription/qwen3.8-flash Alibaba light writes code, reviews")
 	}
 	if longModels {
 		want = append(want,
