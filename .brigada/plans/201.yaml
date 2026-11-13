@@ -214,7 +214,7 @@ tasks:
     review_tier: standard
     review_effort: medium
     skills: ["surface-parity"]
-    state: needs_foreman
+    state: ready
     branch: "brigada/task-776"
     rounds: 0
   - id: 777
