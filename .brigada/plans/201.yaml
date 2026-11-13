@@ -126,7 +126,7 @@ tasks:
     continue: "adapter-dsh-kimi-qwen"
     effort: medium
     skills: ["docs-change"]
-    state: ready
+    state: running
     branch: ""
     rounds: 0
   - id: 770
@@ -226,6 +226,6 @@ tasks:
     continue: "adapter-codex-opencode"
     effort: medium
     skills: ["surface-parity"]
-    state: needs_foreman
+    state: running
     branch: "brigada/task-777"
     rounds: 0
