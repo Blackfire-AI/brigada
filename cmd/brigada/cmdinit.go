@@ -510,15 +510,14 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 			var models []string
 			var classes []string
 			if h == "qwen-code" {
-				// qwen-code runs with auto-approve, so it writes code and answers
-				// questions, reviews only when its classes ask, and gets no question about writing.
-				warning := "qwen-code runs with auto-approve: when it writes code it can run any command on this machine without asking. It does not review by default."
+				// qwen-code runs with auto-approve, so it gets the warning and no
+				// question about writing; its classes are the default ones.
+				warning := "qwen-code runs with auto-approve: when it writes code it can run any command on this machine without asking."
 				if styled {
 					printInitWrapped(stdout, "    ", "    ", style.Warn(style.Warning()+" "+warning))
 				} else {
 					printInitWrapped(stdout, "    ", "    ", warning)
 				}
-				classes = []string{"implement", "answer"}
 				for _, entry := range entries {
 					models = append(models, entry.value)
 				}
@@ -550,9 +549,9 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 				}
 			case "kimi":
 				if styled {
-					printInitWrapped(stdout, "    ", "    ", style.Warn(style.Warning()+" kimi has no sandbox: when it writes code it can run any command on this machine without asking. As a reviewer it only reads."))
+					printInitWrapped(stdout, "    ", "    ", style.Warn(style.Warning()+" kimi has no sandbox: when it writes code it can run any command on this machine without asking. Its reviews are not read-only either."))
 				} else {
-					fmt.Fprint(stdout, "    kimi has no sandbox: when it writes code it can run any command on this\n    machine without asking. As a reviewer it only reads.\n")
+					fmt.Fprint(stdout, "    kimi has no sandbox: when it writes code it can run any command on this\n    machine without asking. Its reviews are not read-only either.\n")
 				}
 				writes := len(saved[h]) > 0 && slices.Contains(saved[h][0].classes, "implement")
 				hint := "y/N"
@@ -991,9 +990,9 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		case "kimi":
 			permissions = "edit files and run any command without asking"
 		case "qwen-code":
-			permissions = "edit files and run any command without asking; reviews opt-in"
+			permissions = "edit files and run any command without asking"
 		case "opencode":
-			permissions = "edit files; run only the commands of the worker tools scope"
+			permissions = "edit files and run commands under OpenCode's rules for the agent's permission="
 		case "dsh":
 			permissions = "edit files and run commands inside dsh's workspace sandbox; reviews follow the agent's permission="
 		}

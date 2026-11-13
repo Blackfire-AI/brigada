@@ -72,7 +72,7 @@ dsh (experimental): init can't check sign-in.
   [1mkimi[0m  [33m? sign-in can't be checked[0m[90m - sign in with [0m[36mkimi login[0m
 [1m    Use kimi? [0m[36m[y/N][0m[1m:[0m
     [33m! kimi has no sandbox: when it writes code it can run any command on this
-    machine without asking. As a reviewer it only reads.[0m
+    machine without asking. Its reviews are not read-only either.[0m
 [1m    Let kimi write code too, not only review? [0m[36m[y/N][0m[1m:[0m
 
   [1mopencode[0m  [32mok signed in[0m
@@ -91,7 +91,7 @@ dsh (experimental): init can't check sign-in.
 
   [1mqwen-code[0m  [90mexperimental - [0m[32mok signed in[0m
     [33m! qwen-code runs with auto-approve: when it writes code it can run any
-    command on this machine without asking. It does not review by default.[0m
+    command on this machine without asking.[0m
 
   [90m-> [0m[90mchange later: run brigada init again[0m
      [90myour own defaults: ~/.codex/config.toml, ~/.kimi-code/config.toml[0m
@@ -144,10 +144,10 @@ dsh (experimental): init can't check sign-in.
     opencode  zai-coding-plan/glm-5.3
               [90mZhipu (GLM)[0m  standard  writes code, reviews
     qwen-code qwen-subscription/qwen3.8-max
-              [90mAlibaba[0m      heavy     writes code, answers questions
+              [90mAlibaba[0m      heavy     writes code, reviews
     qwen-code qwen-subscription/qwen3.8-flash
-              [90mAlibaba[0m      light     writes code, answers questions
-  [1mReviews:[0m 4 model families, so every task can get a reviewer of another one.
+              [90mAlibaba[0m      light     writes code, reviews
+  [1mReviews:[0m 5 model families, so every task can get a reviewer of another one.
   [1mAt once:[0m 4 tasks on this machine; per account: claude 3, codex 2, kimi 1,
     opencode 2, qwen-code 1 (change: brigada config)
   [1mCheck:[0m uv run pytest (init doesn't run it; change it later in
@@ -155,8 +155,9 @@ dsh (experimental): init can't check sign-in.
   [1mWhat workers may do:[0m
     claude    edit files and run commands under permission bypassPermissions
     codex     edit files and run commands inside codex's sandbox
-    opencode  edit files; run only the commands of the worker tools scope
-    qwen-code edit files and run any command without asking; reviews opt-in
+    opencode  edit files and run commands under OpenCode's rules for the
+              agent's permission=
+    qwen-code edit files and run any command without asking
   [1mFiles[0m in this repository (brigada never commits them):
     [32mnew[0m        .brigada/project.yaml                      [90mthe settings above[0m
     [32mnew[0m        .brigada/operator.md                       [90mtells your own coding
