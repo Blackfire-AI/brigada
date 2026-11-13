@@ -215,7 +215,7 @@ tasks:
     review_tier: standard
     review_effort: medium
     skills: ["surface-parity"]
-    state: reviewing
+    state: done
     branch: "brigada/task-776-r1"
     rounds: 0
   - id: 777
@@ -227,6 +227,6 @@ tasks:
     continue: "adapter-codex-opencode"
     effort: medium
     skills: ["surface-parity"]
-    state: done
+    state: needs_foreman
     branch: "brigada/task-777"
     rounds: 0
