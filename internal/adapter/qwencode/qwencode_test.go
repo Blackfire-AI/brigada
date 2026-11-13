@@ -64,7 +64,13 @@ func TestCommand(t *testing.T) {
 		{"default model omits -m", adapter.Job{Prompt: prompt, Model: DefaultModel}, "", append(slicesClone(base), tail...)},
 		{"model", adapter.Job{Prompt: prompt, Model: "qwen-subscription/qwen3.8-flash"}, "", append(append(slicesClone(base), "-m", "qwen-subscription/qwen3.8-flash"), tail...)},
 		{"resume", adapter.Job{Prompt: prompt}, "sess-1", append(append(slicesClone(base), tail...), "--resume", "sess-1")},
-		{"read dirs and permission ignored", adapter.Job{Prompt: prompt, ReadDirs: []string{"/x"}, Permission: "plan"}, "", append(slicesClone(base), tail...)},
+		{"read dirs ignored, no permission keeps the default flag", adapter.Job{Prompt: prompt, ReadDirs: []string{"/x"}}, "", append(slicesClone(base), tail...)},
+		{"a named mode reaches --approval-mode", adapter.Job{Prompt: prompt, Permission: "plan"}, "", append(slicesClone(base), "--approval-mode", "plan", "--setting-sources", "user")},
+		{"auto-edit replaces the skip flag", adapter.Job{Prompt: prompt, Permission: "auto-edit"}, "sess-1", append(slicesClone(base), "--approval-mode", "auto-edit", "--setting-sources", "user", "--resume", "sess-1")},
+		{"a review runs on the same path", adapter.Job{Prompt: prompt, Review: true, Permission: "plan"}, "", append(slicesClone(base), "--approval-mode", "plan", "--setting-sources", "user")},
+		{"a review with no permission keeps the default flag", adapter.Job{Prompt: prompt, Review: true}, "", append(slicesClone(base), tail...)},
+		// A foreman turn never reads permission=.
+		{"mcp ignores permission", adapter.Job{Prompt: prompt, MCPConfig: "/tmp/mcp.json", Permission: "plan"}, "", append(slicesClone(base), "--dangerously-skip-permissions", "--setting-sources", "user", "--mcp-config", "/tmp/mcp.json", "--strict-mcp-config")},
 		// A foreman turn: the bridge, strict, then the resume.
 		{"mcp", adapter.Job{Prompt: prompt, MCPConfig: "/tmp/mcp.json"}, "sess-1", append(append(slicesClone(base), tail...), "--mcp-config", "/tmp/mcp.json", "--strict-mcp-config", "--resume", "sess-1")},
 	}
@@ -116,7 +122,9 @@ func TestCommandRefusals(t *testing.T) {
 		job  adapter.Job
 		want string
 	}{
-		{"review", adapter.Job{Prompt: "p", Review: true}, "no read-only review policy yet; review jobs cannot run on it"},
+		{"a mode qwen has none for", adapter.Job{Prompt: "p", Permission: "bypassPermissions"}, `permission "bypassPermissions" is not one of qwen's approval modes`},
+		{"the deprecated tools= alias", adapter.Job{Prompt: "p", Review: true, Permission: adapter.ToolsAliasPermission([]string{"Read", "Grep"})}, `permission "Read+Grep" is not one of qwen's approval modes`},
+		{"the empty tools= alias", adapter.Job{Prompt: "p", Permission: adapter.ToolsAliasPermission(nil)}, `permission "none" is not one of qwen's approval modes`},
 		{"effort", adapter.Job{Prompt: "p", Effort: "high"}, "effort"},
 	}
 	for _, tc := range cases {

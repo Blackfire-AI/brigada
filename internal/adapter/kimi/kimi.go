@@ -24,7 +24,8 @@ import (
 
 // Adapter drives the kimi CLI (2.1.x) in its headless prompt mode: -p
 // runs non-interactively without approval prompts, which is how a
-// production fleet runs it. The zero value runs `kimi` from PATH; the
+// production fleet runs it; its permission mechanism is that approve-all
+// mode (--yolo), which job.Permission may name. The zero value runs `kimi` from PATH; the
 // fields carry what the agent's configuration passes through.
 type Adapter struct {
 	// Binary is the CLI to run; "kimi" when empty.
@@ -36,8 +37,9 @@ type Adapter struct {
 	// so the field is read only when the run is fresh.
 	AgentFile string
 
-	// ReadOnlyAgentFile is the runner-owned definition used for review jobs,
-	// whether or not AgentFile is set. Work and fix jobs keep the CLI's normal agent.
+	// ReadOnlyAgentFile is no longer read: a review job takes Job.Permission
+	// like any other. The field and its runner wiring stay, dead but
+	// compiling, until a follow-up removes them.
 	ReadOnlyAgentFile string
 
 	// ExtraArgs are further flags the agent's configuration passes
@@ -104,15 +106,15 @@ func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*ex
 	if job.Model != "" && job.Model != DefaultModel {
 		args = append(args, "-m", job.Model)
 	}
-	agentFile := a.AgentFile
-	if job.Review && a.ReadOnlyAgentFile != "" {
-		// A reviewer is read-only whatever agent the configuration names.
-		agentFile = a.ReadOnlyAgentFile
+	permArgs, err := permissionArgs(job.Permission)
+	if err != nil {
+		return nil, err
 	}
+	args = append(args, permArgs...)
 	if resumeSessionID != "" {
 		args = append(args, "--session", resumeSessionID)
-	} else if agentFile != "" {
-		args = append(args, "--agent-file", agentFile)
+	} else if a.AgentFile != "" {
+		args = append(args, "--agent-file", a.AgentFile)
 	}
 	args = append(args, a.ExtraArgs...)
 	cmd := exec.Command(binary, args...)
@@ -122,6 +124,24 @@ func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*ex
 	cmd.Dir = workdir
 	cmd.Env = workerEnv(os.Environ())
 	return cmd, nil
+}
+
+// permissionArgs maps a job's permission= onto kimi's own permission
+// mechanism. Its only one headless is approve-all: -p already runs without
+// approval prompts (what a production fleet relies on), and `--yolo` names
+// that mode explicitly. kimi has no read-only or edits-only mode on its
+// command line, so a permission= that asks for one is refused with the value
+// named — never accepted and ignored. A reviewer therefore gets no
+// brigada-made read-only policy from this adapter: ReadOnlyAgentFile is no
+// longer read here. The deprecated tools= alias, a tool scope, is refused too.
+func permissionArgs(permission string) ([]string, error) {
+	switch permission {
+	case "":
+		return nil, nil
+	case "yolo":
+		return []string{"--yolo"}, nil
+	}
+	return nil, fmt.Errorf("kimi: permission %q is not one kimi can honour: its headless mode approves everything (yolo) and the CLI has no narrower mode", permission)
 }
 
 // envPrefix marks brigada's own variables: the runner's token, the

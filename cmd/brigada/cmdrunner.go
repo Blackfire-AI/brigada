@@ -502,11 +502,9 @@ func resolveRunnerAgents(rt *runtime, specs []agentSpec, workerScript string) ([
 			if spec.agentFile != "" {
 				return nil, nil, fmt.Errorf("--agent-file is a --harness kimi flag; the qwen-code harness takes none")
 			}
-			// qwen-code runs no reviews: its default classes already
-			// leave the review class out, and an explicit one is refused.
-			if slices.Contains(spec.classes, "review") {
-				return nil, nil, fmt.Errorf("the qwen-code harness takes no review class: qwen-code has no read-only review policy")
-			}
+			// A review takes the agent's permission= like any job, so an
+			// explicit review class is accepted; the default classes still
+			// leave it out.
 			ad = &qwencode.Adapter{}
 		case "fake":
 			if spec.agentFile != "" {

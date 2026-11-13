@@ -69,13 +69,13 @@ func TestRunnerKimiReviewAgentFile(t *testing.T) {
 					t.Fatal(err)
 				}
 				i := slices.Index(cmd.Args, "--agent-file")
+				// The adapter no longer swaps in the read-only agent for a
+				// review (Job.Permission is the grant now); the wiring that
+				// writes the file is dead until a follow-up removes it.
 				want := spec.agentFile
-				if review {
-					want = file
-				}
 				if want == "" {
 					if i >= 0 {
-						t.Fatalf("work got a review agent: %v", cmd.Args)
+						t.Fatalf("review=%v got an agent file: %v", review, cmd.Args)
 					}
 				} else if i < 0 || i+1 >= len(cmd.Args) || cmd.Args[i+1] != want {
 					t.Fatalf("args = %v, want agent file %q", cmd.Args, want)
@@ -350,18 +350,6 @@ func TestRunnerHarnessFlags(t *testing.T) {
 			args:     []string{"runner", "--agent", "harness=qwen-code,agent-file=" + agentFile, "--state-dir", state},
 			wantCode: 2,
 			wantErr:  "--agent-file is a --harness kimi flag",
-		},
-		{
-			name:     "a review class with the qwen-code harness is a usage error",
-			args:     []string{"runner", "--agent", "harness=qwen-code,classes=implement+review", "--state-dir", state},
-			wantCode: 2,
-			wantErr:  "no read-only review policy",
-		},
-		{
-			name:     "a review class with --harness qwen-code is a usage error",
-			args:     []string{"runner", "--harness", "qwen-code", "--classes", "review", "--state-dir", state},
-			wantCode: 2,
-			wantErr:  "no read-only review policy",
 		},
 		{
 			name:     "tools with the qwen-code harness is a usage error",

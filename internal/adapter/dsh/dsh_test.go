@@ -134,6 +134,19 @@ func TestCommandRefusals(t *testing.T) {
 	}
 }
 
+// TestCommandRefusesAPermissionDshHasNoModeFor: a mode outside dsh's three,
+// and the deprecated tools= alias that maps onto permission=, are refused
+// with the value named.
+func TestCommandRefusesAPermissionDshHasNoModeFor(t *testing.T) {
+	stubCLI(t)
+	for _, perm := range []string{"plan", "bypassPermissions", adapter.ToolsAliasPermission([]string{"Bash(go test:*)"}), adapter.ToolsAliasPermission(nil)} {
+		cmd, err := (&Adapter{}).Command(adapter.Job{Prompt: "p", Permission: perm}, "/work", "")
+		if err == nil || cmd != nil || !strings.Contains(err.Error(), `"`+perm+`"`) || !strings.HasPrefix(err.Error(), "dsh: ") {
+			t.Errorf("permission %q: Command = %v, %v; want a refusal naming it", perm, cmd, err)
+		}
+	}
+}
+
 func TestCommandEnv(t *testing.T) {
 	stubCLI(t)
 	t.Setenv("DEEPSEEK_API_KEY", "key-from-the-runner-env")
@@ -144,9 +157,16 @@ func TestCommandEnv(t *testing.T) {
 	t.Setenv("GIT_OPTIONAL_LOCKS", "1")
 	for _, tc := range []struct {
 		review bool
+		perm   string
 		mode   string
-	}{{false, "workspace-write"}, {true, "read-only"}} {
-		cmd, err := (&Adapter{}).Command(adapter.Job{Prompt: "p", Review: tc.review}, "/work", "")
+	}{
+		{false, "", "workspace-write"}, // the default with no permission=
+		{true, "", "workspace-write"},  // a review takes the same path
+		{false, "read-only", "read-only"},
+		{true, "read-only", "read-only"},
+		{false, "danger-full-access", "danger-full-access"},
+	} {
+		cmd, err := (&Adapter{}).Command(adapter.Job{Prompt: "p", Review: tc.review, Permission: tc.perm}, "/work", "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -165,12 +185,12 @@ func TestCommandEnv(t *testing.T) {
 		if _, ok := envValue(cmd.Env, "BRIGADA_TOKEN"); ok {
 			t.Errorf("review=%v: BRIGADA_TOKEN leaked", tc.review)
 		}
-		if slices.Contains(cmd.Env, "DSH_PERMISSION_MODE=danger-full-access") {
-			t.Errorf("review=%v: danger-full-access survived", tc.review)
+		if tc.mode != "danger-full-access" && slices.Contains(cmd.Env, "DSH_PERMISSION_MODE=danger-full-access") {
+			t.Errorf("review=%v: the ambient danger-full-access survived", tc.review)
 		}
 		cache, _ := envValue(cmd.Env, "GOCACHE")
 		locks, _ := envValue(cmd.Env, "GIT_OPTIONAL_LOCKS")
-		if tc.review {
+		if tc.mode == "read-only" {
 			if cache != "/ambient/go-build" || locks != "1" {
 				t.Errorf("review: GOCACHE=%q GIT_OPTIONAL_LOCKS=%q, want the ambient values", cache, locks)
 			}

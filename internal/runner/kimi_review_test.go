@@ -27,7 +27,9 @@ func (a *kimiCommandRecorder) Command(job adapter.Job, workdir, resume string) (
 	return nil, errors.New("command captured")
 }
 
-func TestKimiReviewPolicyReachesWorker(t *testing.T) {
+// A review job no longer gets a brigada-made read-only agent file from the
+// kimi adapter: its permission is Job.Permission, like a work or fix job's.
+func TestKimiReviewTakesNoReadOnlyAgentFile(t *testing.T) {
 	for _, kind := range []engine.Kind{engine.KindReview, engine.KindWork, engine.KindFix} {
 		t.Run(string(kind), func(t *testing.T) {
 			ad := &kimiCommandRecorder{Adapter: kimi.Adapter{Binary: "/unused/kimi", ReadOnlyAgentFile: "/runner/kimi-readonly.md"}}
@@ -38,15 +40,10 @@ func TestKimiReviewPolicyReachesWorker(t *testing.T) {
 			if ad.cmd == nil {
 				t.Fatal("command was not built")
 			}
-			want := kind == engine.KindReview
-			found := false
-			for i, arg := range ad.cmd.Args {
-				if arg == "--agent-file" && i+1 < len(ad.cmd.Args) && ad.cmd.Args[i+1] == ad.ReadOnlyAgentFile {
-					found = true
+			for _, arg := range ad.cmd.Args {
+				if arg == "--agent-file" || arg == "/runner/kimi-readonly.md" {
+					t.Fatalf("%s command = %v, want no read-only agent file", kind, ad.cmd.Args)
 				}
-			}
-			if found != want {
-				t.Fatalf("%s command = %v, want read-only agent %t", kind, ad.cmd.Args, want)
 			}
 		})
 	}
