@@ -278,8 +278,8 @@ tasks:
     caps: {fix_rounds: 3, review_rounds: 2, restart: 2}
     skills: ["surface-parity", "docs-change"]
     state: running
-    branch: ""
-    rounds: 0
+    branch: "brigada/task-781"
+    rounds: 1
   - id: 782
     name: "approval-docs-gaps"
     title: "Gaps left by #228: config-key list, approval test skip, docs verifier and approval flags"
