@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -116,8 +117,10 @@ func TestCommandRefusals(t *testing.T) {
 		job  adapter.Job
 		want string
 	}{
-		{"review", adapter.Job{Prompt: "p", Review: true}, "no read-only review policy yet; review jobs cannot run on it"},
 		{"effort", adapter.Job{Prompt: "p", Effort: "high"}, "effort"},
+		{"unknown permission", adapter.Job{Prompt: "p", Permission: "acceptEdits"}, `permission "acceptEdits" names no mode`},
+		{"the deprecated tools alias has no mode here", adapter.Job{Prompt: "p", Permission: "Bash(go test:*)+Bash(go vet:*)"}, "names no mode"},
+		{"the deprecated none alias has no mode here", adapter.Job{Prompt: "p", Permission: "none"}, "names no mode"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -129,6 +132,53 @@ func TestCommandRefusals(t *testing.T) {
 				t.Errorf("err = %q", err)
 			}
 		})
+	}
+}
+
+// TestCommandPermissionPassThrough: permission= resolves onto
+// autoApproveFlag, bypassPermissions by default and explicitly, default
+// omitting it; a review takes the identical path, since it has no
+// read-only policy of brigada's own any more.
+func TestCommandPermissionPassThrough(t *testing.T) {
+	stubCLI(t)
+	const prompt = "p"
+	cases := []struct {
+		name       string
+		permission string
+		review     bool
+		wantFlag   bool
+	}{
+		{"absent", "", false, true},
+		{"absent, review", "", true, true},
+		{"bypassPermissions", "bypassPermissions", false, true},
+		{"default omits the flag", "default", false, false},
+		{"default omits the flag, review", "default", true, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd, err := (&Adapter{}).Command(adapter.Job{Prompt: prompt, Permission: tc.permission, Review: tc.review}, t.TempDir(), "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := slices.Contains(cmd.Args, autoApproveFlag)
+			if got != tc.wantFlag {
+				t.Errorf("args = %q, want the flag present = %v", cmd.Args, tc.wantFlag)
+			}
+		})
+	}
+}
+
+// TestCommandForemanIgnoresPermission: a foreman turn keeps the
+// unconditional flag whatever permission= says — qwen has no foreman
+// confinement of its own to layer it under (§4.1 gap).
+func TestCommandForemanIgnoresPermission(t *testing.T) {
+	stubCLI(t)
+	cmd, err := (&Adapter{}).Command(adapter.Job{Prompt: "p", MCPConfig: "/tmp/mcp.json", Permission: "default"}, t.TempDir(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(cmd.Args, autoApproveFlag) {
+		t.Errorf("foreman args = %q, want the flag unconditionally", cmd.Args)
 	}
 }
 

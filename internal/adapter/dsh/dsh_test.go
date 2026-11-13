@@ -134,6 +134,12 @@ func TestCommandRefusals(t *testing.T) {
 	}
 }
 
+// TestCommandEnv: the agent's permission= resolves onto DSH_PERMISSION_MODE,
+// workspace-write when the agent names none, the same for a work and a
+// review job alike (§5.2: a review has no read-only default of
+// brigada's) — only an explicit permission=read-only still gets it, and
+// drops the GOCACHE/GIT_OPTIONAL_LOCKS pair, since that sandbox denies
+// the writes they are for anyway.
 func TestCommandEnv(t *testing.T) {
 	stubCLI(t)
 	t.Setenv("DEEPSEEK_API_KEY", "key-from-the-runner-env")
@@ -143,47 +149,67 @@ func TestCommandEnv(t *testing.T) {
 	t.Setenv("GOCACHE", "/ambient/go-build")
 	t.Setenv("GIT_OPTIONAL_LOCKS", "1")
 	for _, tc := range []struct {
-		review bool
-		mode   string
-	}{{false, "workspace-write"}, {true, "read-only"}} {
-		cmd, err := (&Adapter{}).Command(adapter.Job{Prompt: "p", Review: tc.review}, "/work", "")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if v, _ := envValue(cmd.Env, "DSH_TELEMETRY_MODE"); v != "DISABLED" {
-			t.Errorf("review=%v: DSH_TELEMETRY_MODE = %q", tc.review, v)
-		}
-		if v, _ := envValue(cmd.Env, "DSH_PERMISSION_MODE"); v != tc.mode {
-			t.Errorf("review=%v: DSH_PERMISSION_MODE = %q, want %q", tc.review, v, tc.mode)
-		}
-		if n := countKey(cmd.Env, "DSH_PERMISSION_MODE") + countKey(cmd.Env, "DSH_TELEMETRY_MODE"); n != 2 {
-			t.Errorf("review=%v: %d DSH_ variables, want one each", tc.review, n)
-		}
-		if v, ok := envValue(cmd.Env, "DEEPSEEK_API_KEY"); !ok || v != "key-from-the-runner-env" {
-			t.Errorf("review=%v: DEEPSEEK_API_KEY not passed", tc.review)
-		}
-		if _, ok := envValue(cmd.Env, "BRIGADA_TOKEN"); ok {
-			t.Errorf("review=%v: BRIGADA_TOKEN leaked", tc.review)
-		}
-		if slices.Contains(cmd.Env, "DSH_PERMISSION_MODE=danger-full-access") {
-			t.Errorf("review=%v: danger-full-access survived", tc.review)
-		}
-		cache, _ := envValue(cmd.Env, "GOCACHE")
-		locks, _ := envValue(cmd.Env, "GIT_OPTIONAL_LOCKS")
-		if tc.review {
-			if cache != "/ambient/go-build" || locks != "1" {
-				t.Errorf("review: GOCACHE=%q GIT_OPTIONAL_LOCKS=%q, want the ambient values", cache, locks)
+		name       string
+		review     bool
+		permission string
+		mode       string
+	}{
+		{"work, no permission=", false, "", "workspace-write"},
+		{"review, no permission= either, no read-only default", true, "", "workspace-write"},
+		{"review, explicit read-only", true, "read-only", "read-only"},
+		{"work, explicit danger-full-access", false, "danger-full-access", "danger-full-access"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd, err := (&Adapter{}).Command(adapter.Job{Prompt: "p", Review: tc.review, Permission: tc.permission}, "/work", "")
+			if err != nil {
+				t.Fatal(err)
 			}
-			continue
-		}
-		if want := filepath.Join(os.TempDir(), "brigada-gocache"); cache != want {
-			t.Errorf("work: GOCACHE = %q, want %q", cache, want)
-		}
-		if locks != "0" {
-			t.Errorf("work: GIT_OPTIONAL_LOCKS = %q, want 0", locks)
-		}
-		if n := countKey(cmd.Env, "GOCACHE") + countKey(cmd.Env, "GIT_OPTIONAL_LOCKS"); n != 2 {
-			t.Errorf("work: %d GOCACHE/GIT_OPTIONAL_LOCKS entries, want one each", n)
+			if v, _ := envValue(cmd.Env, "DSH_TELEMETRY_MODE"); v != "DISABLED" {
+				t.Errorf("DSH_TELEMETRY_MODE = %q", v)
+			}
+			if v, _ := envValue(cmd.Env, "DSH_PERMISSION_MODE"); v != tc.mode {
+				t.Errorf("DSH_PERMISSION_MODE = %q, want %q", v, tc.mode)
+			}
+			if n := countKey(cmd.Env, "DSH_PERMISSION_MODE") + countKey(cmd.Env, "DSH_TELEMETRY_MODE"); n != 2 {
+				t.Errorf("%d DSH_ variables, want one each", n)
+			}
+			if v, ok := envValue(cmd.Env, "DEEPSEEK_API_KEY"); !ok || v != "key-from-the-runner-env" {
+				t.Error("DEEPSEEK_API_KEY not passed")
+			}
+			if _, ok := envValue(cmd.Env, "BRIGADA_TOKEN"); ok {
+				t.Error("BRIGADA_TOKEN leaked")
+			}
+			cache, _ := envValue(cmd.Env, "GOCACHE")
+			locks, _ := envValue(cmd.Env, "GIT_OPTIONAL_LOCKS")
+			if tc.mode == "read-only" {
+				if cache != "/ambient/go-build" || locks != "1" {
+					t.Errorf("GOCACHE=%q GIT_OPTIONAL_LOCKS=%q, want the ambient values kept", cache, locks)
+				}
+				return
+			}
+			if want := filepath.Join(os.TempDir(), "brigada-gocache"); cache != want {
+				t.Errorf("GOCACHE = %q, want %q", cache, want)
+			}
+			if locks != "0" {
+				t.Errorf("GIT_OPTIONAL_LOCKS = %q, want 0", locks)
+			}
+			if n := countKey(cmd.Env, "GOCACHE") + countKey(cmd.Env, "GIT_OPTIONAL_LOCKS"); n != 2 {
+				t.Errorf("%d GOCACHE/GIT_OPTIONAL_LOCKS entries, want one each", n)
+			}
+		})
+	}
+}
+
+// TestCommandPermissionRefused: a permission= naming no mode dsh takes
+// is refused, named, never silently dropped — the deprecated
+// tools=/worker_tools alias included.
+func TestCommandPermissionRefused(t *testing.T) {
+	stubCLI(t)
+	for _, permission := range []string{"bypassPermissions", "none", "Bash(go test:*)+Bash(go vet:*)"} {
+		if _, err := (&Adapter{}).Command(adapter.Job{Prompt: "p", Permission: permission}, "/work", ""); err == nil {
+			t.Errorf("permission %q was accepted", permission)
+		} else if !strings.Contains(err.Error(), permission) || !strings.HasPrefix(err.Error(), "dsh: ") {
+			t.Errorf("permission %q: err = %q", permission, err)
 		}
 	}
 }

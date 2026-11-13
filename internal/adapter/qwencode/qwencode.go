@@ -7,9 +7,9 @@
 // carries the `brigada mcp` bridge through --mcp-config with
 // --strict-mcp-config, resumes the project's session headless with
 // --resume, and the attach (AttachCommand) runs the TUI forked onto the
-// client's session id. Its limits: no read-only review policy, no effort
-// control, and a foreman turn keeps --dangerously-skip-permissions, so
-// the foreman's read-only confinement is not enforced.
+// client's session id. Its limits: no effort control, and a foreman turn
+// keeps --dangerously-skip-permissions unconditionally, so the foreman's
+// read-only confinement is not enforced.
 package qwencode
 
 import (
@@ -49,6 +49,37 @@ const DefaultModel = "default"
 // auto-approve flag it does list.
 const autoApproveFlag = "--dangerously-skip-permissions"
 
+// qwenPermissionModes are the two modes permission= may name for qwen: the
+// CLI's own permission mechanism is the one lever autoApproveFlag is, on
+// or off, so brigada's vocabulary for it borrows claude's two names for
+// the same shape of choice (the stream is Claude Code-compatible, package
+// doc) rather than inventing its own.
+var qwenPermissionModes = []string{"bypassPermissions", "default"}
+
+// qwenApprovalArgs resolves the agent's permission= onto autoApproveFlag
+// for a worker or a review job: bypassPermissions when the agent names
+// none — today's default, since a headless run cannot answer an ask — or
+// when it names it explicitly; default omits the flag, which asks and is
+// unverified headless, an agent's own choice to make, never brigada's
+// default. A value naming neither mode is refused, named, never silently
+// dropped — the deprecated tools=/worker_tools alias can still reach this
+// harness (the project's worker_tools key is not gated to claude), and a
+// Claude-spelled tool scope is a mode qwen has none of either.
+func qwenApprovalArgs(permission string) ([]string, error) {
+	mode := permission
+	if mode == "" {
+		mode = "bypassPermissions"
+	}
+	switch mode {
+	case "bypassPermissions":
+		return []string{autoApproveFlag}, nil
+	case "default":
+		return nil, nil
+	default:
+		return nil, fmt.Errorf("qwen-code: permission %q names no mode qwen takes; want one of %s", permission, strings.Join(qwenPermissionModes, ", "))
+	}
+}
+
 // settingSourcesFlag and settingSourcesValue keep a headless run from
 // loading the repository's own .qwen/settings.json: only the user's
 // settings, where the login lives, are read (as claude's --setting-sources
@@ -80,17 +111,20 @@ func (a *Adapter) ProbeCommand(ctx context.Context) *exec.Cmd {
 //
 // A job that carries an MCP config is a foreman turn (§12.2): the bridge
 // rides --mcp-config, and --strict-mcp-config keeps every other server
-// out, as claude's headless turn does. The turn keeps auto-approve: qwen
-// offers no read-only scope brigada maps the foreman's onto, so the
-// foreman's confinement (§4) is not enforced by the harness.
+// out, as claude's headless turn does. The turn keeps auto-approve
+// unconditionally, never reading permission=: qwen offers no read-only
+// scope brigada maps the foreman's onto (§4.1 gap), so varying the one
+// lever it has by the agent's own choice could leave a headless turn
+// asking a question nobody answers.
 //
-// job.ReadDirs and job.Tools are ignored for now: reading extra
-// directories and mapping a tool scope onto qwen's permission rules are
-// follow-ups.
+// A worker or a review job alike (§5.2: a review has no read-only
+// default of brigada's) takes the agent's permission= instead, resolved
+// by qwenApprovalArgs onto that same lever — the CLI's only one, so its
+// vocabulary is two names, not a scope of its own.
+//
+// job.ReadDirs is ignored for now: reading extra directories is a
+// follow-up.
 func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*exec.Cmd, error) {
-	if job.Review {
-		return nil, errors.New("qwen-code: no read-only review policy yet; review jobs cannot run on it")
-	}
 	if err := adapter.ValidateEffort("qwen-code", job.Effort); err != nil {
 		return nil, fmt.Errorf("qwen-code: %w", err)
 	}
@@ -98,7 +132,16 @@ func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*ex
 	if job.Model != "" && job.Model != DefaultModel {
 		args = append(args, "-m", job.Model)
 	}
-	args = append(args, autoApproveFlag, settingSourcesFlag, settingSourcesValue)
+	approval := []string{autoApproveFlag}
+	if job.MCPConfig == "" {
+		var err error
+		approval, err = qwenApprovalArgs(job.Permission)
+		if err != nil {
+			return nil, err
+		}
+	}
+	args = append(args, approval...)
+	args = append(args, settingSourcesFlag, settingSourcesValue)
 	if job.MCPConfig != "" {
 		args = append(args, "--mcp-config", job.MCPConfig, "--strict-mcp-config")
 	}

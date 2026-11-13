@@ -47,25 +47,22 @@ func TestCommand(t *testing.T) {
 		wantArg []string // the arguments after the executable
 	}{
 		{
-			name:    "review uses the runner agent",
-			ad:      Adapter{ReadOnlyAgentFile: "/runner/kimi-readonly.md"},
-			job:     adapter.Job{Prompt: prompt, Review: true},
-			wantExe: "kimi",
-			wantArg: []string{"-p", prompt, "--output-format", "stream-json", "--agent-file", "/runner/kimi-readonly.md"},
-		},
-		{
-			name:    "work keeps the normal agent",
-			ad:      Adapter{ReadOnlyAgentFile: "/runner/kimi-readonly.md"},
-			job:     adapter.Job{Prompt: prompt},
-			wantExe: "kimi",
-			wantArg: []string{"-p", prompt, "--output-format", "stream-json"},
-		},
-		{
-			name:    "read-only agent wins for review",
+			// ReadOnlyAgentFile no longer picks a different agent for a
+			// review: kimi has no permission mechanism to vary by job.Review
+			// or permission=, so a review keeps whatever AgentFile names,
+			// exactly as a work job does (§5.2; task 773's note).
+			name:    "review keeps the configured agent, not the runner's read-only one",
 			ad:      Adapter{AgentFile: "custom.md", ReadOnlyAgentFile: "/runner/kimi-readonly.md"},
 			job:     adapter.Job{Prompt: prompt, Review: true},
 			wantExe: "kimi",
-			wantArg: []string{"-p", prompt, "--output-format", "stream-json", "--agent-file", "/runner/kimi-readonly.md"},
+			wantArg: []string{"-p", prompt, "--output-format", "stream-json", "--agent-file", "custom.md"},
+		},
+		{
+			name:    "review with no agent file carries none either",
+			ad:      Adapter{ReadOnlyAgentFile: "/runner/kimi-readonly.md"},
+			job:     adapter.Job{Prompt: prompt, Review: true},
+			wantExe: "kimi",
+			wantArg: []string{"-p", prompt, "--output-format", "stream-json"},
 		},
 		{
 			name:    "review resume keeps its bound agent",
@@ -141,6 +138,32 @@ func TestCommandMCPConfigRefused(t *testing.T) {
 		if _, err := (&Adapter{}).Command(job, t.TempDir(), resume); err == nil {
 			t.Errorf("resume %q: a job with an MCP config built a command", resume)
 		}
+	}
+}
+
+// TestCommandPermissionRefused: kimi has no permission mechanism of its
+// own (package doc), so any non-empty permission= is refused, named,
+// never silently accepted and ignored — a worker, a review and the
+// deprecated tools=/worker_tools alias (which can still name a
+// Claude-spelled scope or "none" for this harness) alike. An empty
+// permission= — today's default — still builds, unaffected.
+func TestCommandPermissionRefused(t *testing.T) {
+	stubCLI(t)
+	for _, permission := range []string{"bypassPermissions", "none", "Bash(go test:*)+Bash(go vet:*)"} {
+		t.Run(permission, func(t *testing.T) {
+			for _, review := range []bool{false, true} {
+				_, err := (&Adapter{}).Command(adapter.Job{Prompt: "p", Permission: permission, Review: review}, t.TempDir(), "")
+				if err == nil {
+					t.Fatalf("review=%v: Command accepted permission %q", review, permission)
+				}
+				if !strings.Contains(err.Error(), permission) || !strings.HasPrefix(err.Error(), "kimi: ") {
+					t.Errorf("review=%v: err = %q, want it to name %q", review, err, permission)
+				}
+			}
+		})
+	}
+	if _, err := (&Adapter{}).Command(adapter.Job{Prompt: "p"}, t.TempDir(), ""); err != nil {
+		t.Errorf("an empty permission= was refused: %v", err)
 	}
 }
 

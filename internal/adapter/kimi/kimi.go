@@ -2,7 +2,12 @@
 // per job, `kimi -p` with stream-json output, resumed by session id
 // when the job carries one. The CLI's own login state — its tokens, its
 // configuration — is the ambient environment's business; brigada adds
-// nothing of its own to it and takes the runner's share back out.
+// nothing of its own to it and takes the runner's share back out. The
+// CLI has no permission mechanism of its own at all: -p runs
+// non-interactively with every call approved, with no flag or mode to
+// name a narrower one, so permission= (§5.2) has nothing to pass
+// through to — a non-empty value is refused, named, rather than silently
+// accepted and ignored.
 package kimi
 
 import (
@@ -36,8 +41,12 @@ type Adapter struct {
 	// so the field is read only when the run is fresh.
 	AgentFile string
 
-	// ReadOnlyAgentFile is the runner-owned definition used for review jobs,
-	// whether or not AgentFile is set. Work and fix jobs keep the CLI's normal agent.
+	// ReadOnlyAgentFile named the runner-owned read-only definition a
+	// review job used to force regardless of AgentFile. Command no longer
+	// branches on job.Review to pick it (§5.2: a review takes the same
+	// permission= pass-through as a worker, which here is none at all);
+	// the field stays so the runner's wiring that still sets it keeps
+	// compiling, but nothing in this package reads it any more.
 	ReadOnlyAgentFile string
 
 	// ExtraArgs are further flags the agent's configuration passes
@@ -93,6 +102,11 @@ func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*ex
 	if err := adapter.ValidateEffort("kimi", job.Effort); err != nil {
 		return nil, fmt.Errorf("kimi: %w", err)
 	}
+	if job.Permission != "" {
+		// The CLI has no permission mechanism to honour this with (package
+		// doc): refuse rather than silently run unrestricted.
+		return nil, fmt.Errorf("kimi: the CLI has no permission mechanism of its own; permission %q names a mode it cannot honour", job.Permission)
+	}
 	binary := a.Binary
 	if binary == "" {
 		binary = "kimi"
@@ -105,10 +119,6 @@ func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*ex
 		args = append(args, "-m", job.Model)
 	}
 	agentFile := a.AgentFile
-	if job.Review && a.ReadOnlyAgentFile != "" {
-		// A reviewer is read-only whatever agent the configuration names.
-		agentFile = a.ReadOnlyAgentFile
-	}
 	if resumeSessionID != "" {
 		args = append(args, "--session", resumeSessionID)
 	} else if agentFile != "" {

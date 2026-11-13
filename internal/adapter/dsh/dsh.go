@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/Blackfire-AI/brigada/internal/adapter"
@@ -50,16 +51,20 @@ func (a *Adapter) ProbeCommand(ctx context.Context) *exec.Cmd {
 //
 //   - DSH_TELEMETRY_MODE=DISABLED: the headless profile otherwise sends
 //     session telemetry to DeepSeek.
-//   - DSH_PERMISSION_MODE=read-only for a review job, workspace-write for
-//     work and fix jobs. Read-only denies writes (bash writes included) at
-//     the OS level and refuses escalation headless; workspace-write allows
-//     the working directory and the temp directory and denies elsewhere.
-//     danger-full-access is never set.
-//   - For work and fix jobs, GOCACHE in a brigada directory under the temp
-//     directory, shared across jobs, because the sandbox denies new entries
-//     in the user's go-build cache; and GIT_OPTIONAL_LOCKS=0, so git status
-//     and diff take no index.lock, which the sandbox denies in the runner
-//     mirror's gitdir.
+//   - DSH_PERMISSION_MODE, dsh's own permission mechanism: the agent's
+//     permission= (§5.2), the same for a work, fix or review job —
+//     workspace-write when the agent names none. Read-only denies writes
+//     (bash writes included) at the OS level and refuses escalation
+//     headless; workspace-write allows the working directory and the temp
+//     directory and denies elsewhere; danger-full-access is a mode this
+//     CLI takes but brigada never defaults to. A value naming none of the
+//     three is refused, named, never silently dropped.
+//   - Unless the mode is read-only (writes there are denied anyway),
+//     GOCACHE in a brigada directory under the temp directory, shared
+//     across jobs, because the sandbox denies new entries in the user's
+//     go-build cache; and GIT_OPTIONAL_LOCKS=0, so git status and diff
+//     take no index.lock, which the sandbox denies in the runner mirror's
+//     gitdir.
 //
 // The model and the reasoning effort ride a per-job patch file in a fresh
 // temporary directory outside the worktree. The Adapter interface has no
@@ -71,6 +76,10 @@ func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*ex
 	}
 	if err := adapter.ValidateEffort("dsh", job.Effort); err != nil {
 		return nil, fmt.Errorf("dsh: %w", err)
+	}
+	mode, err := workerPermissionMode(job.Permission)
+	if err != nil {
+		return nil, err
 	}
 	binary := a.Binary
 	if binary == "" {
@@ -91,8 +100,32 @@ func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*ex
 	}
 	cmd.Dir = workdir
 	cmd.Stdin = strings.NewReader(job.Prompt)
-	cmd.Env = workerEnv(os.Environ(), job.Review)
+	cmd.Env = workerEnv(os.Environ(), mode)
 	return cmd, nil
+}
+
+// dshPermissionModes are the values DSH_PERMISSION_MODE takes; brigada
+// never sets danger-full-access itself, but a worker's permission= may
+// name it.
+var dshPermissionModes = []string{"read-only", "workspace-write", "danger-full-access"}
+
+// workerPermissionMode resolves the agent's permission= onto
+// DSH_PERMISSION_MODE, the same for a worker and a review (§5.2):
+// workspace-write when the agent names none. permission=, through the
+// deprecated tools= or worker_tools alias, never reaches a non-claude
+// harness's --agent flag — cmdrunner refuses tools= outside claude — but
+// the project's worker_tools key is not gated that way, and a value
+// naming no mode this CLI takes is refused here too, with the reason
+// named, rather than silently dropped or passed to a CLI that would
+// reject it unexplained.
+func workerPermissionMode(permission string) (string, error) {
+	if permission == "" {
+		return "workspace-write", nil
+	}
+	if !slices.Contains(dshPermissionModes, permission) {
+		return "", fmt.Errorf("dsh: permission %q names no mode dsh takes; want one of %s", permission, strings.Join(dshPermissionModes, ", "))
+	}
+	return permission, nil
 }
 
 // writePatch writes the per-job patch file and returns its path. An empty
@@ -130,24 +163,22 @@ func writePatch(model, effort string) (string, error) {
 
 // workerEnv keeps the CLI's ambient login state, DEEPSEEK_API_KEY among it,
 // but never the runner's secrets (§5.1), and pins the two DSH_ variables
-// the policy sets, replacing any ambient value.
-func workerEnv(env []string, review bool) []string {
-	mode := "workspace-write"
-	if review {
-		mode = "read-only"
-	}
+// the resolved permission mode sets, replacing any ambient value. The
+// GOCACHE/GIT_OPTIONAL_LOCKS pair is set for every mode but read-only,
+// whose sandbox denies the writes they are for either way.
+func workerEnv(env []string, mode string) []string {
 	out := make([]string, 0, len(env)+4)
 	for _, kv := range env {
 		if strings.HasPrefix(kv, "BRIGADA_") || strings.HasPrefix(kv, "DSH_TELEMETRY_MODE=") || strings.HasPrefix(kv, "DSH_PERMISSION_MODE=") {
 			continue
 		}
-		if !review && (strings.HasPrefix(kv, "GOCACHE=") || strings.HasPrefix(kv, "GIT_OPTIONAL_LOCKS=")) {
+		if mode != "read-only" && (strings.HasPrefix(kv, "GOCACHE=") || strings.HasPrefix(kv, "GIT_OPTIONAL_LOCKS=")) {
 			continue
 		}
 		out = append(out, kv)
 	}
 	out = append(out, "DSH_TELEMETRY_MODE=DISABLED", "DSH_PERMISSION_MODE="+mode)
-	if !review {
+	if mode != "read-only" {
 		out = append(out, "GOCACHE="+filepath.Join(os.TempDir(), "brigada-gocache"), "GIT_OPTIONAL_LOCKS=0")
 	}
 	return out

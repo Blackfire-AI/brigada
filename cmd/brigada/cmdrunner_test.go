@@ -61,6 +61,11 @@ func TestRunnerKimiReviewAgentFile(t *testing.T) {
 					t.Fatalf("review agent permissions: %v, %v", info, err)
 				}
 			}
+			// The runner still writes the read-only agent file above (an
+			// idle leftover: nothing reads ReadOnlyAgentFile any more), but
+			// Command no longer picks it for a review — a review takes the
+			// configured agent exactly as a work job does (§5.2; task 773's
+			// note).
 			ad := ads[0].(*kimi.Adapter)
 			ad.Binary = "/unused/kimi"
 			for _, review := range []bool{false, true} {
@@ -70,15 +75,12 @@ func TestRunnerKimiReviewAgentFile(t *testing.T) {
 				}
 				i := slices.Index(cmd.Args, "--agent-file")
 				want := spec.agentFile
-				if review {
-					want = file
-				}
 				if want == "" {
 					if i >= 0 {
-						t.Fatalf("work got a review agent: %v", cmd.Args)
+						t.Fatalf("review=%v: no agent file configured but one was passed: %v", review, cmd.Args)
 					}
 				} else if i < 0 || i+1 >= len(cmd.Args) || cmd.Args[i+1] != want {
-					t.Fatalf("args = %v, want agent file %q", cmd.Args, want)
+					t.Fatalf("review=%v: args = %v, want agent file %q", review, cmd.Args, want)
 				}
 			}
 		})
