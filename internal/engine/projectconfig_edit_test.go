@@ -130,3 +130,17 @@ func TestProjectConfigRoleKey(t *testing.T) {
 		t.Errorf("unknown role: err = %v, want a refusal", err)
 	}
 }
+
+// TestProjectConfigDefaultsKeepsWorkerTools: init passes no tools, so a
+// worker_tools the file has stays as it is and none is added to a file
+// without one.
+func TestProjectConfigDefaultsKeepsWorkerTools(t *testing.T) {
+	fresh, err := ProjectConfigDefaults(nil, "github.com/o/r", "make check", "")
+	if err != nil || strings.Contains(string(fresh), "worker_tools") {
+		t.Fatalf("fresh file: %s, %v", fresh, err)
+	}
+	kept, err := ProjectConfigDefaults(append(fresh, []byte("worker_tools: Bash(make:*)\n")...), "github.com/o/r", "make ci", "")
+	if err != nil || !strings.Contains(string(kept), "worker_tools: Bash(make:*)") || !strings.Contains(string(kept), "make ci") {
+		t.Fatalf("existing file: %s, %v", kept, err)
+	}
+}
