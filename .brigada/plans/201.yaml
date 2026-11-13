@@ -226,7 +226,7 @@ tasks:
     continue: "adapter-codex-opencode"
     effort: medium
     skills: ["surface-parity"]
-    state: running
+    state: reviewing
     branch: "brigada/task-777-r1"
     rounds: 2
   - id: 778
