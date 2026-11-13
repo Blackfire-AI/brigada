@@ -976,7 +976,7 @@ func TestInitWorkerPermissions(t *testing.T) {
 				"    codex     edit files and run commands inside codex's sandbox\n" +
 				"    kimi      edit files and run any command without asking\n" +
 				"    opencode  edit files and run commands under OpenCode's rules for the\n" +
-					"              agent's permission=\n"
+				"              agent's permission=\n"
 			if !strings.Contains(out, want) {
 				t.Errorf("permissions table missing:\n%s", out)
 			}
