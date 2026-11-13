@@ -327,7 +327,7 @@ The usual way in is through your own coding agent, the operator. `brigada init` 
 - **follows a landing**: merges the staging pull request with a merge commit once CI is green (when `land_target` is the default branch and `after_land` is none, there is no pull request to merge), and restarts the engine and runner after a brigada upgrade, or when their own code landed in the repository, once nothing pending needs the old behaviour;
 - **recovers** after an outage by asking again: an ask re-wakes the foreman, even when its wake budget for the day is spent.
 
-The operator has no approval authority. Plan approval, land approval, push approval, `--and-stop-asking`, tags and releases, and rule changes stay yours; the operator tells you what waits. `brigada attach` below is the other way in: your own conversation with the foreman.
+Approvals stay yours, and the operator does not approve on its own initiative. Plan approval, land approval, push approval, `--and-stop-asking`, tags and releases, and rule changes are your decisions; the operator tells you what waits. `brigada attach` below is the other way in: your own conversation with the foreman.
 
 ### What the foreman can and cannot do
 
@@ -365,7 +365,7 @@ or the same entry by hand in `~/.claude.json` under `mcpServers` (the `brigada` 
 }
 ```
 
-It bears the state directory's client token, so it reaches every project of that engine, and it carries no foreman credential: it cannot plan or edit, only ask, read and request your plan decisions, which you sign yourself. Its `ask_foreman` tool takes a `repo_url` (as `list_projects` shows it) and the `text`. Two replies to a parked task work through it as plain messages: `answer task N: <answer>` and `restart task N with this note: <note>`. The foreman receives your words as they are and acts on them with its own tools; the reply of `ask_foreman` is one line only: the foreman was woken (`waking up`), the message is queued for the next turn because one is running, or it waits, and why (an attached chat, no foreman, the foreman limited). The daily wake budget bounds the foreman's own headless wakes; it does not block a message you send, so a wake that carries your message goes ahead even when the budget is spent. It does not carry the foreman's report. Read that with `status` and `history` after the foreman's turn, which is when the answer or restart shows up in the timeline.
+It bears the state directory's client token, so it reaches every project of that engine, and it carries no foreman credential: it cannot plan or edit, only ask, read and relay your plan decisions, which are yours. Its `ask_foreman` tool takes a `repo_url` (as `list_projects` shows it) and the `text`. Two replies to a parked task work through it as plain messages: `answer task N: <answer>` and `restart task N with this note: <note>`. The foreman receives your words as they are and acts on them with its own tools; the reply of `ask_foreman` is one line only: the foreman was woken (`waking up`), the message is queued for the next turn because one is running, or it waits, and why (an attached chat, no foreman, the foreman limited). The daily wake budget bounds the foreman's own headless wakes; it does not block a message you send, so a wake that carries your message goes ahead even when the budget is spent. It does not carry the foreman's report. Read that with `status` and `history` after the foreman's turn, which is when the answer or restart shows up in the timeline.
 
 With `-` as the only argument, ask reads the message from standard input:
 
@@ -1514,10 +1514,6 @@ A command's flags go after its name and before its positional arguments (`diff`,
 - `brigada land <task-id>... [--onto BRANCH] [--repo URL] [--landed ID]... [--no-check]`: the hand-driven squash of approved tasks onto the checked-out branch, one commit each, in dependency order; rerun the default check; print the push command and stop. See [section 5](#5-finishing-the-land-job).
 - `brigada land approve [--and-stop-asking] <task>`, `brigada land reject <task>`: your decision on a landing held at the land gate; approve queues its land job, reject cancels the landing and leaves the branch; `--and-stop-asking` also changes the rule that held it. See [section 5](#gates-and-holds).
 - `brigada push approve [--repo URL]`: release the push gate; every waiting landing of the project gets its push queued. See [section 5](#gates-and-holds).
-
-### Approving
-
-- `brigada approver add --label L --public-key FILE`, `brigada approver list`, `brigada approver remove --label L`: enroll, list and remove public keys in `approval_keys` in the state directory, mode 0600. No approval command checks them: approving is your decision by convention, and the settings `gate_plan`, `gate_land`, `gate_push` and `approval_tiers` decide what waits.
 
 ### Deciding
 

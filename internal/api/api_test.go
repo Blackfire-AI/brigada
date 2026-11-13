@@ -81,7 +81,6 @@ type env struct {
 	client *http.Client
 
 	secrets map[string]string // token name -> secret
-	keys    string            // the enrolled approval keys' file (§12.2)
 
 	project1, project2, plan, task int64
 }
@@ -139,8 +138,7 @@ func newEnvTokens(t *testing.T, tokens string) *env {
 	if err := os.WriteFile(tokenFile, []byte(tokens), 0o600); err != nil {
 		t.Fatalf("write token file: %v", err)
 	}
-	e.keys = filepath.Join(tmp, "approval_keys")
-	e.eng = engine.New(st, engine.Config{Now: e.clock.Now, PlanReview: &planReviewOff, IssueFetch: issueFetchStub, ApprovalKeys: e.keys})
+	e.eng = engine.New(st, engine.Config{Now: e.clock.Now, PlanReview: &planReviewOff, IssueFetch: issueFetchStub})
 	api, err := New(ctx, st, e.eng, nil, tokenFile)
 	if err != nil {
 		t.Fatalf("build api server: %v", err)
