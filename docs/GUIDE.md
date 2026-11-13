@@ -1100,6 +1100,8 @@ What a worker or reviewer may do is set by its harness's own permission mode, wh
 | dsh | `DSH_PERMISSION_MODE`, the OS-level mode the permission names, `workspace-write` by default | not available |
 | qwen-code | headless `qwen -p` with its auto-approve flag, or the `--approval-mode` the permission names | brigada's MCP tools through `--mcp-config` with `--strict-mcp-config`, but no read-only scope: a headless turn keeps the auto-approve flag, so it can edit files and run any command in the reading checkout, and its reads are not confined to it; an attach runs without that flag, under the CLI's own approval prompts |
 
+For real confinement, choose a harness that sandboxes (codex `workspace-write`, dsh `workspace-write`) or a narrower `permission=` for claude, for example `acceptEdits`. Claude's `bypassPermissions`, opencode `allow`, kimi and qwen-code run with an unconfined shell, so the approval signature does not hold against them ([approving by signature](#approving-by-signature)).
+
 Every harness runs in a git worktree on your machine. Workers inherit your environment minus the credential scrub ([design §5.8](design/05-workers.md#the-credential-scrub)), so none of these scopes keeps a check command, a test run or a kimi worker away from your remaining credentials or the network.
 
 ### Accounts
