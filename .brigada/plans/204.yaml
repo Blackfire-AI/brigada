@@ -5,9 +5,9 @@
 plan: 204
 title: "#230: qwen-code out of credits cools the account instead of breaking the agent"
 repo: "github.com/Blackfire-AI/brigada"
-state: reviewing
+state: active
 created: 2026-11-13T07:02:24.051482Z
-updated: 2026-11-13T07:02:24.051482Z
+updated: 2026-11-13T07:06:25.088799Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -29,6 +29,6 @@ tasks:
     base: ""
     effort: medium
     skills: ["bugfix"]
-    state: pending
+    state: running
     branch: ""
     rounds: 0
