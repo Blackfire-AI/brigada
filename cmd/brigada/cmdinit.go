@@ -857,7 +857,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	if *check == "none" || *check == "-" {
 		*check = ""
 	}
-	if !checkProvided || !toolsProvided {
+	if !checkProvided {
 		candidates, err := checkCandidates(root)
 		if err != nil {
 			return fail(stderr, err)
@@ -877,11 +877,11 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 				*check = entries[initCheckDefault(entries)].Command
 			}
 		}
-		if !toolsProvided {
-			*tools = initCheckTools(*check, entries, candidates)
-		}
 	}
 
+	// No tool scope is suggested from the check: an agent without a scope of
+	// its own takes the permission default of its harness (§5.2), and a
+	// worker_tools already in the file stays as it is.
 	proposed, err := engine.ProjectConfigDefaults(old, canon, *check, *tools)
 	if err != nil {
 		return fail(stderr, err)
@@ -895,13 +895,23 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	if err != nil {
 		return fail(stderr, err)
 	}
-	parsedTools, err := lifecycle.ParseTools(*tools)
-	if err != nil {
-		return usagef(stderr, "--tools: %v", err)
+	var parsedTools []string
+	if toolsProvided {
+		if parsedTools, err = lifecycle.ParseTools(*tools); err != nil {
+			return usagef(stderr, "--tools: %v", err)
+		}
 	}
 	for i := range usable {
-		if usable[i].harness == "claude" && usable[i].tools == nil && (toolsProvided || rt.file.Tools["claude/"+usable[i].model] == nil) {
-			usable[i].tools = parsedTools
+		u := &usable[i]
+		if u.harness != "claude" || u.tools != nil || u.permission != "" {
+			continue
+		}
+		switch {
+		case toolsProvided:
+			// --tools is the deprecated spelling of permission=.
+			u.tools = parsedTools
+		case rt.file.AgentPermission("claude", u.model) == "":
+			u.permission = adapter.DefaultPermission("claude")
 		}
 	}
 	_, adverts, err := resolveRunnerAgents(rt, usable, "")
@@ -970,9 +980,15 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		var permissions string
 		switch a.Harness {
 		case "claude":
-			permissions = "edit files; no commands"
-			if a.Tools != "none" {
-				permissions = "edit files; run only: " + initToolCommands(a.Tools)
+			// A deprecated tools= scope (none, or Bash(...) patterns) reads
+			// as before; anything else is a permission mode.
+			switch {
+			case a.Permission == "none":
+				permissions = "edit files; no commands"
+			case strings.Contains(a.Permission, "("):
+				permissions = "edit files; run only: " + initToolCommands(a.Permission)
+			default:
+				permissions = "edit files and run commands under permission " + a.Permission
 			}
 		case "codex":
 			permissions = "edit files and run commands inside codex's sandbox"

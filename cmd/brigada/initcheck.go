@@ -6,7 +6,6 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/Blackfire-AI/brigada/internal/lifecycle"
 	"github.com/Blackfire-AI/brigada/internal/term"
 )
 
@@ -41,41 +40,6 @@ func initCheckDefault(entries []checkCandidate) int {
 		}
 	}
 	return 0
-}
-
-// initCheckTools is the worker tool scope that lets command run: the one a
-// choice carries (the candidate's when the entry has none), else a scope
-// for the command itself. No check grants only file tools, plus the Go
-// defaults in a Go repository. An unrepresentable scope grants file tools only.
-func initCheckTools(command string, entries, candidates []checkCandidate) string {
-	if command == "" {
-		for _, c := range candidates {
-			if c.Command == "go test ./..." {
-				return c.Tools
-			}
-		}
-		return "none"
-	}
-	for _, e := range entries {
-		if e.Command != command {
-			continue
-		}
-		if e.Tools != "" {
-			return e.Tools
-		}
-		break
-	}
-	for _, c := range candidates {
-		if c.Command == command {
-			return c.Tools
-		}
-	}
-	// "+" joins scopes and parentheses end the pattern: no scope for those.
-	pattern := "Bash(" + command + ":*)"
-	if _, err := lifecycle.ParseTools(pattern); err != nil || strings.ContainsAny(command, "+()") {
-		return "none"
-	}
-	return pattern
 }
 
 // askInitCheck prints Step 4's suggestions and asks for the command itself.

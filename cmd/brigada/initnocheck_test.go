@@ -67,10 +67,9 @@ func TestInitNoCheckChoices(t *testing.T) {
 			if code != wantCode || errs != "" || !strings.Contains(out, "  Check: none (work goes straight to review)\n") {
 				t.Fatalf("init = %d\n%s\n%s", code, out, errs)
 			}
-			permissions := "edit files; no commands"
-			if tc.goRepo {
-				permissions = "edit files; run only: go build, go test, go vet, gofmt"
-			}
+			// No check or any: the permission default, whatever the repository
+			// or an existing worker_tools holds.
+			permissions := initDefaultPermissions
 			if !strings.Contains(out, "    claude    "+permissions+"\n") {
 				t.Fatalf("wrong no-check permissions:\n%s", out)
 			}
@@ -144,7 +143,7 @@ func TestInitNoCheckApply(t *testing.T) {
 			var check, tools string
 			_ = json.Unmarshal(value, &check)
 			_ = json.Unmarshal(cfg.Values[engine.SettingWorkerTools], &tools)
-			if check != step.check || hasCheck != (step.check != "") || tools != step.tools {
+			if check != step.check || hasCheck != (step.check != "") || tools != "" {
 				t.Fatalf("wrong project defaults: %s", content)
 			}
 			_, token, err := lifecycle.TokenForRole(lifecycle.PathsOf(state).Tokens, "client")
@@ -172,8 +171,8 @@ func TestInitNoCheckApply(t *testing.T) {
 				t.Error("default_check missing from settings")
 			}
 			rec, live, err := runnerstate.Running(filepath.Join(state, "runner"))
-			if err != nil || !live || len(rec.Agents) != 2 || rec.Agents[0].Tools != step.tools {
-				t.Fatalf("wrong worker tools: %+v live=%v err=%v", rec, live, err)
+			if err != nil || !live || len(rec.Agents) != 2 || rec.Agents[0].Permission != "bypassPermissions" {
+				t.Fatalf("wrong worker permission: %+v live=%v err=%v", rec, live, err)
 			}
 		})
 	}

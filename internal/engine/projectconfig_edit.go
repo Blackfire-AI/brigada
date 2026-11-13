@@ -10,7 +10,8 @@ import (
 // and spelling survive; the caller shows the resulting diff and asks before
 // writing. Empty input creates the minimal schema-1 file, with gate_push auto
 // spelled out; an empty check omits or removes default_check so the project
-// setting is unset.
+// setting is unset. An empty tools leaves worker_tools, the deprecated alias
+// of the per-agent permission=, as the file has it.
 func ProjectConfigDefaults(content []byte, repo, check, tools string) ([]byte, error) {
 	if len(content) == 0 {
 		content = []byte(fmt.Sprintf("schema: %d\nrepo: %s\n%s: %s\n", ProjectConfigSchema, yamlString(repo), SettingGatePush, GateAuto))
@@ -24,6 +25,11 @@ func ProjectConfigDefaults(content []byte, repo, check, tools string) ([]byte, e
 	}
 	lines := strings.Split(string(content), "\n")
 	for _, item := range []struct{ key, value string }{{SettingDefaultCheck, check}, {SettingWorkerTools, tools}} {
+		if item.key == SettingWorkerTools && item.value == "" {
+			// No scope proposed: an existing worker_tools stays, and none
+			// is added (the agent's permission default applies, §5.2).
+			continue
+		}
 		if err := ValidateSettingValue(item.key, item.value); err != nil {
 			return nil, err
 		}
