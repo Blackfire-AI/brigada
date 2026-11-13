@@ -397,9 +397,12 @@ func toolEnd(blocks []blockJSON) (adapter.Event, bool) {
 
 // resultEvent reads the final line. An error result is an error event
 // sorted by its text (unknown text stays ErrOther); a success result is
-// the session event with the final text in tow. An out-of-credits result
-// has no result field: its errors[] and error_code carry the failure, so
-// they are read before the result and subtype fallbacks.
+// the session event with the final text in tow. A quota result has no
+// result field: its errors[] and error_code carry the failure, so they are
+// read before the result and subtype fallbacks. An HTTP 402 billing_error
+// carrying a future quota.reset_at is the subscription's weekly window and
+// sorts as a limit until that reset; a 402 with no usable reset_at stays a
+// spent balance.
 func resultEvent(lj lineJSON) (adapter.Event, bool) {
 	if lj.IsError || strings.HasPrefix(lj.Subtype, "error") {
 		text := lj.Result
@@ -418,7 +421,15 @@ func resultEvent(lj lineJSON) (adapter.Event, bool) {
 			ev = adapter.Event{Kind: adapter.EvError, ErrorKind: adapter.ErrOther}
 		}
 		ev.Text = text
-		if ev.ErrorKind == adapter.ErrBalance || ev.ErrorKind == adapter.ErrLimit {
+		switch ev.ErrorKind {
+		case adapter.ErrBalance:
+			if until := resetAt(lj.Errors); until != "" {
+				if t, err := time.Parse(time.RFC3339, until); err == nil && t.After(now()) {
+					ev.ErrorKind = adapter.ErrLimit
+					ev.LimitUntil = until
+				}
+			}
+		case adapter.ErrLimit:
 			ev.LimitUntil = resetAt(lj.Errors)
 		}
 		return ev, true
@@ -431,6 +442,9 @@ func resultEvent(lj lineJSON) (adapter.Event, bool) {
 	}
 	return adapter.Event{}, false
 }
+
+// now is the clock resultEvent compares a reset time against; tests pin it.
+var now = time.Now
 
 // resetAt reads quota.reset_at (unix seconds) from the JSON object that
 // follows the status prefix in an errors[] string ("HTTP 402: {...}") and
@@ -467,18 +481,22 @@ type errorPhrase struct {
 
 // errorPhrases is conservative on purpose: stderr also carries chatter
 // ("rate limited, retrying"), so only whole failure phrases are here.
-// The out-of-credits result line (errors[] with HTTP 402 billing_error,
-// error_code insufficient_quota) is verified against a real transcript by
-// the failure-balance fixture; the other phrases are still UNVERIFIED
-// against the real CLI, a best understanding and not seen output.
+// The HTTP 402 billing_error result line (errors[] with error_code
+// insufficient_quota) is verified against a real failure by the
+// failure-weekly-limit fixture: with quota.reset_at it is the subscription's
+// weekly window (the qwen UI showed "week limit reached" with the same reset
+// time), so resultEvent sorts it as a limit until that reset. The other
+// phrases are still UNVERIFIED against the real CLI, a best understanding
+// and not seen output.
 var errorPhrases = []errorPhrase{
 	// The session --resume named is gone (§5.6): a fresh run, not another resume.
 	{adapter.ErrResumeFailed, "session not found"},
 	{adapter.ErrResumeFailed, "no session found"},
 	{adapter.ErrResumeFailed, "no conversation found"},
 	{adapter.ErrResumeFailed, "conversation not found"},
-	// A spent balance (§8): ahead of the quota rows, since the
-	// out-of-credits text also says insufficient_quota and first match wins.
+	// A 402 sorts as a spent balance (§8) here, ahead of the quota rows
+	// since its text also says insufficient_quota and first match wins;
+	// resultEvent turns one with a usable quota.reset_at into a limit.
 	{adapter.ErrBalance, "http 402"},
 	{adapter.ErrBalance, "billing_error"},
 	{adapter.ErrBalance, "insufficient credits"},
