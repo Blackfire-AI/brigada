@@ -88,13 +88,15 @@ The MCP server is a `brigada mcp` stdio process started by the foreman's harness
 
 An approval is a signature over a one-time challenge for one named act. The engine issues a challenge that names the act (approving or rejecting a plan at its version, a landing, a push) and expires; the user signs it with a private key, and the engine verifies the signature against a public key it stores. The engine stores public keys only: the private key is the user's, held outside the state directory and never in it, so reading the state directory yields nothing that signs. A signature covers its one challenge, so it cannot be replayed for another act, another plan version or a later moment.
 
-Signing must need something only a human holds:
+The signature is a check on the user's own acts through the API. It is not a security boundary against a process running as the same OS user with a shell: such a process can change brigada's state directory, settings and binary as the user can. The signature raises the bar only together with an OS boundary around the agents, such as a harness sandbox, a separate OS user or a container, and brigada does not provide that boundary today.
+
+Within such a boundary, signing should need something only a human holds:
 
 - a hardware token that asks for a touch,
 - an agent key constrained to ask for a touch on each use, or
 - a key kept off the machine.
 
-The residual risk is plain: a private key that is an ordinary file the same OS user can read lets an agent with a shell sign. Such a key defends nothing against a worker or foreman whose harness grants a shell; only a key that needs a human at signing time does.
+The residual risk is plain: without an OS boundary, a worker or foreman whose harness grants a shell runs as the user, and a private key that is an ordinary file the user can read does not stop it. Such a key is part of raising the bar together with that boundary, not a defense on its own.
 
 The engine keeps each challenge as a pending request (the `approval_requests` table, §11). Asking for a gated act — the user's yes or no on a plan at its version, the yes or no on a landing, the yes on a push — creates the request, or finds the one already waiting for that act, and answers its challenge; the act runs only when a signature for that request's challenge verifies, and the request is then spent, across an engine restart too. The gate settings (`gate_plan`, `gate_land`, `gate_push`, `approval_tiers`) still decide what waits; the signature releases what they hold. A request that waits is an entry of the needs-you queue and a notification, in the same words everywhere: `signature wanted out of band to approve plan #7 at version 2 (request #5, challenge <nonce>, expires <time>)`. A refusal says which reason applies: no enrolled key, no signature, a wrong or reused signature, an expired challenge, or an act other than the one signed.
 
