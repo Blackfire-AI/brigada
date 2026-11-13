@@ -5,9 +5,9 @@
 plan: 201
 title: "#228 implementation: harness-owned permissions, runner-only push, approval authority"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: reviewing
 created: 2026-11-12T21:47:35.965112Z
-updated: 2026-11-12T23:57:58.499822Z
+updated: 2026-11-13T01:08:55.334119Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -228,4 +228,30 @@ tasks:
     skills: ["surface-parity"]
     state: running
     branch: "brigada/task-777"
+    rounds: 0
+  - id: 778
+    name: "leftovers-permission"
+    title: "Leftovers of the permission pass-through: the dead kimi read-only wiring, the retired qwen-code review reason, TERMS.md rule 2"
+    class: "implement"
+    deps: ["docs-followups"]
+    base: "docs-followups"
+    effort: medium
+    caps: {fix_rounds: 3, review_rounds: 2, restart: 2}
+    skills: ["refactor", "docs-change"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 779
+    name: "scope-display"
+    title: "The registered scope display: capacity and the runner's startup line say what the harness actually runs"
+    class: "implement"
+    deps: ["leftovers-permission"]
+    base: "leftovers-permission"
+    continue: "leftovers-permission"
+    effort: medium
+    review_tier: standard
+    caps: {fix_rounds: 3, review_rounds: 2, restart: 2}
+    skills: ["surface-parity"]
+    state: pending
+    branch: ""
     rounds: 0
