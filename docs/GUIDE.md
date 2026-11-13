@@ -815,11 +815,13 @@ The loop — plan, work, check, review, land, push — is brigada's; you stop it
 A held plan waits in `pending_approval`, and nothing is queued. The needs-you entry gives the reasons, for example `7 tasks, over the limit of 5`, `gate_plan is ask` or `check_command: check "make release" differs from default_check "go test ./..."`, with how to release or change it. An amendment of an already-active plan is judged by what it adds: each added task is checked on its own against the per-task rules — its class, the protected paths its spec or check mentions, its extra repositories, its check against `default_check` — and one that trips a rule is held alone, parked with a needs-you line naming the rule, while the plan stays active and the rest runs on. The task count and `gate_plan` never hold an amendment of a running plan, and cancelling, re-pointing or retiering never holds. A `respec` edit is judged on the text it adds and the task's check, with the same per-task hold. You decide:
 
 ```sh
-brigada plan approve 7    # queues the tasks; prints each task's job
-brigada plan reject 7     # cancels the plan's tasks
+brigada plan approve 7    # queues the tasks once signed; prints each task's job
+brigada plan reject 7     # cancels the plan's tasks once signed
 ```
 
 or through the coordinator's `plan_approve` and `plan_reject` ([section 3](#3-several-repositories)), which name the plan version you were shown.
+
+A bare call like these asks: it exits 1, approves nothing, and prints the challenge to sign — see [Approving by signature](#approving-by-signature) for the enroll-then-sign round trip and the `--request`/`--signature` flags both commands take.
 
 On a running plan, `brigada plan approve` releases the tasks a rule holds alone, from an amendment or from the plan budget: they queue as their dependencies allow, and `--and-stop-asking` changes only the rules those tasks tripped. The foreman cannot release them: its `task_restart` and `answer` refuse a held task. `brigada plan reject` works only on a plan that waits whole; to drop a held task, ask the foreman to cancel it.
 
@@ -1498,12 +1500,16 @@ A command's flags go after its name and before its positional arguments (`diff`,
 ### Finishing
 
 - `brigada land <task-id>... [--onto BRANCH] [--repo URL] [--landed ID]... [--no-check]`: the hand-driven squash of approved tasks onto the checked-out branch, one commit each, in dependency order; rerun the default check; print the push command and stop. See [section 5](#5-finishing-the-land-job).
-- `brigada land approve <task>`, `brigada land reject <task>`: your decision on a landing held at the land gate; approve queues its land job, reject cancels the landing and leaves the branch; `--and-stop-asking` also changes the rule that held it. See [section 5](#gates-and-holds).
-- `brigada push approve [--repo URL]`: release the push gate; every waiting landing of the project gets its push queued. See [section 5](#gates-and-holds).
+- `brigada land approve <task> [--request ID --signature FILE] [--and-stop-asking]`, `brigada land reject <task> [--request ID --signature FILE]`: your decision on a landing held at the land gate; approve queues its land job, reject cancels the landing and leaves the branch; `--and-stop-asking` also changes the rule that held it. With no `--request`/`--signature` it asks, printing the challenge to sign. See [section 5](#gates-and-holds) and [Approving by signature](#approving-by-signature).
+- `brigada push approve [--repo URL] [--request ID --signature FILE]`: release the push gate; every waiting landing of the project gets its push queued. With no `--request`/`--signature` it asks. See [section 5](#gates-and-holds) and [Approving by signature](#approving-by-signature).
+
+### Approving
+
+- `brigada approver add --label LABEL --public-key FILE`: enroll a public key (`-` reads it from standard input) under a label, to sign approvals with. `brigada approver list`: show the enrolled labels. `brigada approver remove --label LABEL`: drop one. The engine stores public keys only; nothing here ever reads a private key. See [Approving by signature](#approving-by-signature).
 
 ### Deciding
 
-- `brigada plan approve <id>`, `brigada plan reject <id>`: your answer on a plan held at the plan gate; `--and-stop-asking` also changes the rule that held it. See [section 7](#gates-and-rules).
+- `brigada plan approve <id> [--request ID --signature FILE] [--and-stop-asking]`, `brigada plan reject <id> [--request ID --signature FILE]`: your answer on a plan held at the plan gate; `--and-stop-asking` also changes the rule that held it. With no `--request`/`--signature` it asks, printing the challenge to sign. See [section 7](#gates-and-rules) and [Approving by signature](#approving-by-signature).
 - `brigada budget [--repo URL] [--wakes N]`: show the project's foreman wake budget, with today's use and the UTC reset time; `--wakes N` (1 to 1000) sets it. See [section 4](#the-wake-budget).
 - `brigada agent reset <harness>/<model>`: clear a broken or cooling agent. See [section 8](#broken-agents).
 - `brigada cancel <job-id>`: stop one live job. See [section 4](#cancelling-and-retiring).
