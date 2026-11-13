@@ -47,17 +47,15 @@ func TestCommand(t *testing.T) {
 		wantArg []string // the arguments after the executable
 	}{
 		{
-			// A review takes the configured agent like any job; the retired
-			// read-only agent file is no longer read.
-			name:    "review no longer swaps the agent",
-			ad:      Adapter{AgentFile: "custom.md", ReadOnlyAgentFile: "/runner/kimi-readonly.md"},
+			// A review takes the configured agent like any job.
+			name:    "review takes the configured agent",
+			ad:      Adapter{AgentFile: "custom.md"},
 			job:     adapter.Job{Prompt: prompt, Review: true},
 			wantExe: "kimi",
 			wantArg: []string{"-p", prompt, "--output-format", "stream-json", "--agent-file", "custom.md"},
 		},
 		{
 			name:    "work with no permission passes no mode flag",
-			ad:      Adapter{ReadOnlyAgentFile: "/runner/kimi-readonly.md"},
 			job:     adapter.Job{Prompt: prompt},
 			wantExe: "kimi",
 			wantArg: []string{"-p", prompt, "--output-format", "stream-json"},

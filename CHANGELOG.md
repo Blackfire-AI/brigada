@@ -12,6 +12,7 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The read-scope hook that confines a claude foreman's file reads to its reading checkout is a default the user can turn off per agent, with `read-scope=false` on the `--agent` or `read_scope.<harness>/<model> = false` in the config file (issue #228).
 - A worker can no longer push its own branch. A task worktree carries no push URL, so the runner is the only path to the remote and only its credentials reach it (issue #228).
 - Approving or rejecting a plan at its version, approving or rejecting a landing and approving a push need the user's signature beyond any token. A client or admin token alone no longer approves: the act refuses with the pending request, its challenge and the message to sign, and runs when `--request ID --signature FILE` carries a signature made with an enrolled key. The coordinator's `plan_approve` and `plan_reject` only request. A project import and a user message stay role-checked calls. The host that runs the API needs `ssh-keygen` on `PATH` (issue #228).
+- A review runs under the agent's `permission=` in every harness, with no read-only default of brigada's. A `qwen-code` agent takes the review class and defaults to `implement,review,answer` like any other, and a Kimi review no longer swaps in a read-only agent definition: the runner writes no `kimi-readonly.md` any more (issue #228).
 
 ### Added
 

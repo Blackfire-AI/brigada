@@ -8,7 +8,6 @@ package kimi
 import (
 	"bytes"
 	"context"
-	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -37,11 +36,6 @@ type Adapter struct {
 	// so the field is read only when the run is fresh.
 	AgentFile string
 
-	// ReadOnlyAgentFile is no longer read: a review job takes Job.Permission
-	// like any other. The field and its runner wiring stay, dead but
-	// compiling, until a follow-up removes them.
-	ReadOnlyAgentFile string
-
 	// ExtraArgs are further flags the agent's configuration passes
 	// through, appended verbatim after the adapter's own. Empty adds
 	// nothing.
@@ -55,13 +49,6 @@ var _ adapter.Adapter = (*Adapter)(nil)
 // the agent's configuration sets no --model, and the adapter's answer
 // to it is no -m flag at all.
 const DefaultModel = "default"
-
-// ReadOnlyAgentDefinition uses Kimi Code's Markdown agent format:
-// https://moonshotai.github.io/kimi-code/en/customization/agents
-// The frontmatter includes its required description and an exact tool allowlist.
-//
-//go:embed readonly.md
-var ReadOnlyAgentDefinition string
 
 // Name implements adapter.Adapter: the harness this adapter drives,
 // which the runner's advertisement pairs it with (§5.1).
@@ -132,8 +119,8 @@ func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*ex
 // that mode explicitly. kimi has no read-only or edits-only mode on its
 // command line, so a permission= that asks for one is refused with the value
 // named — never accepted and ignored. A reviewer therefore gets no
-// brigada-made read-only policy from this adapter: ReadOnlyAgentFile is no
-// longer read here. The deprecated tools= alias, a tool scope, is refused too.
+// brigada-made read-only policy from this adapter. The deprecated tools=
+// alias, a tool scope, is refused too.
 func permissionArgs(permission string) ([]string, error) {
 	switch permission {
 	case "":
