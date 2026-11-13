@@ -288,6 +288,6 @@ tasks:
     base: "docs-followups"
     effort: medium
     skills: ["bugfix", "docs-change"]
-    state: ready
+    state: running
     branch: ""
     rounds: 0
