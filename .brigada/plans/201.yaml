@@ -226,8 +226,8 @@ tasks:
     continue: "adapter-codex-opencode"
     effort: medium
     skills: ["surface-parity"]
-    state: running
-    branch: "brigada/task-777"
+    state: reviewing
+    branch: "brigada/task-777-r1"
     rounds: 0
   - id: 778
     name: "leftovers-permission"
