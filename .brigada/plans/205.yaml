@@ -55,6 +55,6 @@ tasks:
     continue: "drop-approval-engine-store"
     effort: low
     skills: ["schema-migration", "docs-change"]
-    state: ready
+    state: running
     branch: ""
     rounds: 0
