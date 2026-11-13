@@ -13,8 +13,8 @@
 //   - Verification needs an allowed_signers file. The package writes it as
 //     a temporary file of mode 0600 inside a private directory and removes
 //     it when the call returns.
-//   - A test that needs a real signature skips when the binary is absent,
-//     and says so.
+//   - A test that needs a real signature fails when the binary is absent,
+//     and says so; it never skips.
 //
 // The authority never prompts on /dev/tty and has no fallback to one: an
 // agent with a shell drives a terminal as the same user, so a terminal

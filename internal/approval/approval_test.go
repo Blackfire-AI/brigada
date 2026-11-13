@@ -31,7 +31,7 @@ func fakePublicKey(t *testing.T) string {
 func requireKeygen(t *testing.T) {
 	t.Helper()
 	if _, err := exec.LookPath("ssh-keygen"); err != nil {
-		t.Skip("ssh-keygen is not on PATH: a test that needs a real signature cannot run here")
+		t.Fatalf("ssh-keygen is required on the check host for the approval tests: %v", err)
 	}
 }
 
