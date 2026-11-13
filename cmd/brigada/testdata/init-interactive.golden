@@ -92,7 +92,7 @@ Step 2 of 4: workers
 
   qwen-code (experimental): signed in
     qwen-code runs with auto-approve: when it writes code it can run any
-    command on this machine without asking. It does not review.
+    command on this machine without asking. It does not review by default.
 
   -> change later: run brigada init again
      your own defaults: ~/.codex/config.toml, ~/.kimi-code/config.toml
@@ -157,7 +157,7 @@ Plan
     claude    edit files and run commands under permission bypassPermissions
     codex     edit files and run commands inside codex's sandbox
     opencode  edit files; run only the commands of the worker tools scope
-    qwen-code edit files and run any command without asking; no reviews
+    qwen-code edit files and run any command without asking; reviews opt-in
   Files in this repository (brigada never commits them):
     new        .brigada/project.yaml                      the settings above
     new        .brigada/operator.md                       tells your own coding

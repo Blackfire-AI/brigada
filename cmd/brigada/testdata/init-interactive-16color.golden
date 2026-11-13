@@ -91,7 +91,7 @@ dsh (experimental): init can't check sign-in.
 
   [1mqwen-code[0m  [90mexperimental · [0m[32m✓ signed in[0m
     [33m! qwen-code runs with auto-approve: when it writes code it can run any
-    command on this machine without asking. It does not review.[0m
+    command on this machine without asking. It does not review by default.[0m
 
   [90m↺ [0m[90mchange later: run brigada init again[0m
     [90myour own defaults: ~/.codex/config.toml, ~/.kimi-code/config.toml[0m
@@ -156,7 +156,7 @@ dsh (experimental): init can't check sign-in.
     claude    edit files and run commands under permission bypassPermissions
     codex     edit files and run commands inside codex's sandbox
     opencode  edit files; run only the commands of the worker tools scope
-    qwen-code edit files and run any command without asking; no reviews
+    qwen-code edit files and run any command without asking; reviews opt-in
   [1mFiles[0m in this repository (brigada never commits them):
     [32mnew[0m        .brigada/project.yaml                      [90mthe settings above[0m
     [32mnew[0m        .brigada/operator.md                       [90mtells your own coding

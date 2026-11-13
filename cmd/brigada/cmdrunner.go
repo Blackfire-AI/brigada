@@ -246,9 +246,9 @@ func (s agentSpec) accountLabel() string {
 const defaultClasses = "implement,review,answer"
 
 // harnessDefaultClasses is what an agent of the harness takes when no
-// classes were given. qwen-code runs no reviews, so its default leaves
-// the review class out; an explicit review stays refused when the
-// runner resolves the agent.
+// classes were given. qwen-code's default still leaves the review class
+// out; an explicit review class is accepted and runs under the agent's
+// permission=.
 func harnessDefaultClasses(harness string) []string {
 	if harness == "qwen-code" {
 		return []string{"implement", "answer"}
@@ -502,11 +502,9 @@ func resolveRunnerAgents(rt *runtime, specs []agentSpec, workerScript string) ([
 			if spec.agentFile != "" {
 				return nil, nil, fmt.Errorf("--agent-file is a --harness kimi flag; the qwen-code harness takes none")
 			}
-			// qwen-code runs no reviews: its default classes already
-			// leave the review class out, and an explicit one is refused.
-			if slices.Contains(spec.classes, "review") {
-				return nil, nil, fmt.Errorf("the qwen-code harness takes no review class: qwen-code has no read-only review policy")
-			}
+			// A review takes the agent's permission= like any job, so an
+			// explicit review class is accepted; the default classes still
+			// leave it out.
 			ad = &qwencode.Adapter{}
 		case "fake":
 			if spec.agentFile != "" {

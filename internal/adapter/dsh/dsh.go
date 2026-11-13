@@ -50,12 +50,14 @@ func (a *Adapter) ProbeCommand(ctx context.Context) *exec.Cmd {
 //
 //   - DSH_TELEMETRY_MODE=DISABLED: the headless profile otherwise sends
 //     session telemetry to DeepSeek.
-//   - DSH_PERMISSION_MODE=read-only for a review job, workspace-write for
-//     work and fix jobs. Read-only denies writes (bash writes included) at
-//     the OS level and refuses escalation headless; workspace-write allows
-//     the working directory and the temp directory and denies elsewhere.
-//     danger-full-access is never set.
-//   - For work and fix jobs, GOCACHE in a brigada directory under the temp
+//   - DSH_PERMISSION_MODE=<job.Permission>, dsh's own sandbox mode (§5.2),
+//     workspace-write when the agent sets none. Read-only denies writes
+//     (bash writes included) at the OS level and refuses escalation
+//     headless; workspace-write allows the working directory and the temp
+//     directory and denies elsewhere; danger-full-access lifts the sandbox.
+//     A review takes the same path as a work job. A value naming none of
+//     the three is refused with the value named.
+//   - For every mode but read-only, GOCACHE in a brigada directory under the temp
 //     directory, shared across jobs, because the sandbox denies new entries
 //     in the user's go-build cache; and GIT_OPTIONAL_LOCKS=0, so git status
 //     and diff take no index.lock, which the sandbox denies in the runner
@@ -71,6 +73,10 @@ func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*ex
 	}
 	if err := adapter.ValidateEffort("dsh", job.Effort); err != nil {
 		return nil, fmt.Errorf("dsh: %w", err)
+	}
+	mode, err := sandboxMode(job.Permission)
+	if err != nil {
+		return nil, err
 	}
 	binary := a.Binary
 	if binary == "" {
@@ -91,8 +97,24 @@ func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*ex
 	}
 	cmd.Dir = workdir
 	cmd.Stdin = strings.NewReader(job.Prompt)
-	cmd.Env = workerEnv(os.Environ(), job.Review)
+	cmd.Env = workerEnv(os.Environ(), mode)
 	return cmd, nil
+}
+
+// dshModes is dsh's own DSH_PERMISSION_MODE values.
+var dshModes = map[string]bool{"read-only": true, "workspace-write": true, "danger-full-access": true}
+
+// sandboxMode maps permission= onto dsh's mode: workspace-write when empty;
+// a value naming none of dsh's three modes (a deprecated tools= alias among
+// them) is refused rather than dropped.
+func sandboxMode(permission string) (string, error) {
+	if permission == "" {
+		return "workspace-write", nil
+	}
+	if !dshModes[permission] {
+		return "", fmt.Errorf("dsh: permission %q is not one of dsh's sandbox modes (read-only, workspace-write, danger-full-access)", permission)
+	}
+	return permission, nil
 }
 
 // writePatch writes the per-job patch file and returns its path. An empty
@@ -131,23 +153,20 @@ func writePatch(model, effort string) (string, error) {
 // workerEnv keeps the CLI's ambient login state, DEEPSEEK_API_KEY among it,
 // but never the runner's secrets (§5.1), and pins the two DSH_ variables
 // the policy sets, replacing any ambient value.
-func workerEnv(env []string, review bool) []string {
-	mode := "workspace-write"
-	if review {
-		mode = "read-only"
-	}
+func workerEnv(env []string, mode string) []string {
+	readOnly := mode == "read-only"
 	out := make([]string, 0, len(env)+4)
 	for _, kv := range env {
 		if strings.HasPrefix(kv, "BRIGADA_") || strings.HasPrefix(kv, "DSH_TELEMETRY_MODE=") || strings.HasPrefix(kv, "DSH_PERMISSION_MODE=") {
 			continue
 		}
-		if !review && (strings.HasPrefix(kv, "GOCACHE=") || strings.HasPrefix(kv, "GIT_OPTIONAL_LOCKS=")) {
+		if !readOnly && (strings.HasPrefix(kv, "GOCACHE=") || strings.HasPrefix(kv, "GIT_OPTIONAL_LOCKS=")) {
 			continue
 		}
 		out = append(out, kv)
 	}
 	out = append(out, "DSH_TELEMETRY_MODE=DISABLED", "DSH_PERMISSION_MODE="+mode)
-	if !review {
+	if !readOnly {
 		out = append(out, "GOCACHE="+filepath.Join(os.TempDir(), "brigada-gocache"), "GIT_OPTIONAL_LOCKS=0")
 	}
 	return out

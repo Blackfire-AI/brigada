@@ -204,11 +204,12 @@ func TestAgentsAddQwenCodeDefaultsToImplementAndAnswer(t *testing.T) {
 	if !strings.Contains(out, "registered qwen-code/qwen3.8-max (tier heavy, classes implement,answer)") {
 		t.Errorf("output = %s", out)
 	}
-	// An explicit review class is refused: qwen-code runs no reviews.
-	if code, out, errOut := agentsDo(t, "agents", "add", "--state-dir", state, "qwen-code/qwen3.8-flash", "--classes", "review"); code != 2 || out != "" || !strings.Contains(errOut, "no read-only review policy") {
+	// An explicit review class is accepted: qwen-code reviews under the
+	// agent's permission=, only its default classes leave review out.
+	if code, out, errOut := agentsDo(t, "agents", "add", "--state-dir", state, "qwen-code/qwen3.8-flash", "--classes", "review"); code != 0 || errOut != "" || !strings.Contains(out, "classes review") {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errOut)
 	}
-	if got := loadAgentLines(t, state); len(got) != 2 {
+	if got := loadAgentLines(t, state); len(got) != 3 {
 		t.Fatalf("lines = %q", got)
 	}
 }

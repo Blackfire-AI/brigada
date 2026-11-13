@@ -47,33 +47,33 @@ func TestCommand(t *testing.T) {
 		wantArg []string // the arguments after the executable
 	}{
 		{
-			name:    "review uses the runner agent",
-			ad:      Adapter{ReadOnlyAgentFile: "/runner/kimi-readonly.md"},
+			// A review takes the configured agent like any job; the retired
+			// read-only agent file is no longer read.
+			name:    "review no longer swaps the agent",
+			ad:      Adapter{AgentFile: "custom.md", ReadOnlyAgentFile: "/runner/kimi-readonly.md"},
 			job:     adapter.Job{Prompt: prompt, Review: true},
 			wantExe: "kimi",
-			wantArg: []string{"-p", prompt, "--output-format", "stream-json", "--agent-file", "/runner/kimi-readonly.md"},
+			wantArg: []string{"-p", prompt, "--output-format", "stream-json", "--agent-file", "custom.md"},
 		},
 		{
-			name:    "work keeps the normal agent",
+			name:    "work with no permission passes no mode flag",
 			ad:      Adapter{ReadOnlyAgentFile: "/runner/kimi-readonly.md"},
 			job:     adapter.Job{Prompt: prompt},
 			wantExe: "kimi",
 			wantArg: []string{"-p", prompt, "--output-format", "stream-json"},
 		},
 		{
-			name:    "read-only agent wins for review",
-			ad:      Adapter{AgentFile: "custom.md", ReadOnlyAgentFile: "/runner/kimi-readonly.md"},
-			job:     adapter.Job{Prompt: prompt, Review: true},
+			name:    "yolo reaches kimi's own flag",
+			job:     adapter.Job{Prompt: prompt, Permission: "yolo"},
 			wantExe: "kimi",
-			wantArg: []string{"-p", prompt, "--output-format", "stream-json", "--agent-file", "/runner/kimi-readonly.md"},
+			wantArg: []string{"-p", prompt, "--output-format", "stream-json", "--yolo"},
 		},
 		{
-			name:    "review resume keeps its bound agent",
-			ad:      Adapter{ReadOnlyAgentFile: "/runner/kimi-readonly.md"},
-			job:     adapter.Job{Prompt: prompt, Review: true},
+			name:    "yolo on a review resume",
+			job:     adapter.Job{Prompt: prompt, Review: true, Permission: "yolo"},
 			resume:  "review-session",
 			wantExe: "kimi",
-			wantArg: []string{"-p", prompt, "--output-format", "stream-json", "--session", "review-session"},
+			wantArg: []string{"-p", prompt, "--output-format", "stream-json", "--yolo", "--session", "review-session"},
 		},
 		{
 			name:    "fresh run",
@@ -127,6 +127,19 @@ func TestCommand(t *testing.T) {
 		}
 		if got := append([]string{tc.wantExe}, tc.wantArg...); !slices.Equal(cmd.Args, got) {
 			t.Errorf("%s: args =\n%v\nwant\n%v", tc.name, cmd.Args, got)
+		}
+	}
+}
+
+// TestCommandRefusesAPermissionKimiHasNoModeFor: kimi's only mode is
+// approve-all, so any narrower permission=, and the deprecated tools= alias
+// that maps onto it, is refused with the value named.
+func TestCommandRefusesAPermissionKimiHasNoModeFor(t *testing.T) {
+	stubCLI(t)
+	for _, perm := range []string{"read-only", "plan", "bypassPermissions", adapter.ToolsAliasPermission([]string{"Read"}), adapter.ToolsAliasPermission(nil)} {
+		cmd, err := (&Adapter{}).Command(adapter.Job{Prompt: "p", Review: true, Permission: perm}, t.TempDir(), "")
+		if err == nil || cmd != nil || !strings.Contains(err.Error(), `"`+perm+`"`) || !strings.HasPrefix(err.Error(), "kimi: ") {
+			t.Errorf("permission %q: Command = %v, %v; want a refusal naming it", perm, cmd, err)
 		}
 	}
 }
