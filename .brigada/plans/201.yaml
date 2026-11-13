@@ -126,7 +126,7 @@ tasks:
     continue: "adapter-dsh-kimi-qwen"
     effort: medium
     skills: ["docs-change"]
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 770
@@ -186,7 +186,7 @@ tasks:
     base: "permission-plumbing"
     effort: medium
     skills: ["config-setting"]
-    state: reviewing
+    state: needs_foreman
     branch: "brigada/task-774-r1"
     rounds: 1
   - id: 775
