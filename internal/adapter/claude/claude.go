@@ -83,8 +83,9 @@ func foremanToolScope() (allowed, disallowed []string) {
 	return allowed, []string{"Bash", "Edit", "NotebookEdit", "NotebookRead", "Write", "WebFetch", "WebSearch"}
 }
 
-// DefaultWorkerTools is the Go scope list opencode and the deprecated
-// tools= display name; the claude adapter no longer passes it.
+// DefaultWorkerTools is the Go scope list the deprecated tools= display
+// name (ScopeText) renders for a nil scope; the claude adapter no longer
+// passes it to the CLI.
 func DefaultWorkerTools() []string {
 	return []string{"Bash(go build:*)", "Bash(go test:*)", "Bash(go vet:*)", "Bash(gofmt:*)"}
 }
