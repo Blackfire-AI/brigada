@@ -175,8 +175,8 @@ tasks:
     effort: medium
     review_tier: standard
     skills: ["config-setting"]
-    state: running
-    branch: "brigada/task-773"
+    state: reviewing
+    branch: "brigada/task-773-r1"
     rounds: 0
   - id: 774
     name: "permission-cli"
