@@ -238,8 +238,8 @@ tasks:
     effort: medium
     caps: {fix_rounds: 3, review_rounds: 2, restart: 2}
     skills: ["refactor", "docs-change"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-778"
     rounds: 0
   - id: 779
     name: "scope-display"
