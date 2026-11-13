@@ -232,6 +232,8 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	// A rerun defaults to the saved foreman and to the saved agents, one spec
 	// per model. A foreman-only spec (no classes) is not a task choice.
 	var saved map[string][]agentSpec
+	// savedAny is every saved line, a foreman-only one (no classes) included.
+	var savedAny map[string][]agentSpec
 	var savedForeman agentSpec
 	rerun := false
 	if canAsk {
@@ -257,10 +259,12 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 			}
 			rerun = true
 			saved = make(map[string][]agentSpec)
+			savedAny = make(map[string][]agentSpec)
 			for _, spec := range choices.specs {
 				if len(spec.classes) > 0 {
 					saved[spec.harness] = append(saved[spec.harness], spec)
 				}
+				savedAny[spec.harness] = append(savedAny[spec.harness], spec)
 			}
 		}
 	}
@@ -327,7 +331,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 				source = initCurrentModel(source, spec)
 			}
 		}
-		source = initMarkSaved(source, saved[h])
+		source = initMarkSaved(source, savedAny[h])
 		sources[h] = source
 		probes[h] = source.signIn
 	}

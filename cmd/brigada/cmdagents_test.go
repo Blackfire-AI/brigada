@@ -113,7 +113,7 @@ func TestAgentsLeavesOutSupersededModels(t *testing.T) {
 	}
 	for _, want := range []string{
 		"Offered by your CLIs, not registered (1):\n  opencode/fixture/gpt-6.1-sol  tier standard",
-		"Registered, but a newer version of the model is offered (1):\n  opencode/fixture/gpt-6-sol  replaced by opencode/fixture/gpt-6.1-sol\n",
+		"Registered, but a newer version of the model is listed or registered (1):\n  opencode/fixture/gpt-6-sol  replaced by opencode/fixture/gpt-6.1-sol\n",
 		"To retire one, remove its line from",
 	} {
 		if !strings.Contains(out, want) {

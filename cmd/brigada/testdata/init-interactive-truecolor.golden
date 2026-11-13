@@ -38,7 +38,7 @@ dsh (experimental): init can't check sign-in.
                                                     losing any of its words.[0m
      [38;2;108;198;224m 9[0m  opencode/zai-coding-plan/glm-5.3           [38;2;138;143;152mGLM-5.3, 200K context[0m
      [38;2;108;198;224m10[0m  opencode/opencode/deepseek-v3              [38;2;138;143;152mDeepSeek V3, 1M context[0m
-     [38;2;108;198;224m11[0m  qwen-code/qwen-subscription/qwen3.8-max    [38;2;138;143;152mheavy[0m
+     [38;2;108;198;224m11[0m  qwen-code/qwen-subscription/qwen3.8-max    [38;2;138;143;152mstandard[0m
      [38;2;108;198;224m12[0m  qwen-code/qwen-subscription/qwen3.8-flash  [38;2;138;143;152mlight[0m
 [1m    Pick 1-12, or type harness/model [0m[38;2;108;198;224m[1][0m[1m:[0m
     [38;2;138;143;152mHow hard should the foreman think? Higher means better plans and decisions,

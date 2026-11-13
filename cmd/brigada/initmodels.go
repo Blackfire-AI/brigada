@@ -361,7 +361,7 @@ func initDshModels(ctx context.Context) initModelSource {
 	return initModelSource{
 		entries: []initModelEntry{
 			{id: 1, name: "deepseek-flash", value: "deepseek-flash", note: "light; dsh's default"},
-			{id: 2, name: "deepseek-v4-pro", value: "deepseek-v4-pro", note: "heavy"},
+			{id: 2, name: "deepseek-v4-pro", value: "deepseek-v4-pro", note: "standard"},
 		},
 		signIn: probeHarness(ctx, "dsh"),
 	}
@@ -372,7 +372,7 @@ func initDshModels(ctx context.Context) initModelSource {
 func initQwenModels(ctx context.Context) initModelSource {
 	return initModelSource{
 		entries: []initModelEntry{
-			{id: 1, name: "qwen-subscription/qwen3.8-max", value: "qwen-subscription/qwen3.8-max", note: "heavy"},
+			{id: 1, name: "qwen-subscription/qwen3.8-max", value: "qwen-subscription/qwen3.8-max", note: "standard"},
 			{id: 2, name: "qwen-subscription/qwen3.8-flash", value: "qwen-subscription/qwen3.8-flash", note: "light"},
 		},
 		signIn: probeHarness(ctx, "qwen-code"),

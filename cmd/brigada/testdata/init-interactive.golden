@@ -38,7 +38,7 @@ Step 1 of 4: the foreman
                                                     losing any of its words.
       9  opencode/zai-coding-plan/glm-5.3           GLM-5.3, 200K context
      10  opencode/opencode/deepseek-v3              DeepSeek V3, 1M context
-     11  qwen-code/qwen-subscription/qwen3.8-max    heavy
+     11  qwen-code/qwen-subscription/qwen3.8-max    standard
      12  qwen-code/qwen-subscription/qwen3.8-flash  light
     Pick 1-12, or type harness/model [1]:
     How hard should the foreman think? Higher means better plans and decisions,

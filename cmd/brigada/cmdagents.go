@@ -344,7 +344,7 @@ func printAgentsReport(w io.Writer, path string, offer agentsOffer, registered [
 	}
 	if len(d.superseded) > 0 {
 		fmt.Fprintln(w)
-		fmt.Fprintf(w, "Registered, but a newer version of the model is offered (%d):\n", len(d.superseded))
+		fmt.Fprintf(w, "Registered, but a newer version of the model is listed or registered (%d):\n", len(d.superseded))
 		pairs := slices.Sorted(maps.Keys(d.superseded))
 		width := 0
 		for _, pair := range pairs {
