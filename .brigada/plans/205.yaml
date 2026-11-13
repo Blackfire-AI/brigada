@@ -30,10 +30,9 @@ tasks:
     effort: medium
     review_tier: standard
     skills: ["surface-parity", "docs-change"]
-    state: needs_foreman
+    state: ready
     branch: "brigada/task-787"
-    rounds: 2
-    question: "Can the runner or a human run `git rm internal/api/approvalgate.go cmd/brigada/cmdapproval.go cmd/brigada/cmdapproval_test.go internal/mcp/approval_test.go` (nothing else)? I have no way to delete files."
+    rounds: 0
   - id: 788
     name: "drop-approval-engine-store"
     title: "Remove GatedAct, internal/approval, `brigada approver`, the approval_requests table and ssh-keygen"
