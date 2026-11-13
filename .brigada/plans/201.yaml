@@ -288,6 +288,6 @@ tasks:
     base: "docs-followups"
     effort: medium
     skills: ["bugfix", "docs-change"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-782-r1"
     rounds: 0
