@@ -5,9 +5,9 @@
 plan: 205
 title: "#228 revert: approval is a convention, not security; remove the approval-signature machinery"
 repo: "github.com/Blackfire-AI/brigada"
-state: reviewing
+state: needs_foreman
 created: 2026-11-13T07:43:01.195601Z
-updated: 2026-11-13T08:22:26.05431Z
+updated: 2026-11-13T08:34:14.023727Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
