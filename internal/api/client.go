@@ -98,6 +98,9 @@ type Agent struct {
 	// Tools is a claude worker's tool scope (§5.2), "+"-joined or
 	// "none"; empty for a harness brigada does not scope.
 	Tools string `json:"tools,omitempty"`
+	// Permission is the agent's resolved permission= value (§5.2): the mode
+	// its job grants hand the harness. Empty for a harness with none to set.
+	Permission string `json:"permission,omitempty"`
 }
 
 // processStart is when this process began: Register reports it, so the
@@ -114,7 +117,7 @@ func (c *Client) Register(ctx context.Context, agents []Agent, maxParallel int) 
 		body.Agents[i] = agentAdvert{
 			Adapter: a.Adapter, Harness: a.Harness, Model: a.Model,
 			Family: a.Family, Account: a.Account, Classes: a.Classes,
-			Effort: a.Effort, Tools: a.Tools,
+			Effort: a.Effort, Tools: a.Tools, Permission: a.Permission,
 		}
 	}
 	var out struct {

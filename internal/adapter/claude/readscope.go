@@ -50,18 +50,25 @@ const readScopeMatcherPattern = "^(Read|Grep|Glob)$"
 // checkout, never brigada's own state, whose tokens and per-turn
 // configs are not the foreman's to read.
 func foremanSettingsJSON(root, statusLine string) (string, error) {
-	command, err := readScopeHookCommand(root)
-	if err != nil {
-		return "", err
-	}
-	settings := foremanSettings{
-		DisableAllHooks: false,
-		Hooks: &foremanHooks{
+	return foremanSettingsWith(root, statusLine, true)
+}
+
+// foremanSettingsWith is foremanSettingsJSON with the agent's read-scope
+// switch (the per-agent read-scope= key, on by default): off installs no
+// hook, and the settings keep only the status line and disableAllHooks.
+func foremanSettingsWith(root, statusLine string, readScope bool) (string, error) {
+	settings := foremanSettings{DisableAllHooks: false}
+	if readScope {
+		command, err := readScopeHookCommand(root)
+		if err != nil {
+			return "", err
+		}
+		settings.Hooks = &foremanHooks{
 			PreToolUse: []readScopeGroup{{
 				Matcher: readScopeMatcherPattern,
 				Hooks:   []readScopeHook{{Type: "command", Command: command}},
 			}},
-		},
+		}
 	}
 	if statusLine != "" {
 		settings.StatusLine = &statusLineSettings{

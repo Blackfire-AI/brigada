@@ -43,7 +43,15 @@ type Adapter struct {
 	// empty one is explicitly none — the file tools alone, no shell.
 	AllowedTools    []string
 	DisallowedTools []string
+
+	// NoReadScope is the agent's read-scope= switch turned off (§4.1): a
+	// foreman session then installs no read-scope hook. The zero value
+	// keeps the hook, so the switch defaults to on.
+	NoReadScope bool
 }
+
+// readScopeOn reports whether a foreman session installs the read-scope hook.
+func (a *Adapter) readScopeOn() bool { return !a.NoReadScope }
 
 // workerPermissionMode is the permission mode a worker runs under when
 // the agent config does not name one: edits inside the working tree are
@@ -108,40 +116,6 @@ func ScopeText(tools []string) string {
 }
 
 var _ adapter.Adapter = (*Adapter)(nil)
-
-// ShellCommands implements adapter.ShellScoped: the commands of the
-// agent's own scope (AllowedTools; nil is the Go default, non-nil empty is
-// none). Each `Bash(X:*)` or exact `Bash(X)` entry gives X, in order; other tools
-// such as Edit are left out, and a bare Bash names the whole shell. The
-// job's tools are not read: claude takes its scope from its config.
-func (a *Adapter) ShellCommands(_ []string) (commands []string, whole bool) {
-	tools := a.AllowedTools
-	if tools == nil {
-		tools = DefaultWorkerTools()
-	}
-	for _, t := range tools {
-		if t == "Bash" {
-			return nil, true
-		}
-		rest, ok := strings.CutPrefix(t, "Bash(")
-		if !ok {
-			continue
-		}
-		// `Bash(X:*)` allows X and what follows it; the exact rule
-		// `Bash(X)` allows X alone. Either way X is a command the
-		// shell may run, so a Bash rule never reads as no shell.
-		cmd, ok := strings.CutSuffix(rest, ":*)")
-		if !ok {
-			cmd, ok = strings.CutSuffix(rest, ")")
-		}
-		if ok && cmd != "" {
-			commands = append(commands, cmd)
-		}
-	}
-	return commands, false
-}
-
-var _ adapter.ShellScoped = (*Adapter)(nil)
 
 // The claude CLI carries the attach too (§4.2 item 1): interactive
 // resume on a forked session id.
@@ -221,7 +195,7 @@ func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*ex
 		// workdir, the reading checkout the turn runs in.
 		args = append(args, "--mcp-config", job.MCPConfig)
 		allowed, disallowed = foremanToolScope()
-		settings, err := foremanSettingsJSON(workdir, "")
+		settings, err := foremanSettingsWith(workdir, "", a.readScopeOn())
 		if err != nil {
 			return nil, fmt.Errorf("claude: %w", err)
 		}
@@ -323,7 +297,7 @@ func (a *Adapter) AttachCommand(job adapter.Job, workdir, resumeSessionID, newSe
 	// reads no wider than a headless turn does. The status bar rides
 	// the same settings, beside the hook, for this session alone; the
 	// user's own settings files are never touched.
-	settings, err := foremanSettingsJSON(workdir, job.StatusLine)
+	settings, err := foremanSettingsWith(workdir, job.StatusLine, a.readScopeOn())
 	if err != nil {
 		return nil, fmt.Errorf("claude: %w", err)
 	}
