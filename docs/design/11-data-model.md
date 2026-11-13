@@ -7,8 +7,9 @@
 - `sessions` (key, agent, runner, harness session id, state)
 - attach holds (§4.2)
 - pauses (§8.3: scope, the engine or a project; start; origin)
+- stale land refs (project and target whose waiting ref `refs/brigada/land/<target>` the next landing deletes before it stacks)
 - `runners`
-- `agents` (runner, adapter, harness, model, family, account, classes, health, cooling until)
+- `agents` (runner, adapter, harness, model, family, account, classes, permission, health, cooling until)
 - `outcomes`
 - `events` (append-only)
 - `messages`
