@@ -798,7 +798,7 @@ func TestRunnerAgentFlag(t *testing.T) {
 	}
 	line := out.String()
 	for _, want := range []string{"claude (model sonnet@high, tier standard, classes implement,review,answer)", "fake (model fake-1, tier standard, classes review)",
-		"claude (model sonnet@high, tier standard, classes implement,review,answer) tools Bash(go build:*)+Bash(go test:*)+Bash(go vet:*)+Bash(gofmt:*);"} {
+		"claude (model sonnet@high, tier standard, classes implement,review,answer) permission bypassPermissions;"} {
 		if !strings.Contains(line, want) {
 			t.Errorf("the startup line = %q, want it to list %q", line, want)
 		}

@@ -1011,8 +1011,8 @@ func TestForemanSettings(t *testing.T) {
 
 // TestScopeText pins the registration's spelling of a worker scope.
 func TestScopeText(t *testing.T) {
-	if got, want := ScopeText(nil), "Bash(go build:*)+Bash(go test:*)+Bash(go vet:*)+Bash(gofmt:*)"; got != want {
-		t.Errorf("default scope text = %q, want %q", got, want)
+	if got := ScopeText(nil); got != "" {
+		t.Errorf("unset scope text = %q, want empty: no tools= means no scope to show", got)
 	}
 	if got := ScopeText([]string{}); got != "none" {
 		t.Errorf("explicit none text = %q, want none", got)

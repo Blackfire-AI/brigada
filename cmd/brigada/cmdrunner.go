@@ -131,8 +131,13 @@ func runRunner(ctx context.Context, args []string, stdout, stderr io.Writer) int
 			classes = "none"
 		}
 		parts[i] = fmt.Sprintf("%s (model %s, tier %s, classes %s)", a.Harness, model, adapter.AgentTier(a.Harness, a.Model), classes)
-		if a.Tools != "" {
+		// An explicit tools= scope is shown as the alias still changes what
+		// claude runs; otherwise the resolved permission is the scope.
+		switch {
+		case a.Tools != "":
 			parts[i] += " tools " + a.Tools
+		case a.Permission != "":
+			parts[i] += " permission " + a.Permission
 		}
 	}
 	// The configured env.<harness>.<VAR> references resolve here, at every
@@ -452,8 +457,8 @@ func resolveRunnerAgents(rt *runtime, specs []agentSpec, workerScript string) ([
 			if spec.agentFile != "" {
 				return nil, nil, fmt.Errorf("--agent-file is a --harness kimi flag; the claude harness takes none")
 			}
-			// The flag wins over the config key; neither is the Go
-			// default (nil), which is not the same as none (empty).
+			// The flag wins over the config key. Neither set is nil: no
+			// scope to register, the permission shows instead; none is empty.
 			tools := spec.tools
 			if tools == nil {
 				tools = rt.file.Tools["claude/"+spec.model]

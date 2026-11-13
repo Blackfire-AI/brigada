@@ -9,7 +9,6 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/Blackfire-AI/brigada/internal/adapter/claude"
 	"github.com/Blackfire-AI/brigada/internal/engine"
 	"github.com/Blackfire-AI/brigada/internal/runnerstate"
 )
@@ -274,7 +273,7 @@ func printConfigMachine(rt *runtime, flagStateDir string, stdout, stderr io.Writ
 		{"caps.account.<label>", "no cap"}, {"caps.model.<model>", "no cap"},
 		{"cost.<harness>/<model>", "1"}, {"tier.<harness>/<model>", "from the model name"},
 		{"permission.<harness>/<model>", "the harness default"},
-		{"tools.claude/<model>", claude.ScopeText(nil)},
+		{"tools.claude/<model>", "unset: the claude permission applies"},
 	}
 	// The loader already validated this file. No accepted key holds a secret;
 	// do not read harness config or credential files into this map.
@@ -321,6 +320,11 @@ func printConfigMachine(rt *runtime, flagStateDir string, stdout, stderr io.Writ
 	}
 	slices.Sort(keys)
 	for _, key := range keys {
+		// A per-model tools key wraps after a "+", like the generic row's.
+		if strings.HasPrefix(key, "tools.") && values[key] != "" {
+			printInitWords(stdout, "  "+key+" = ", "    ", configValueWords(key, values[key]))
+			continue
+		}
 		printInitWrapped(stdout, "  ", "    ", key+" = "+values[key])
 	}
 	return 0
