@@ -238,7 +238,7 @@ tasks:
     effort: medium
     caps: {fix_rounds: 3, review_rounds: 2, restart: 2}
     skills: ["refactor", "docs-change"]
-    state: running
+    state: reviewing
     branch: "brigada/task-778"
     rounds: 1
   - id: 779
