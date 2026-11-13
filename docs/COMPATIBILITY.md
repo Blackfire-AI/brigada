@@ -110,7 +110,7 @@ These may change in any release, including a patch release:
 
 Before 2.0, a breaking change is a bug, unless a security fix requires it. Deprecations are announced in CHANGELOG.md first.
 
-**Deprecated, removal deferred to 2.0.** The agent's `tools=` field (and the config key `tools.claude/<model>` and the `--tools` flag of `init` that write it) and the project's `worker_tools` are deprecated aliases of the agent's `permission=` (config key `permission.<harness>/<model>`; issue #228). They are still read and store the same value, and each prints a warning that names `permission=`. They keep working until 2.0 removes them, and a `.brigada/project.yaml` that uses `worker_tools` stays valid schema 1.
+**Deprecated, removal deferred to 2.0.** The agent's `tools=` field (and the config key `tools.claude/<model>` and the `--tools` flag of `init` that write it) and the project's `worker_tools` are deprecated aliases of the agent's `permission=` (config key `permission.<harness>/<model>`; issue #228). They are still read and store the same value, a project's `worker_tools` standing in for a claude agent's `permission=` on that project's work and fix jobs, and each prints a warning that names `permission=`. They keep working until 2.0 removes them, and a `.brigada/project.yaml` that uses `worker_tools` stays valid schema 1.
 
 **Breaks, as security fixes** (issue #228):
 
