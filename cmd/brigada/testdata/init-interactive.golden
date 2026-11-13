@@ -73,7 +73,7 @@ Step 2 of 4: workers
   first, or leave kimi out.
     Use kimi? [y/N]:
     kimi has no sandbox: when it writes code it can run any command on this
-    machine without asking. As a reviewer it only reads.
+    machine without asking. Its reviews are not read-only either.
     Let kimi write code too, not only review? [y/N]:
 
   opencode: signed in to 2 providers (opencode providers list)
@@ -92,7 +92,7 @@ Step 2 of 4: workers
 
   qwen-code (experimental): signed in
     qwen-code runs with auto-approve: when it writes code it can run any
-    command on this machine without asking. It does not review.
+    command on this machine without asking.
 
   -> change later: run brigada init again
      your own defaults: ~/.codex/config.toml, ~/.kimi-code/config.toml
@@ -145,19 +145,20 @@ Plan
     opencode  zai-coding-plan/glm-5.3
               Zhipu (GLM)  standard  writes code, reviews
     qwen-code qwen-subscription/qwen3.8-max
-              Alibaba      heavy     writes code, answers questions
+              Alibaba      heavy     writes code, reviews
     qwen-code qwen-subscription/qwen3.8-flash
-              Alibaba      light     writes code, answers questions
-  Reviews: 4 model families, so every task can get a reviewer of another one.
+              Alibaba      light     writes code, reviews
+  Reviews: 5 model families, so every task can get a reviewer of another one.
   At once: 4 tasks on this machine; per account: claude 3, codex 2, kimi 1,
     opencode 2, qwen-code 1 (change: brigada config)
   Check: uv run pytest (init doesn't run it; change it later in
     .brigada/project.yaml)
   What workers may do:
-    claude    edit files; run only: uv run pytest
+    claude    edit files and run commands under permission bypassPermissions
     codex     edit files and run commands inside codex's sandbox
-    opencode  edit files; run only the commands of the worker tools scope
-    qwen-code edit files and run any command without asking; no reviews
+    opencode  edit files and run commands under OpenCode's rules for the
+              agent's permission=
+    qwen-code edit files and run any command without asking
   Files in this repository (brigada never commits them):
     new        .brigada/project.yaml                      the settings above
     new        .brigada/operator.md                       tells your own coding

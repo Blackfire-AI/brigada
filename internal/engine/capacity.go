@@ -115,6 +115,9 @@ type CapacityAgent struct {
 	// advertised it (§5.2): Claude Code patterns joined by "+", or
 	// "none". Empty for a harness brigada does not scope.
 	Tools string `json:"tools,omitempty"`
+	// Permission is the agent's resolved permission= as its runner
+	// advertised it (§5.2). It is the agent's scope when Tools is empty.
+	Permission string `json:"permission,omitempty"`
 }
 
 // CapacityLayer is one cap layer's row as capacity reports it (§12.2):
@@ -174,6 +177,7 @@ type capacityAgent struct {
 	account, health string
 	coolingUntil    string
 	tools           string
+	permission      string
 	effort          string
 }
 
@@ -210,14 +214,14 @@ func capacityTx(tx *sql.Tx, cfg Config, projectID int64, now time.Time) (Capacit
 	rows.Close()
 
 	agents := []capacityAgent{}
-	rows, err = tx.Query(`SELECT id, runner_id, harness, model, account, health, COALESCE(cooling_until, ''), tools, effort
+	rows, err = tx.Query(`SELECT id, runner_id, harness, model, account, health, COALESCE(cooling_until, ''), tools, permission, effort
 		FROM agents ORDER BY id`)
 	if err != nil {
 		return CapacitySnapshot{}, fmt.Errorf("list agents: %w", err)
 	}
 	for rows.Next() {
 		var a capacityAgent
-		if err := rows.Scan(&a.id, &a.runner, &a.harness, &a.model, &a.account, &a.health, &a.coolingUntil, &a.tools, &a.effort); err != nil {
+		if err := rows.Scan(&a.id, &a.runner, &a.harness, &a.model, &a.account, &a.health, &a.coolingUntil, &a.tools, &a.permission, &a.effort); err != nil {
 			rows.Close()
 			return CapacitySnapshot{}, fmt.Errorf("list agents: %w", err)
 		}
@@ -343,6 +347,7 @@ func capacityTx(tx *sql.Tx, cfg Config, projectID int64, now time.Time) (Capacit
 			CoolingUntil: coolingUntil,
 			Cost:         cfg.Caps.CostOf(a.harness, a.model),
 			Tools:        a.tools,
+			Permission:   a.permission,
 		})
 	}
 

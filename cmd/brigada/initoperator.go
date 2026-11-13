@@ -46,8 +46,8 @@ const operatorBody = `# Operating brigada from your coding agent
 
 You are the operator: the user's own coding agent, outside brigada.
 Brigada's foreman plans and its workers build; you pass the user's
-requests to the foreman and report back through the brigada CLI. You
-hold no approval authority.
+requests to the foreman and report back through the brigada CLI.
+Approvals stay the user's: you do not approve on your own initiative.
 
 ## Ask
 

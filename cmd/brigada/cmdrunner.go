@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/Blackfire-AI/brigada/internal/adapter"
@@ -55,7 +56,7 @@ func runRunner(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	fs.IntVar(&maxParallel, "max-parallel", 0, "how many concurrent jobs this runner runs, advertised at register (0 = unset, one at a time)")
 	fs.BoolVar(&noStart, "no-start", false, "do not start the engine on demand; fail when none is running")
 	agents := &agentSpecs{}
-	fs.Var(agents, "agent", "one offered agent, --agent once per harness and model: harness=<h>[,model=<m>][,classes=<c1>+<c2>|none][,account=<label>][,agent-file=<path>][,effort=<level>][,tools=<p1>+<p2>|none]; account defaults to the harness name; effort is validated per harness (claude, codex, opencode, dsh; kimi and qwen-code have none); tools= (claude only) replaces the Go shell scope with Claude Code tool patterns, none = file tools only; replaces --harness/--model/--classes/--agent-file")
+	fs.Var(agents, "agent", "one offered agent, --agent once per harness and model: harness=<h>[,model=<m>][,classes=<c1>+<c2>|none][,account=<label>][,agent-file=<path>][,effort=<level>][,tools=<p1>+<p2>|none][,permission=<mode>][,read-scope=true|false]; permission= is the mode the harness runs in (claude default: bypassPermissions) and tools= its deprecated alias; read-scope= turns the read-scope hook off (default on); account defaults to the harness name; effort is validated per harness (claude, codex, opencode, dsh; kimi and qwen-code have none); tools= (claude only) replaces the Go shell scope with Claude Code tool patterns, none = file tools only; replaces --harness/--model/--classes/--agent-file")
 	if code, stop := common.parse(stdout, stderr, args); stop {
 		return code
 	}
@@ -94,6 +95,14 @@ func runRunner(ctx context.Context, args []string, stdout, stderr io.Writer) int
 		})
 	}
 
+	for _, w := range rt.file.Warnings {
+		fmt.Fprintf(stderr, "brigada: warning: config: %s\n", w)
+	}
+	for _, spec := range agents.specs {
+		for _, w := range spec.warnings() {
+			fmt.Fprintf(stderr, "brigada: warning: %s\n", w)
+		}
+	}
 	ads, adverts, err := resolveRunnerAgents(rt, agents.specs, workerScript)
 	if err != nil {
 		var pathErr *os.PathError
@@ -101,9 +110,6 @@ func runRunner(ctx context.Context, args []string, stdout, stderr io.Writer) int
 			return fail(stderr, err)
 		}
 		return usagef(stderr, "%v", err)
-	}
-	if err := writeKimiReviewAgentFiles(ads); err != nil {
-		return fail(stderr, err)
 	}
 
 	if code := ensureEngine(ctx, rt, noStart, stderr); code != 0 {
@@ -125,8 +131,13 @@ func runRunner(ctx context.Context, args []string, stdout, stderr io.Writer) int
 			classes = "none"
 		}
 		parts[i] = fmt.Sprintf("%s (model %s, tier %s, classes %s)", a.Harness, model, adapter.AgentTier(a.Harness, a.Model), classes)
-		if a.Tools != "" {
+		// An explicit tools= scope is shown as the alias still changes what
+		// claude runs; otherwise the resolved permission is the scope.
+		switch {
+		case a.Tools != "":
 			parts[i] += " tools " + a.Tools
+		case a.Permission != "":
+			parts[i] += " permission " + a.Permission
 		}
 	}
 	// The configured env.<harness>.<VAR> references resolve here, at every
@@ -187,6 +198,37 @@ type agentSpec struct {
 	// scope as registered, filled once the runner resolves it.
 	tools     []string
 	toolsText string
+	// permission is the explicit permission= mode (§5.2): "" when unset.
+	// tools= is its deprecated alias; resolve gives the effective value.
+	permission string
+	// readScope is the explicit read-scope= switch (#131): nil when unset,
+	// which is on.
+	readScope *bool
+}
+
+// resolve gives the agent's effective permission and read-scope switch:
+// the flag over the config file over the harness default, with tools= read
+// as the deprecated alias of permission=. This is the one resolved value
+// the job grant takes; nothing here interprets the permission string.
+func (s agentSpec) resolve(file lifecycle.FileConfig) (permission string, readScope bool) {
+	model := s.model
+	if model == "" {
+		model = runnerDefaultModel(s.harness)
+	}
+	permission = lifecycle.ResolvePermission(s.harness, s.permission, s.tools, file.AgentPermission(s.harness, model))
+	readScope = file.AgentReadScope(s.harness, model)
+	if s.readScope != nil {
+		readScope = *s.readScope
+	}
+	return permission, readScope
+}
+
+// warnings are the deprecation notices of the agent's own flags.
+func (s agentSpec) warnings() []string {
+	if s.tools != nil {
+		return []string{"--agent tools=: " + adapter.DeprecatedKeyWarning("tools")}
+	}
+	return nil
 }
 
 // accountLabel is the account the agent's quota is shared under (§8): the
@@ -199,20 +241,15 @@ func (s agentSpec) accountLabel() string {
 	return s.harness
 }
 
-// defaultClasses is what an agent takes when nothing narrows it — the
-// shorthand --classes default and the --agent form's own, kept one
-// constant so the two forms cannot drift. harnessDefaultClasses carries
-// the per-harness exceptions.
+// defaultClasses is what an agent takes when nothing narrows it, in every
+// harness — the shorthand --classes default and the --agent form's own,
+// kept one constant so the two forms cannot drift. A review runs under the
+// agent's permission= like any job.
 const defaultClasses = "implement,review,answer"
 
 // harnessDefaultClasses is what an agent of the harness takes when no
-// classes were given. qwen-code runs no reviews, so its default leaves
-// the review class out; an explicit review stays refused when the
-// runner resolves the agent.
+// classes were given: the same for every harness.
 func harnessDefaultClasses(harness string) []string {
-	if harness == "qwen-code" {
-		return []string{"implement", "answer"}
-	}
 	return splitList(defaultClasses)
 }
 
@@ -275,9 +312,23 @@ func (s *agentSpecs) Set(v string) error {
 				return fmt.Errorf("--agent %q: tools: %w", v, err)
 			}
 			spec.tools = tools
+		case "permission":
+			if err := adapter.ValidatePermission(value); err != nil {
+				return fmt.Errorf("--agent %q: permission: %w", v, err)
+			}
+			spec.permission = value
+		case "read-scope":
+			on, err := strconv.ParseBool(value)
+			if err != nil {
+				return fmt.Errorf("--agent %q: read-scope: want true or false, got %q", v, value)
+			}
+			spec.readScope = &on
 		default:
-			return fmt.Errorf("--agent %q: unknown field %q; want harness, model, classes, account, agent-file, effort or tools", v, key)
+			return fmt.Errorf("--agent %q: unknown field %q; want harness, model, classes, account, agent-file, effort, tools, permission or read-scope", v, key)
 		}
+	}
+	if spec.permission != "" && spec.tools != nil && adapter.ToolsAliasPermission(spec.tools) != spec.permission {
+		return fmt.Errorf("--agent %q: tools= is the deprecated alias of permission= and they disagree; keep permission=", v)
 	}
 	if spec.harness == "" {
 		return fmt.Errorf("--agent %q: harness=<h> is required", v)
@@ -317,6 +368,12 @@ func (s agentSpec) String() string {
 			text = strings.Join(s.tools, "+")
 		}
 		fields = append(fields, "tools="+text)
+	}
+	if s.permission != "" {
+		fields = append(fields, "permission="+s.permission)
+	}
+	if s.readScope != nil {
+		fields = append(fields, "read-scope="+strconv.FormatBool(*s.readScope))
 	}
 	return strings.Join(fields, ",")
 }
@@ -388,6 +445,10 @@ func resolveRunnerAgents(rt *runtime, specs []agentSpec, workerScript string) ([
 		}
 		seen[pair] = true
 		var ad adapter.Adapter
+		// The agent's resolved permission= value rides its advertisement to
+		// the job grant; the read-scope switch goes to the code that
+		// installs the hook.
+		permission, readScope := spec.resolve(rt.file)
 		if spec.tools != nil && spec.harness != "claude" {
 			return nil, nil, fmt.Errorf("--agent tools=: %s", lifecycle.ToolsRefusal(spec.harness))
 		}
@@ -396,13 +457,13 @@ func resolveRunnerAgents(rt *runtime, specs []agentSpec, workerScript string) ([
 			if spec.agentFile != "" {
 				return nil, nil, fmt.Errorf("--agent-file is a --harness kimi flag; the claude harness takes none")
 			}
-			// The flag wins over the config key; neither is the Go
-			// default (nil), which is not the same as none (empty).
+			// The flag wins over the config key. Neither set is nil: no
+			// scope to register, the permission shows instead; none is empty.
 			tools := spec.tools
 			if tools == nil {
 				tools = rt.file.Tools["claude/"+spec.model]
 			}
-			ad = &claude.Adapter{AllowedTools: tools}
+			ad = &claude.Adapter{NoReadScope: !readScope}
 			spec.toolsText = claude.ScopeText(tools)
 		case "kimi":
 			// The agent file is resolved and checked here, not at the
@@ -418,7 +479,7 @@ func resolveRunnerAgents(rt *runtime, specs []agentSpec, workerScript string) ([
 				}
 				spec.agentFile = abs
 			}
-			ad = &kimi.Adapter{AgentFile: spec.agentFile, ReadOnlyAgentFile: filepath.Join(runnerStateDir(rt), "kimi-readonly.md")}
+			ad = &kimi.Adapter{AgentFile: spec.agentFile}
 		case "codex":
 			if spec.agentFile != "" {
 				return nil, nil, fmt.Errorf("--agent-file is a --harness kimi flag; the codex harness takes none")
@@ -437,11 +498,6 @@ func resolveRunnerAgents(rt *runtime, specs []agentSpec, workerScript string) ([
 		case "qwen-code":
 			if spec.agentFile != "" {
 				return nil, nil, fmt.Errorf("--agent-file is a --harness kimi flag; the qwen-code harness takes none")
-			}
-			// qwen-code runs no reviews: its default classes already
-			// leave the review class out, and an explicit one is refused.
-			if slices.Contains(spec.classes, "review") {
-				return nil, nil, fmt.Errorf("the qwen-code harness takes no review class: qwen-code has no read-only review policy")
 			}
 			ad = &qwencode.Adapter{}
 		case "fake":
@@ -471,32 +527,12 @@ func resolveRunnerAgents(rt *runtime, specs []agentSpec, workerScript string) ([
 			Account: spec.accountLabel(),
 			Classes: spec.classes,
 			Tools:   spec.toolsText,
+
+			Permission: permission,
 		})
 	}
 
 	return ads, adverts, nil
-}
-
-// writeKimiReviewAgentFiles runs once at runner startup, never while init is
-// displaying its plan or per job. Reviews use it even when the agent names
-// its own agent file, which stays the work jobs' definition.
-func writeKimiReviewAgentFiles(ads []adapter.Adapter) error {
-	for _, ad := range ads {
-		k, ok := ad.(*kimi.Adapter)
-		if !ok {
-			continue
-		}
-		if err := os.MkdirAll(filepath.Dir(k.ReadOnlyAgentFile), 0700); err != nil {
-			return err
-		}
-		if err := os.WriteFile(k.ReadOnlyAgentFile, []byte(kimi.ReadOnlyAgentDefinition), 0600); err != nil {
-			return err
-		}
-		if err := os.Chmod(k.ReadOnlyAgentFile, 0600); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func runnerSpecStrings(specs []agentSpec) []string {

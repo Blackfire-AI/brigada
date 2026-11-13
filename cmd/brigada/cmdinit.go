@@ -510,15 +510,14 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 			var models []string
 			var classes []string
 			if h == "qwen-code" {
-				// qwen-code runs with auto-approve, so it writes code and answers
-				// questions, never reviews, and gets no question about writing.
-				warning := "qwen-code runs with auto-approve: when it writes code it can run any command on this machine without asking. It does not review."
+				// qwen-code runs with auto-approve, so it gets the warning and no
+				// question about writing; its classes are the default ones.
+				warning := "qwen-code runs with auto-approve: when it writes code it can run any command on this machine without asking."
 				if styled {
 					printInitWrapped(stdout, "    ", "    ", style.Warn(style.Warning()+" "+warning))
 				} else {
 					printInitWrapped(stdout, "    ", "    ", warning)
 				}
-				classes = []string{"implement", "answer"}
 				for _, entry := range entries {
 					models = append(models, entry.value)
 				}
@@ -550,9 +549,9 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 				}
 			case "kimi":
 				if styled {
-					printInitWrapped(stdout, "    ", "    ", style.Warn(style.Warning()+" kimi has no sandbox: when it writes code it can run any command on this machine without asking. As a reviewer it only reads."))
+					printInitWrapped(stdout, "    ", "    ", style.Warn(style.Warning()+" kimi has no sandbox: when it writes code it can run any command on this machine without asking. Its reviews are not read-only either."))
 				} else {
-					fmt.Fprint(stdout, "    kimi has no sandbox: when it writes code it can run any command on this\n    machine without asking. As a reviewer it only reads.\n")
+					fmt.Fprint(stdout, "    kimi has no sandbox: when it writes code it can run any command on this\n    machine without asking. Its reviews are not read-only either.\n")
 				}
 				writes := len(saved[h]) > 0 && slices.Contains(saved[h][0].classes, "implement")
 				hint := "y/N"
@@ -841,7 +840,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	if err != nil && !os.IsNotExist(err) {
 		return fail(stderr, err)
 	}
-	projectCheck, projectTools := "", ""
+	projectCheck := ""
 	if exists {
 		cfg, err := engine.ParseProjectConfig(old)
 		if err != nil {
@@ -851,34 +850,28 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 			return fail(stderr, fmt.Errorf("project.yaml names another repository; correct it before init"))
 		}
 		_ = json.Unmarshal(cfg.Values[engine.SettingDefaultCheck], &projectCheck)
-		_ = json.Unmarshal(cfg.Values[engine.SettingWorkerTools], &projectTools)
 	}
 	checkProvided := *check != ""
 	if *check == "none" || *check == "-" {
 		*check = ""
 	}
-	if !checkProvided || !toolsProvided {
+	if !checkProvided {
 		candidates, err := checkCandidates(root)
 		if err != nil {
 			return fail(stderr, err)
 		}
-		entries := initCheckEntries(candidates, projectCheck, projectTools, exists)
-		if !checkProvided {
-			if canAsk {
-				command, exhausted, err := askInitCheck(stdout, ask, entries, candidates)
-				if err != nil {
-					return fail(stderr, err)
-				}
-				if exhausted {
-					return usagef(stderr, "--check: no usable answer; type a command or - for no check, or pass --check COMMAND")
-				}
-				*check = command
-			} else {
-				*check = entries[initCheckDefault(entries)].Command
+		entries := initCheckEntries(candidates, projectCheck, exists)
+		if canAsk {
+			command, exhausted, err := askInitCheck(stdout, ask, entries, candidates)
+			if err != nil {
+				return fail(stderr, err)
 			}
-		}
-		if !toolsProvided {
-			*tools = initCheckTools(*check, entries, candidates)
+			if exhausted {
+				return usagef(stderr, "--check: no usable answer; type a command or - for no check, or pass --check COMMAND")
+			}
+			*check = command
+		} else {
+			*check = entries[initCheckDefault(entries)].Command
 		}
 	}
 
@@ -895,13 +888,25 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	if err != nil {
 		return fail(stderr, err)
 	}
-	parsedTools, err := lifecycle.ParseTools(*tools)
-	if err != nil {
-		return usagef(stderr, "--tools: %v", err)
+	// Init suggests the per-agent permission default, not a tool scope: a
+	// claude agent with no scope or permission of its own, here or in the
+	// machine config, saves the harness default as its explicit permission=.
+	// An explicit --tools still writes the deprecated spelling.
+	var parsedTools []string
+	if toolsProvided {
+		if parsedTools, err = lifecycle.ParseTools(*tools); err != nil {
+			return usagef(stderr, "--tools: %v", err)
+		}
 	}
 	for i := range usable {
-		if usable[i].harness == "claude" && usable[i].tools == nil && (toolsProvided || rt.file.Tools["claude/"+usable[i].model] == nil) {
+		if usable[i].harness != "claude" || usable[i].tools != nil || usable[i].permission != "" {
+			continue
+		}
+		switch {
+		case toolsProvided:
 			usable[i].tools = parsedTools
+		case rt.file.Tools["claude/"+usable[i].model] == nil && rt.file.AgentPermission("claude", usable[i].model) == "":
+			usable[i].permission = adapter.DefaultPermission("claude")
 		}
 	}
 	_, adverts, err := resolveRunnerAgents(rt, usable, "")
@@ -971,19 +976,25 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		switch a.Harness {
 		case "claude":
 			permissions = "edit files; no commands"
-			if a.Tools != "none" {
+			carriesTools := slices.ContainsFunc(usable, func(s agentSpec) bool {
+				return s.harness == "claude" && s.model == a.Model && (s.tools != nil || rt.file.Tools["claude/"+s.model] != nil)
+			})
+			switch {
+			case carriesTools && a.Tools != "none":
 				permissions = "edit files; run only: " + initToolCommands(a.Tools)
+			case !carriesTools && a.Permission != "none" && a.Permission != "":
+				permissions = "edit files and run commands under permission " + a.Permission
 			}
 		case "codex":
 			permissions = "edit files and run commands inside codex's sandbox"
 		case "kimi":
 			permissions = "edit files and run any command without asking"
 		case "qwen-code":
-			permissions = "edit files and run any command without asking; no reviews"
+			permissions = "edit files and run any command without asking"
 		case "opencode":
-			permissions = "edit files; run only the commands of the worker tools scope"
+			permissions = "edit files and run commands under OpenCode's rules for the agent's permission="
 		case "dsh":
-			permissions = "edit files and run commands inside dsh's workspace sandbox; reviews run read-only"
+			permissions = "edit files and run commands inside dsh's workspace sandbox; reviews follow the agent's permission="
 		}
 		prefix := fmt.Sprintf("    %-9s ", a.Harness)
 		printInitWrapped(stdout, prefix, strings.Repeat(" ", term.VisibleWidth(prefix)), permissions)

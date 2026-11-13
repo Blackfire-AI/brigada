@@ -70,10 +70,9 @@ func TestInitQwenCodeForemanWhenSignedIn(t *testing.T) {
 	for _, want := range []string{
 		"qwen-code (experimental): version 1.0.0-preview.1, sign-in can't be checked",
 		"Use qwen-code? [y/N]:",
-		"qwen-code runs with auto-approve: when it writes code it can run any command on this machine without asking. It does not review.",
+		"qwen-code runs with auto-approve: when it writes code it can run any command on this machine without asking.",
 		"    qwen-code qwen-subscription/qwen3.8-max",
-		"writes code, answers questions",
-		"qwen-code edit files and run any command without asking; no reviews",
+		"qwen-code edit files and run any command without asking",
 	} {
 		if !strings.Contains(flat, strings.Join(strings.Fields(want), " ")) {
 			t.Errorf("missing %q:\n%s", want, out)
@@ -99,9 +98,8 @@ func TestInitQwenCodeForemanWhenSignedIn(t *testing.T) {
 		"qwen-code/qwen-subscription/qwen3.8-max",
 		"qwen-code/qwen-subscription/qwen3.8-flash",
 		"qwen-code (experimental): signed in",
-		"qwen-code runs with auto-approve: when it writes code it can run any command on this machine without asking. It does not review.",
+		"qwen-code runs with auto-approve: when it writes code it can run any command on this machine without asking.",
 		"    qwen-code qwen-subscription/qwen3.8-max",
-		"writes code, answers questions",
 	} {
 		if !strings.Contains(flat, strings.Join(strings.Fields(want), " ")) {
 			t.Errorf("missing %q:\n%s", want, out)
@@ -154,7 +152,7 @@ func TestInitDshKeyNoteAndPlan(t *testing.T) {
 				"    dsh       deepseek-flash",
 				"    dsh       deepseek-v4-pro",
 				"dsh is experimental and may change in any release.",
-				"dsh's workspace sandbox; reviews run read-only",
+				"dsh's workspace sandbox; reviews follow the agent's permission=",
 			} {
 				if !strings.Contains(strings.Join(strings.Fields(out), " "), strings.Join(strings.Fields(want), " ")) {
 					t.Errorf("missing %q:\n%s", want, out)

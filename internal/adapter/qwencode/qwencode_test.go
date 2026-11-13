@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Blackfire-AI/brigada/internal/adapter"
 )
@@ -64,7 +65,13 @@ func TestCommand(t *testing.T) {
 		{"default model omits -m", adapter.Job{Prompt: prompt, Model: DefaultModel}, "", append(slicesClone(base), tail...)},
 		{"model", adapter.Job{Prompt: prompt, Model: "qwen-subscription/qwen3.8-flash"}, "", append(append(slicesClone(base), "-m", "qwen-subscription/qwen3.8-flash"), tail...)},
 		{"resume", adapter.Job{Prompt: prompt}, "sess-1", append(append(slicesClone(base), tail...), "--resume", "sess-1")},
-		{"read dirs and tools ignored", adapter.Job{Prompt: prompt, ReadDirs: []string{"/x"}, Tools: []string{"Bash(go test:*)"}}, "", append(slicesClone(base), tail...)},
+		{"read dirs ignored, no permission keeps the default flag", adapter.Job{Prompt: prompt, ReadDirs: []string{"/x"}}, "", append(slicesClone(base), tail...)},
+		{"a named mode reaches --approval-mode", adapter.Job{Prompt: prompt, Permission: "plan"}, "", append(slicesClone(base), "--approval-mode", "plan", "--setting-sources", "user")},
+		{"auto-edit replaces the skip flag", adapter.Job{Prompt: prompt, Permission: "auto-edit"}, "sess-1", append(slicesClone(base), "--approval-mode", "auto-edit", "--setting-sources", "user", "--resume", "sess-1")},
+		{"a review runs on the same path", adapter.Job{Prompt: prompt, Review: true, Permission: "plan"}, "", append(slicesClone(base), "--approval-mode", "plan", "--setting-sources", "user")},
+		{"a review with no permission keeps the default flag", adapter.Job{Prompt: prompt, Review: true}, "", append(slicesClone(base), tail...)},
+		// A foreman turn never reads permission=.
+		{"mcp ignores permission", adapter.Job{Prompt: prompt, MCPConfig: "/tmp/mcp.json", Permission: "plan"}, "", append(slicesClone(base), "--dangerously-skip-permissions", "--setting-sources", "user", "--mcp-config", "/tmp/mcp.json", "--strict-mcp-config")},
 		// A foreman turn: the bridge, strict, then the resume.
 		{"mcp", adapter.Job{Prompt: prompt, MCPConfig: "/tmp/mcp.json"}, "sess-1", append(append(slicesClone(base), tail...), "--mcp-config", "/tmp/mcp.json", "--strict-mcp-config", "--resume", "sess-1")},
 	}
@@ -116,7 +123,9 @@ func TestCommandRefusals(t *testing.T) {
 		job  adapter.Job
 		want string
 	}{
-		{"review", adapter.Job{Prompt: "p", Review: true}, "no read-only review policy yet; review jobs cannot run on it"},
+		{"a mode qwen has none for", adapter.Job{Prompt: "p", Permission: "bypassPermissions"}, `permission "bypassPermissions" is not one of qwen's approval modes`},
+		{"the deprecated tools= alias", adapter.Job{Prompt: "p", Review: true, Permission: adapter.ToolsAliasPermission([]string{"Read", "Grep"})}, `permission "Read+Grep" is not one of qwen's approval modes`},
+		{"the empty tools= alias", adapter.Job{Prompt: "p", Permission: adapter.ToolsAliasPermission(nil)}, `permission "none" is not one of qwen's approval modes`},
 		{"effort", adapter.Job{Prompt: "p", Effort: "high"}, "effort"},
 	}
 	for _, tc := range cases {
@@ -341,21 +350,84 @@ func TestParseIgnoresNoise(t *testing.T) {
 	}
 }
 
+// weeklyLimitResult is the 402 result line of a real transcript: the
+// subscription's weekly limit, with its reset time in quota.reset_at.
+const weeklyLimitResult = `{"type":"result","subtype":"error_during_execution","is_error":true,"num_turns":1,"errors":["inference.chatCompletions.stream: HTTP 402: {\"error\":{\"type\":\"billing_error\",\"code\":\"insufficient_quota\",\"message\":\"insufficient credits: top up and retry\",\"retryable\":false,\"quota\":{\"member_type\":\"plus\",\"reset_at\":1795080981}}}"],"error_code":"insufficient_quota"}`
+
+// balanceResult is the same 402 line without quota.reset_at: a spent balance.
+const balanceResult = `{"type":"result","subtype":"error_during_execution","is_error":true,"num_turns":1,"errors":["inference.chatCompletions.stream: HTTP 402: {\"error\":{\"type\":\"billing_error\",\"code\":\"insufficient_quota\",\"message\":\"insufficient credits: top up and retry\",\"retryable\":false,\"quota\":{\"member_type\":\"plus\"}}}"],"error_code":"insufficient_quota"}`
+
+// pinNow pins the package clock to a time before the fixture's reset.
+func pinNow(t *testing.T) {
+	t.Helper()
+	old := now
+	now = func() time.Time { return time.Date(2026, 11, 13, 0, 0, 0, 0, time.UTC) }
+	t.Cleanup(func() { now = old })
+}
+
+// TestWeeklyLimitFixtureStdout runs the weekly-limit stdout through
+// ParseEvent: the last error event is a limit until the 402's reset time.
+func TestWeeklyLimitFixtureStdout(t *testing.T) {
+	pinNow(t)
+	a := &Adapter{}
+	var last adapter.Event
+	var found bool
+	for _, l := range readLines(t, "failure-weekly-limit.jsonl") {
+		if ev, ok := a.ParseEvent([]byte(l)); ok && ev.Kind == adapter.EvError {
+			last, found = ev, true
+		}
+	}
+	if !found {
+		t.Fatal("no error event")
+	}
+	if last.ErrorKind != adapter.ErrLimit {
+		t.Errorf("kind = %q, want %q", last.ErrorKind, adapter.ErrLimit)
+	}
+	if want := "2026-11-19T09:36:21Z"; last.LimitUntil != want {
+		t.Errorf("LimitUntil = %q, want %q", last.LimitUntil, want)
+	}
+	if !strings.Contains(last.Text, "HTTP 402") {
+		t.Errorf("Text = %q, want the errors text", last.Text)
+	}
+}
+
+func TestBalanceResetAtMalformed(t *testing.T) {
+	pinNow(t)
+	a := &Adapter{}
+	for _, l := range []string{
+		`{"type":"result","is_error":true,"errors":["HTTP 402: {\"error\":{\"type\":\"billing_error\",\"quota\":{\"reset_at\":\"soon\"}}}"]}`,
+		`{"type":"result","is_error":true,"errors":["HTTP 402: {not json"]}`,
+		`{"type":"result","is_error":true,"errors":["HTTP 402: billing_error"]}`,
+		// 1700000000 is 2023-11-14, before the pinned clock.
+		`{"type":"result","is_error":true,"errors":["HTTP 402: {\"error\":{\"type\":\"billing_error\",\"quota\":{\"reset_at\":1700000000}}}"]}`,
+	} {
+		ev, ok := a.ParseEvent([]byte(l))
+		if !ok || ev.ErrorKind != adapter.ErrBalance || ev.LimitUntil != "" {
+			t.Errorf("%s = %+v, %v; want balance with no LimitUntil", l, ev, ok)
+		}
+	}
+}
+
 func TestErrorResult(t *testing.T) {
+	pinNow(t)
 	a := &Adapter{}
 	cases := []struct {
-		line string
-		want adapter.ErrorKind
+		line  string
+		want  adapter.ErrorKind
+		until string
 	}{
-		{`{"type":"result","subtype":"error_during_execution","is_error":true,"result":"Usage limit reached"}`, adapter.ErrLimit},
-		{`{"type":"result","is_error":true,"result":"something odd happened"}`, adapter.ErrOther},
-		{`{"type":"result","subtype":"error_max_turns","is_error":true}`, adapter.ErrOther},
+		{`{"type":"result","subtype":"error_during_execution","is_error":true,"result":"Usage limit reached"}`, adapter.ErrLimit, ""},
+		{`{"type":"result","is_error":true,"result":"something odd happened"}`, adapter.ErrOther, ""},
+		{`{"type":"result","subtype":"error_max_turns","is_error":true}`, adapter.ErrOther, ""},
+		{weeklyLimitResult, adapter.ErrLimit, "2026-11-19T09:36:21Z"},
+		{balanceResult, adapter.ErrBalance, ""},
+		{`{"type":"result","subtype":"error_during_execution","is_error":true,"error_code":"insufficient_quota"}`, adapter.ErrLimit, ""},
 	}
 	for _, tc := range cases {
 		for name, parse := range map[string]func([]byte) (adapter.Event, bool){"stdout": a.ParseEvent, "stderr": a.ParseErrEvent} {
 			ev, ok := parse([]byte(tc.line))
-			if !ok || ev.Kind != adapter.EvError || ev.ErrorKind != tc.want {
-				t.Errorf("%s %s = %+v, %v; want %q", name, tc.line, ev, ok, tc.want)
+			if !ok || ev.Kind != adapter.EvError || ev.ErrorKind != tc.want || ev.LimitUntil != tc.until {
+				t.Errorf("%s %s = %+v, %v; want %q until %q", name, tc.line, ev, ok, tc.want, tc.until)
 			}
 		}
 	}

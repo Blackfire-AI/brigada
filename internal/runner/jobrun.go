@@ -260,20 +260,16 @@ func (r *jobRun) runWorker(ctx context.Context, ad adapter.Adapter, model, workd
 	// The extra checkouts (§5.8) are named in the prompt — the worker
 	// may have no shell to read their variables with — and granted as
 	// read-only dirs to the adapter, whatever its CLI offers for one.
-	var tools []string // nil: the project set none, the harness's default scope
-	if r.grant.WorkerTools != "" {
-		if t, err := adapter.ParseToolScope(r.grant.WorkerTools); err == nil {
-			tools = t
-		}
-	}
+	// The grant's resolved permission value goes to the adapter as it is,
+	// for a review as for a worker: brigada sets no scope of its own.
 	cmd, err := ad.Command(adapter.Job{
-		Prompt:    r.grant.Prompt + r.extraPromptOf() + shellScopeNote(ad, r.grant, tools, r.mcpConfig),
-		Model:     model,
-		Review:    isReviewJob(r.grant),
-		Effort:    r.cfg.effortFor(r.grant),
-		MCPConfig: r.mcpConfig,
-		ReadDirs:  r.extraDirs(),
-		Tools:     tools,
+		Prompt:     r.grant.Prompt + r.extraPromptOf(),
+		Model:      model,
+		Review:     isReviewJob(r.grant),
+		Effort:     r.cfg.effortFor(r.grant),
+		MCPConfig:  r.mcpConfig,
+		ReadDirs:   r.extraDirs(),
+		Permission: r.grant.Permission,
 	}, workdir, resume)
 	if err != nil {
 		return &noWorkerError{err}
@@ -284,6 +280,9 @@ func (r *jobRun) runWorker(ctx context.Context, ad adapter.Adapter, model, workd
 	// command's environment, whatever the adapter put there. An unset Env
 	// means inherit, so it is materialized first for the same scrub.
 	cmd.Env = scrubWorkerEnv(cmd.Env, r.cfg.GitEnv)
+	// And its git never prompts for a credential: a push or fetch that
+	// wants a login fails at once.
+	cmd.Env = withEnv(cmd.Env, []string{"GIT_TERMINAL_PROMPT=0"})
 	// The CLI's working directory is its worktree, and so is its PWD:
 	// the runner's own PWD points at the state directory, and a Node CLI
 	// that reads PWD before the cwd would work there.

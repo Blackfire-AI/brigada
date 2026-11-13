@@ -217,6 +217,7 @@ func (s *Server) handlePlanDecision(approve bool) handler {
 			}
 			project = named
 		}
+		// The route checked the role; the decision runs as asked.
 		var res engine.PlanDecision
 		if approve {
 			res, err = s.eng.ApprovePlanVersion(r.Context(), project, planID, req.Version, req.AndStopAsking)

@@ -509,7 +509,11 @@ echo '{"type":"tool_start","name":"Edit"}'
 echo pushed > work.txt
 git add -A
 git commit -qm 'fake work: add work.txt'
-git push -q origin HEAD
+if git push -q origin HEAD 2>/dev/null; then
+  : > "$TEST_MARKERS_DIR/push-succeeded"
+else
+  : > "$TEST_MARKERS_DIR/push-refused"
+fi
 echo '{"type":"tool_end","name":"Edit"}'
 br=$(git rev-parse --abbrev-ref HEAD)
 printf '{"type":"result","text":"done and pushed: {\\"status\\":\\"done\\",\\"summary\\":\\"pushed work.txt\\",\\"branch\\":\\"%s\\"}"}\n' "$br"
@@ -727,18 +731,17 @@ func TestRunnerHappyPath(t *testing.T) {
 	e.assertNoWorktrees()
 }
 
-// TestRunnerWorkerPushesItself is the happy path where the worker does
-// the pushing anyway (§5.3 lets a worker with a shell commit, never asks
-// it to push) and the runner's ls-remote check finds the branch already
-// there.
-func TestRunnerWorkerPushesItself(t *testing.T) {
+// TestRunnerRefusesWorkerPushAndPushesItself pins the push invariant
+// (§5.7): a worker's `git push origin HEAD` from its worktree is
+// refused, and the runner still pushes the task branch itself.
+func TestRunnerRefusesWorkerPushAndPushesItself(t *testing.T) {
 	t.Parallel()
 	remote := newRemote(t)
 	e := newTestEnv(t, engine.Config{})
 	e.seedProject(remote)
 	task := e.seedTask("", `test -f work.txt`)
 	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Add work.txt.", "", ""))
-	markerDir(t)
+	markers := markerDir(t)
 
 	p := e.startRunner(writeWorkerScript(t, pushingWorker), 100*time.Millisecond)
 	defer p.stop(t)
@@ -748,8 +751,11 @@ func TestRunnerWorkerPushesItself(t *testing.T) {
 	if res.Status != "done" || res.Branch != taskBranch(task, 1) {
 		t.Errorf("worker result = %+v, want done on %s", res, taskBranch(task, 1))
 	}
+	if _, err := os.Stat(filepath.Join(markers, "push-refused")); err != nil {
+		t.Errorf("the worker's push was not refused: %v", err)
+	}
 	if remoteBranchCommit(t, remote, taskBranch(task, 1)) == "" {
-		t.Error("the worker's push is not on the remote")
+		t.Error("the runner did not push the task branch")
 	}
 	if check := e.checkResult(done); check.ExitCode != 0 {
 		t.Errorf("check = %+v, want a pass", check)
@@ -839,7 +845,7 @@ func TestRunnerSalvagesFailedWork(t *testing.T) {
 		{name: "no result with commits", worker: "echo edited > work.txt\ngit add -A\ngit commit -qm work\n" + noResultWorker, status: statusFailed, reason: reasonNoResult, existing: true, wantSaved: true},
 		{name: "failed with edits", worker: "echo edited > work.txt\n" + fakeResultScript(`{"status":"failed","summary":"unfinished"}`), status: statusFailed, existing: true, wantSaved: true},
 		{name: "no result on existing branch without changes", worker: noResultWorker, status: statusFailed, reason: reasonNoResult, existing: true},
-		{name: "no result already pushed", worker: "echo edited > work.txt\ngit add -A\ngit commit -qm work\ngit push -q origin HEAD\n" + noResultWorker, status: statusFailed, reason: reasonNoResult, pushed: true},
+		{name: "no result already pushed", worker: "echo edited > work.txt\ngit add -A\ngit commit -qm work\ngit push -q __REMOTE__ HEAD:refs/heads/__BRANCH__\n" + noResultWorker, status: statusFailed, reason: reasonNoResult, pushed: true},
 		{name: "needs help with edits", worker: "echo edited > work.txt\n" + fakeResultScript(`{"status":"needs_help","summary":"waiting","question":"what next?"}`), status: statusNeedsHelp, existing: true},
 		{name: "salvage push rejected", worker: "echo edited > work.txt\n" + noResultWorker, status: statusFailed, reason: reasonNoResult, existing: true, rejectPush: true},
 	} {
@@ -861,7 +867,9 @@ func TestRunnerSalvagesFailedWork(t *testing.T) {
 				}
 			}
 			job := e.submitWork(task, "Edit work.txt.")
-			p := e.startRunner(writeWorkerScript(t, tt.worker), 100*time.Millisecond)
+			// A worker's own push goes by URL: its origin refuses pushes (§5.7).
+			worker := strings.NewReplacer("__REMOTE__", remote, "__BRANCH__", branch).Replace(tt.worker)
+			p := e.startRunner(writeWorkerScript(t, worker), 100*time.Millisecond)
 			defer p.stop(t)
 			done := e.waitJob(job, func(j *engine.JobInfo) bool { return j.Status == "done" })
 			res := e.workerResult(done)

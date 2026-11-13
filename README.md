@@ -25,7 +25,9 @@ dsh support is experimental: it was checked against one developer-preview releas
 
 brigada drives the vendors' **unmodified** CLIs, each signed in with your own account. It uses the accounts you configure, one login per account, and when one is rate-limited it dispatches to another configured account. See [docs/TERMS.md](docs/TERMS.md).
 
-> **Before you start.** brigada is local-first: one Go binary and a SQLite store on your machine. Workers run in git worktrees, not containers, each under its CLI's own permission scope: claude edits under `acceptEdits` with a tool allowlist (the file tools and the Go toolchain by default), codex and dsh run in an OS-level workspace-write sandbox, opencode is scoped by `OPENCODE_PERMISSION`, kimi work jobs carry no scope from brigada, qwen-code work jobs run headless with the CLI's own auto-approve flag and never take a review, and every review is read-only. The scope per harness is in [GUIDE section 8](docs/GUIDE.md#scope-per-harness). Workers inherit your environment minus the credential scrub, so a check command, a test run or a kimi worker can still reach your credentials and network. Do not point brigada at a repository you do not trust ([design §5.7](docs/design/05-workers.md#57-an-environment-for-checks-and-reviews)).
+> **Before you start.** brigada is local-first: one Go binary and a SQLite store on your machine. Workers run in git worktrees, not containers, under the permissions of your own harness, which brigada passes through per agent instead of setting a scope of its own: an agent's `permission=` reaches its CLI as that CLI's own permission flag or argument, for a review as for a work job. Claude runs `bypassPermissions` unless you set another mode, codex and dsh take a sandbox mode, opencode an `OPENCODE_PERMISSION` rule, kimi `--yolo` or nothing, and qwen-code an approval mode or, by default, its auto-approve flag. The agent's `tools=` and the project's `worker_tools` are deprecated aliases of `permission=`. The scope per harness is in [GUIDE section 8](docs/GUIDE.md#scope-per-harness). Workers inherit your environment minus the credential scrub, so a check command, a test run or a worker whose harness grants a shell can still reach your credentials and network. Do not point brigada at a repository you do not trust ([design §5.7](docs/design/05-workers.md#57-an-environment-for-checks-and-reviews)).
+>
+> The runner is the only path that pushes: a task worktree carries no push URL, so a worker cannot push its own branch, though git run as you against an explicit URL still pushes with whatever your account holds. Approving a plan, a landing or a push is your decision by convention: the role checks keep the foreman token out of it and the coordinator asks for an explicit yes, but it is not a boundary against a process that runs as you with a shell. See [SECURITY.md](SECURITY.md).
 
 ## Ask your coding agent to set it up
 
@@ -145,9 +147,9 @@ brigada init
 Init walks you through four steps:
 
 1. Pick the foreman model from the signed-in Claude, Codex, OpenCode and qwen-code CLIs, then how hard it should think. `--foreman claude/sonnet@medium` supplies both.
-2. Choose which CLIs' models may run tasks. Opencode offers a menu with multiple picks. Two model families give cross-family reviews (preferred; required with `review.family=require`); Kimi reviews only unless you let it write code; qwen-code writes code and answers but never reviews.
+2. Choose which CLIs' models may run tasks. Opencode offers a menu with multiple picks. Two model families give cross-family reviews (preferred; required with `review.family=require`); Kimi reviews only unless you let it write code.
 3. Set tasks at once on this machine (or pass `--parallel N`). Enter keeps the saved limit, else half the cores, at least 1 and at most 4.
-4. Confirm the check suggested by your build files, type your own command, or enter `-` for none. Init takes worker tools from that choice and never runs the check.
+4. Confirm the check suggested by your build files, type your own command, or enter `-` for none. Init never runs the check and derives no worker permission from it: each Claude agent without one of its own is saved with the harness default as its `permission=`.
 
 Init then lists the agents, permissions and files, and shows a diff for every existing file it would change (`--verbose` also shows the contents of new files). Nothing is written or started until you confirm.
 
@@ -165,9 +167,9 @@ Rerun `brigada init` to change agents, the foreman model and effort, or tasks at
 ## The first five minutes
 
 1. Install brigada (above) and run `brigada init` in your repository (above).
-2. Open your coding agent in the repository and tell it to read `.brigada/operator.md`. Then tell it, for example, "ask brigada to fix #12". Your agent is the operator: it passes the request to the foreman through the CLI and reports back; it approves nothing.
+2. Open your coding agent in the repository and tell it to read `.brigada/operator.md`. Then tell it, for example, "ask brigada to fix #12". Your agent is the operator: it passes the request to the foreman through the CLI and reports back; approvals stay yours.
 3. Watch `brigada top`: your live view of the meters, what needs you, plans, agents and events.
-4. Approve what the needs-you queue holds. A plan over your size limit, a landing a rule holds, and a push wait for you, with `brigada plan approve`, `brigada land approve` and `brigada push approve`; the operator tells you when something waits, and the decision is yours.
+4. Approve what the needs-you queue holds. A plan over your size limit, a landing a rule holds, and a push wait for you, with `brigada plan approve`, `brigada land approve` and `brigada push approve`. The operator tells you when something waits, and the decision is yours.
 
 ```sh
 brigada status              # engine, jobs, plans, what needs you

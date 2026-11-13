@@ -29,26 +29,41 @@ type Adapter struct {
 	// Binary is the CLI to run; "claude" when empty.
 	Binary string
 
-	// PermissionMode is --permission-mode for every run. Empty means the
-	// worker's default, acceptEdits: file edits inside the worktree the
-	// command runs in are auto-accepted, and everything else still asks —
-	// and asking, headless, is refusing.
-	PermissionMode string
-
-	// AllowedTools and DisallowedTools are the agent config's tool scope
-	// (§5.2), passed through as the CLI's own flags. They scope a code
-	// worker only: a foreman turn or attach always runs under the
-	// foreman's own scope and never reads them. A nil AllowedTools is
-	// "no explicit scope" and the worker gets the Go default; a non-nil
-	// empty one is explicitly none — the file tools alone, no shell.
-	AllowedTools    []string
-	DisallowedTools []string
+	// NoReadScope is the agent's read-scope= switch turned off (§4.1): a
+	// foreman session then installs no read-scope hook. The zero value
+	// keeps the hook, so the switch defaults to on.
+	NoReadScope bool
 }
 
-// workerPermissionMode is the permission mode a worker runs under when
-// the agent config does not name one: edits inside the working tree are
-// accepted without a prompt, which headless runs cannot answer anyway.
-const workerPermissionMode = "acceptEdits"
+// readScopeOn reports whether a foreman session installs the read-scope hook.
+func (a *Adapter) readScopeOn() bool { return !a.NoReadScope }
+
+// workerPermissionMode is the --permission-mode a worker runs under when
+// the agent sets no permission=: a headless run cannot answer an ask, and
+// acceptEdits with no allowlist refuses every shell command, so a worker
+// could not run its own tests. No mode unverified headless (auto) is chosen.
+const workerPermissionMode = "bypassPermissions"
+
+// permissionFlags maps an agent's resolved permission= value onto the
+// CLI's own flags. Empty is the worker default. The deprecated tools=
+// alias keeps its meaning: "none" is acceptEdits with no allowlist, and
+// a tool pattern list (Capitalized, "+" or "(") is --allowedTools under
+// acceptEdits. Any other value is a mode name, passed through verbatim.
+func permissionFlags(perm string) (mode string, allowed []string) {
+	switch {
+	case perm == "":
+		return workerPermissionMode, nil
+	case perm == "none":
+		return "acceptEdits", nil
+	case strings.ContainsAny(perm, "+(") || (perm[0] >= 'A' && perm[0] <= 'Z'):
+		tools, err := adapter.ParseToolScope(perm)
+		if err != nil {
+			return perm, nil
+		}
+		return "acceptEdits", tools
+	}
+	return perm, nil
+}
 
 // foremanToolScope is the foreman's tool scope (§4): brigada's MCP
 // tools — the bridge's whole offer, in the mcp__<server>__<tool>
@@ -68,38 +83,20 @@ func foremanToolScope() (allowed, disallowed []string) {
 	return allowed, []string{"Bash", "Edit", "NotebookEdit", "NotebookRead", "Write", "WebFetch", "WebSearch"}
 }
 
-// reviewToolScope is a reviewer's tool scope: the read-only file tools and
-// git's read commands, with the editing tools denied by name. The agent
-// config's scope never applies to a review.
-func reviewToolScope() (allowed, disallowed []string) {
-	return []string{"Read", "Grep", "Glob",
-			"Bash(git diff:*)", "Bash(git log:*)", "Bash(git show:*)", "Bash(git status:*)"},
-		[]string{"Edit", "NotebookEdit", "Write"}
-}
-
-// workerToolScope is the code worker's default tool scope (§5.2): the Go
-// toolchain's build, test, vet and format commands, and nothing else of
-// the shell. The worker verifies its own work as it goes; the runner
-// still runs the check on the same tree, so no new code reaches
-// execution — the check already runs what tests the worker wrote. The
-// agent config's explicit scope replaces this default.
-func workerToolScope() (allowed, disallowed []string) {
-	return DefaultWorkerTools(), nil
-}
-
-// DefaultWorkerTools is the Go default scope a worker runs under when
-// the agent names none, as a fresh list.
+// DefaultWorkerTools is the Go scope list `brigada init` suggests as a
+// check's tools; the claude adapter does not pass it to the CLI.
 func DefaultWorkerTools() []string {
 	return []string{"Bash(go build:*)", "Bash(go test:*)", "Bash(go vet:*)", "Bash(gofmt:*)"}
 }
 
-// ScopeText renders a worker scope as the agent registration records it
-// and the runner prints it: the patterns joined by "+", the --agent
-// tools= spelling, and "none" for the explicitly empty scope. A nil
-// scope is the default and renders as the Go default's patterns.
+// ScopeText renders an explicit worker scope as the agent registration
+// records it and the runner prints it: the patterns joined by "+", the
+// --agent tools= spelling, and "none" for the explicitly empty scope. A
+// nil scope is no tools= at all and renders as "": the agent runs under
+// its permission, which the displays show instead.
 func ScopeText(tools []string) string {
 	if tools == nil {
-		tools = DefaultWorkerTools()
+		return ""
 	}
 	if len(tools) == 0 {
 		return "none"
@@ -108,40 +105,6 @@ func ScopeText(tools []string) string {
 }
 
 var _ adapter.Adapter = (*Adapter)(nil)
-
-// ShellCommands implements adapter.ShellScoped: the commands of the
-// agent's own scope (AllowedTools; nil is the Go default, non-nil empty is
-// none). Each `Bash(X:*)` or exact `Bash(X)` entry gives X, in order; other tools
-// such as Edit are left out, and a bare Bash names the whole shell. The
-// job's tools are not read: claude takes its scope from its config.
-func (a *Adapter) ShellCommands(_ []string) (commands []string, whole bool) {
-	tools := a.AllowedTools
-	if tools == nil {
-		tools = DefaultWorkerTools()
-	}
-	for _, t := range tools {
-		if t == "Bash" {
-			return nil, true
-		}
-		rest, ok := strings.CutPrefix(t, "Bash(")
-		if !ok {
-			continue
-		}
-		// `Bash(X:*)` allows X and what follows it; the exact rule
-		// `Bash(X)` allows X alone. Either way X is a command the
-		// shell may run, so a Bash rule never reads as no shell.
-		cmd, ok := strings.CutSuffix(rest, ":*)")
-		if !ok {
-			cmd, ok = strings.CutSuffix(rest, ")")
-		}
-		if ok && cmd != "" {
-			commands = append(commands, cmd)
-		}
-	}
-	return commands, false
-}
-
-var _ adapter.ShellScoped = (*Adapter)(nil)
 
 // The claude CLI carries the attach too (§4.2 item 1): interactive
 // resume on a forked session id.
@@ -197,21 +160,18 @@ func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*ex
 	if resumeSessionID != "" {
 		args = append(args, "--resume", resumeSessionID)
 	}
-	mode := a.PermissionMode
-	if mode == "" {
-		mode = workerPermissionMode
-	}
-	review := job.Review && job.MCPConfig == ""
-	if review {
-		// Edits are not auto-accepted for a reviewer, and no configured
-		// mode lifts the deny rules below.
-		mode = "default"
+	// A worker and a review take the same pass-through: the runner discards
+	// a review's tree and a reviewer may run tests, so no read-only default.
+	mode, allowed := permissionFlags(job.Permission)
+	var disallowed []string
+	foreman := job.MCPConfig != ""
+	if foreman && job.Permission == "" {
+		// A foreman turn with no agent mode takes acceptEdits, not the
+		// worker's bypass: its own tool scope below is brigada's.
+		mode = "acceptEdits"
 	}
 	args = append(args, "--permission-mode", mode)
-	allowed, disallowed := a.AllowedTools, a.DisallowedTools
-	if review {
-		allowed, disallowed = reviewToolScope()
-	} else if job.MCPConfig != "" {
+	if foreman {
 		// A job that carries an MCP config is a foreman turn (§12.2): the
 		// bridge is the turn's own, and the CLI offers no other server
 		// beside it. The foreman's tool scope is brigada's too (§4), not
@@ -221,15 +181,11 @@ func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*ex
 		// workdir, the reading checkout the turn runs in.
 		args = append(args, "--mcp-config", job.MCPConfig)
 		allowed, disallowed = foremanToolScope()
-		settings, err := foremanSettingsJSON(workdir, "")
+		settings, err := foremanSettingsWith(workdir, "", a.readScopeOn())
 		if err != nil {
 			return nil, fmt.Errorf("claude: %w", err)
 		}
 		args = append(args, "--settings", settings)
-	} else if allowed == nil {
-		// A code worker with no explicit scope gets the default (§5.2):
-		// the Go toolchain, so it can build and test as it goes.
-		allowed, disallowed = workerToolScope()
 	}
 	if len(allowed) > 0 {
 		args = append(args, append([]string{"--allowedTools"}, allowed...)...)
@@ -323,7 +279,7 @@ func (a *Adapter) AttachCommand(job adapter.Job, workdir, resumeSessionID, newSe
 	// reads no wider than a headless turn does. The status bar rides
 	// the same settings, beside the hook, for this session alone; the
 	// user's own settings files are never touched.
-	settings, err := foremanSettingsJSON(workdir, job.StatusLine)
+	settings, err := foremanSettingsWith(workdir, job.StatusLine, a.readScopeOn())
 	if err != nil {
 		return nil, fmt.Errorf("claude: %w", err)
 	}

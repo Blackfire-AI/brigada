@@ -63,6 +63,11 @@ func TestServeCallCapacity(t *testing.T) {
 		if _, err := tx.Exec("UPDATE agents SET effort = 'high', tools = 'Bash(npm test:*)+Bash(npx jest:*)' WHERE id = ?", broken); err != nil {
 			return err
 		}
+		// An agent with a permission and no tools= shows the permission; the
+		// broken one above has both and shows its explicit tools= scope alone.
+		if _, err := tx.Exec("UPDATE agents SET permission = 'bypassPermissions' WHERE id IN (?, ?)", ready, broken); err != nil {
+			return err
+		}
 		// The live job, recorded on the ready agent and held by the
 		// runner, so both it and the layers that count it show use 1.
 		_, err = tx.Exec(`INSERT INTO jobs (project_id, task_id, kind, key, agent_id, lease_owner, mode, prompt, status, created_at, updated_at)
@@ -81,9 +86,9 @@ func TestServeCallCapacity(t *testing.T) {
 		t.Fatalf("capacity errored: %s", text)
 	}
 	for _, want := range []string{
-		"agent 1 claude/sonnet tier=standard effort=default account=work cap=none running=1 quota=ready cost=1",
+		"agent 1 claude/sonnet tier=standard effort=default account=work cap=none running=1 quota=ready cost=1 permission=bypassPermissions\n",
 		"agent 2 claude/sonnet tier=standard effort=default account=work cap=none running=0 quota=cooling until " + coolUntil + " cost=1",
-		"agent 3 claude/sonnet tier=standard effort=high account=work cap=none running=0 quota=broken cost=1 tools=Bash(npm test:*)+Bash(npx jest:*)",
+		"agent 3 claude/sonnet tier=standard effort=high account=work cap=none running=0 quota=broken cost=1 tools=Bash(npm test:*)+Bash(npx jest:*)\n",
 		"runner 1 cap=none use=1 queue=0",
 		"account work cap=none use=1 queue=0",
 		"plan 1 cap=none use=1 queue=0",

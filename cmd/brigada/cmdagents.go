@@ -361,8 +361,7 @@ func runAgentsAdd(ctx context.Context, args []string, stdout, stderr io.Writer) 
 	if strings.ContainsAny(model, ", \t\r\n") {
 		return usagef(stderr, "model %q must not contain commas or whitespace", model)
 	}
-	// --classes given nowhere keeps the harness's own default, which is
-	// not the three classes for qwen-code.
+	// --classes given nowhere keeps the default, implement,review,answer.
 	explicit := map[string]bool{}
 	fs.Visit(func(f *flag.Flag) { explicit[f.Name] = true })
 	spec := agentSpec{harness: harness, model: model, effort: *effort}

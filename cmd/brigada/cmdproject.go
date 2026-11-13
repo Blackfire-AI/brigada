@@ -373,7 +373,7 @@ func gitRoot(dir string) (string, error) {
 // still-imported value and print a conflict, with both values, for a
 // local override.
 func runProjectImport(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	return runProjectImportWithConfirm(ctx, args, stdout, stderr, func(prompt string) (bool, error) {
+	return runProjectImportWarn(ctx, args, stdout, stderr, true, func(prompt string) (bool, error) {
 		fmt.Fprint(stdout, prompt+" [y/N] ")
 		answer, _ := bufio.NewReader(projectStdin).ReadString('\n')
 		a := strings.ToLower(strings.TrimSpace(answer))
@@ -386,8 +386,16 @@ func runProjectImport(ctx context.Context, args []string, stdout, stderr io.Writ
 }
 
 // Init supplies its prompt handling so an import confirmation follows the same
-// terminal formatting and EOF rules as the rest of setup.
+// terminal formatting and EOF rules as the rest of setup. Init prints its own
+// account of the file it writes, so this form does not repeat the
+// deprecation notices of project.yaml.
 func runProjectImportWithConfirm(ctx context.Context, args []string, stdout, stderr io.Writer, confirm func(string) (bool, error)) int {
+	return runProjectImportWarn(ctx, args, stdout, stderr, false, confirm)
+}
+
+// runProjectImportWarn is the import; warn prints the file's deprecation
+// notices (worker_tools, the alias of permission=) to stderr.
+func runProjectImportWarn(ctx context.Context, args []string, stdout, stderr io.Writer, warn bool, confirm func(string) (bool, error)) int {
 	fs := newFlagSet("project import",
 		"brigada project import [--repo URL] [--file PATH] [--yes] [--no-start]",
 		"Import the repository’s .brigada/project.yaml settings.")
@@ -434,6 +442,9 @@ func runProjectImportWithConfirm(ctx context.Context, args []string, stdout, std
 	cfg, err := engine.ParseProjectConfig(content)
 	if err != nil {
 		return fail(stderr, err)
+	}
+	if warn {
+		printConfigWarnings(stderr, cfg)
 	}
 	// A file that names an instructions_file has the client read it: the
 	// engine takes the text, never the path (§5.9).
@@ -544,6 +555,14 @@ func runProjectImportWithConfirm(ctx context.Context, args []string, stdout, std
 		printSettings(stdout, *res.Settings)
 	}
 	return 0
+}
+
+// printConfigWarnings prints the deprecation notices a parsed project.yaml
+// earned (worker_tools, the alias of permission=), one line each.
+func printConfigWarnings(w io.Writer, cfg engine.ProjectConfig) {
+	for _, warning := range cfg.Warnings {
+		fmt.Fprintf(w, "warning: %s: %s\n", engine.ProjectConfigPath, warning)
+	}
 }
 
 // reportGuidanceChanges flags the role files and skills whose current

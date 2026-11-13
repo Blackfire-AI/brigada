@@ -27,6 +27,10 @@ func ProjectConfigDefaults(content []byte, repo, check, tools string) ([]byte, e
 		if err := ValidateSettingValue(item.key, item.value); err != nil {
 			return nil, err
 		}
+		if item.key == SettingWorkerTools && item.value == "" {
+			// No tools given: worker_tools stays as the file has it.
+			continue
+		}
 		if item.key == SettingDefaultCheck && item.value == "" {
 			for i, line := range lines {
 				if strings.HasPrefix(line, item.key+":") {

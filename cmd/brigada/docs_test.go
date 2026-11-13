@@ -334,16 +334,107 @@ func flagNameArg(method string) (int, bool) {
 	return 0, false
 }
 
+// flagHelpers maps each package function that takes *flag.FlagSet parameters
+// to the flag names it defines on them, by argument position.
+func flagHelpers(files []*ast.File) map[string]map[int]map[string]bool {
+	helpers := map[string]map[int]map[string]bool{}
+	for _, f := range files {
+		for _, decl := range f.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Body == nil || fn.Recv != nil {
+				continue
+			}
+			params := map[string]int{}
+			pos := 0
+			for _, field := range fn.Type.Params.List {
+				n := len(field.Names)
+				if n == 0 {
+					n = 1
+				}
+				for i := 0; i < n; i++ {
+					if i < len(field.Names) && isFlagSetPtr(field.Type) {
+						params[field.Names[i].Name] = pos
+					}
+					pos++
+				}
+			}
+			if len(params) == 0 {
+				continue
+			}
+			ast.Inspect(fn.Body, func(n ast.Node) bool {
+				call, ok := n.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				sel, ok := call.Fun.(*ast.SelectorExpr)
+				if !ok {
+					return true
+				}
+				recv, ok := sel.X.(*ast.Ident)
+				if !ok {
+					return true
+				}
+				idx, ok := params[recv.Name]
+				if !ok {
+					return true
+				}
+				i, ok := flagNameArg(sel.Sel.Name)
+				if !ok || i >= len(call.Args) {
+					return true
+				}
+				lit, ok := call.Args[i].(*ast.BasicLit)
+				if !ok {
+					return true
+				}
+				s, err := strconv.Unquote(lit.Value)
+				if err != nil {
+					return true
+				}
+				if helpers[fn.Name.Name] == nil {
+					helpers[fn.Name.Name] = map[int]map[string]bool{}
+				}
+				if helpers[fn.Name.Name][idx] == nil {
+					helpers[fn.Name.Name][idx] = map[string]bool{}
+				}
+				helpers[fn.Name.Name][idx][s] = true
+				return true
+			})
+		}
+	}
+	return helpers
+}
+
+// isFlagSetPtr reports whether t is *flag.FlagSet.
+func isFlagSetPtr(t ast.Expr) bool {
+	star, ok := t.(*ast.StarExpr)
+	if !ok {
+		return false
+	}
+	sel, ok := star.X.(*ast.SelectorExpr)
+	if !ok {
+		return false
+	}
+	pkg, ok := sel.X.(*ast.Ident)
+	return ok && pkg.Name == "flag" && sel.Sel.Name == "FlagSet"
+}
+
 // flagSetsFromSource reads Go source (file name to text) without running
 // any of it and returns the flag names each newFlagSet call's set defines.
+// A set passed to a function of the package that takes a *flag.FlagSet
+// (a helper such as addCommon) also gets the flags that function defines on it.
 func flagSetsFromSource(files map[string]string) ([]sourceFlagSet, error) {
 	var out []sourceFlagSet
 	fset := token.NewFileSet()
+	var parsed []*ast.File
 	for name, src := range files {
 		f, err := parser.ParseFile(fset, name, src, 0)
 		if err != nil {
 			return nil, err
 		}
+		parsed = append(parsed, f)
+	}
+	helpers := flagHelpers(parsed)
+	for _, f := range parsed {
 		for _, decl := range f.Decls {
 			fn, ok := decl.(*ast.FuncDecl)
 			if !ok || fn.Body == nil {
@@ -400,6 +491,27 @@ func flagSetsFromSource(files map[string]string) ([]sourceFlagSet, error) {
 						if s, err := strconv.Unquote(lit.Value); err == nil {
 							sets[recv.Name].flags[s] = true
 						}
+					}
+				}
+				return true
+			})
+			// A set handed to a helper gets the flags the helper defines.
+			ast.Inspect(fn.Body, func(n ast.Node) bool {
+				call, ok := n.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				id, ok := call.Fun.(*ast.Ident)
+				if !ok || helpers[id.Name] == nil {
+					return true
+				}
+				for i, arg := range call.Args {
+					a, ok := arg.(*ast.Ident)
+					if !ok || sets[a.Name] == nil {
+						continue
+					}
+					for name := range helpers[id.Name][i] {
+						sets[a.Name].flags[name] = true
 					}
 				}
 				return true
@@ -689,8 +801,16 @@ func runX(verb string) {
 	_ = a
 	g := newFlagSet("plain", "s", "d")
 	g.IntVar(&n, "eps", 0, "u")
+	h := newFlagSet("helped", "s", "d")
+	_ = addPair(h)
+	_ = addPair(other)
+}
+func addPair(fs *flag.FlagSet) *pair {
+	fs.String("request", "", "u")
+	fs.StringVar(&p.sig, "signature", "", "u")
+	return nil
 }`})
-	if err != nil || len(sets) != 2 {
+	if err != nil || len(sets) != 3 {
 		t.Fatalf("sets = %v, %v", sets, err)
 	}
 	c := &commandChecker{sets: sets}
@@ -703,7 +823,26 @@ func runX(verb string) {
 	if px["nope"] || px["eps"] || c.flagsOf("x") != nil || !c.flagsOf("plain")["eps"] || c.flagsOf("plain")["alpha"] {
 		t.Errorf("extraction crossed sets: %v %v", px, c.flagsOf("plain"))
 	}
+	if hp := c.flagsOf("helped"); !hp["request"] || !hp["signature"] || c.flagsOf("plain")["request"] {
+		t.Errorf("a helper's flags did not reach the set passed to it: %v", hp)
+	}
 	real := newCommandChecker(t)
+	for path, wants := range map[string][]string{
+		"plan approve": {"no-start", "and-stop-asking"},
+		"land approve": {"no-start", "and-stop-asking"},
+		"push approve": {"no-start", "repo"},
+	} {
+		for _, want := range wants {
+			if !real.flagsOf(path)[want] {
+				t.Errorf("%s lacks --%s in the command sources", path, want)
+			}
+		}
+		for _, gone := range []string{"request", "signature"} {
+			if real.flagsOf(path)[gone] {
+				t.Errorf("%s still has --%s in the command sources", path, gone)
+			}
+		}
+	}
 	for path, want := range map[string]string{"init": "take-default", "instructions diff": "state-dir", "project set": "repo", "plan approve": "and-stop-asking", "land approve": "and-stop-asking"} {
 		if !real.flagsOf(path)[want] {
 			t.Errorf("%s lacks --%s in the command sources", path, want)

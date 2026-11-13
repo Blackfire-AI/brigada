@@ -5,6 +5,15 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- Permissions belong to the user's harness, and brigada passes them through per agent. An agent's `permission=` (or the config key `permission.<harness>/<model>`) reaches its CLI as that CLI's own permission flag or argument on claude, codex, opencode, dsh, kimi and qwen-code, and every job grant of the agent carries it, a review's included: brigada no longer sets a tool scope of its own, so a review is no longer read-only by brigada's doing. Claude defaults to `bypassPermissions`; a foreman turn on codex, opencode and qwen-code never reads it (issue #228).
+- The agent's `tools=`, the config key `tools.claude/<model>`, `init --tools` and the project's `worker_tools` are deprecated aliases of `permission=`. They still read and warn, are removed in the next major version, and a `project.yaml` that uses `worker_tools` stays schema 1. `brigada init` saves a Claude agent that has no permission with the harness default as its explicit `permission=`, and `brigada config` shows each agent's resolved `permission:` (issue #228).
+- The read-scope hook that confines a claude foreman's file reads to its reading checkout is a default the user can turn off per agent, with `read-scope=false` on the `--agent` or `read_scope.<harness>/<model> = false` in the config file (issue #228).
+- A worker can no longer push its own branch. A task worktree carries no push URL, so the runner is the only path to the remote and only its credentials reach it (issue #228).
+- A review runs under the agent's `permission=` in every harness, with no read-only default of brigada's. A `qwen-code` agent takes the review class and defaults to `implement,review,answer` like any other, `brigada init` included, and a Kimi review no longer swaps in a read-only agent definition: the runner writes no `kimi-readonly.md` any more (issue #228).
+- A claude agent with no `tools=` no longer shows brigada's Go default allowlist as its registered scope: the runner's startup line and the foreman's `capacity` tool show what the harness actually runs, the agent's `permission=`, and an explicit `tools=` keeps showing its patterns; the capacity snapshot carries `permission` beside `tools`. `brigada config` shows the default of `tools.claude/<model>` as `unset: the claude permission applies` instead of the allowlist (issue #228).
+
 ### Added
 
 - The `qwen-code` adapter drives Alibaba's Qwen Code CLI (`qwen`) as an experimental, worker-only harness: it implements and answers but takes no reviews. `brigada init` offers it, marked experimental, when `qwen` is on `PATH`. Each job runs `qwen -p` with stream-json output, `--dangerously-skip-permissions` and `--setting-sources user`, checked against 1.0.0-preview.1 (issue #224).
@@ -16,6 +25,7 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- A per-model `tools.*` key in the machine config wrapped at spaces in `brigada config`, splitting a pattern like `Bash(go vet:*)` across lines; it now wraps at `+`, where the patterns join (issue #228).
 - A task restarted while its landing waited at the push gate, or sat for a hand push under `gate_push = never`, could not land its reworked head, and `brigada push approve` still pushed the old commit. A restart now forgets that landing and the landings stacked on the same waiting ref, the next landing of the target deletes `refs/brigada/land/<target>` before it stacks, and the re-made landings wait at the push gate again (issue #205). Restart the engine and runner after you upgrade.
 - A dependent whose landing was waiting on a `land_ready` re-check or a not-ready retry could land on its dependency's old round after the dependency was rebuilt from a new `-r<n>` branch. A queued land job is now checked for a stale base when it is leased: it is cancelled and the task parks at `needs_foreman` with `task_base_stale`, as a landing the land rule refuses does (issue #205).
 - The claude adapter sorts the CLI's "You've hit your 5-hour limit" and weekly wordings as limits, so the account cools and the foreman parks until the reset the message names; the reset parser already read the wording's `resets <time> (<zone>)` suffix, which the old classification never reached.

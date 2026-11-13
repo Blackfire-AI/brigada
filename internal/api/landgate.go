@@ -28,29 +28,24 @@ func (s *Server) handleTaskLandDecision(approve bool) handler {
 		if !ok {
 			return
 		}
-		var stopAsking bool
-		if approve {
-			var req struct {
-				AndStopAsking bool `json:"and_stop_asking"`
-			}
-			if body, ok := readBody(w, r); ok {
-				if len(bytes.TrimSpace(body)) > 0 {
-					if err := json.Unmarshal(body, &req); err != nil {
-						writeError(w, http.StatusBadRequest, codeBadRequest, "malformed JSON body: "+err.Error())
-						return
-					}
-				}
-			} else {
-				return
-			}
-			stopAsking = req.AndStopAsking
+		var req struct {
+			AndStopAsking bool `json:"and_stop_asking"`
 		}
-		var (
-			res engine.LandDecision
-			err error
-		)
+		if body, ok := readBody(w, r); ok {
+			if len(bytes.TrimSpace(body)) > 0 {
+				if err := json.Unmarshal(body, &req); err != nil {
+					writeError(w, http.StatusBadRequest, codeBadRequest, "malformed JSON body: "+err.Error())
+					return
+				}
+			}
+		} else {
+			return
+		}
+		// The route checked the role; the decision runs as asked.
+		var res engine.LandDecision
+		var err error
 		if approve {
-			res, err = s.eng.LandApprove(r.Context(), project, taskID, stopAsking)
+			res, err = s.eng.LandApprove(r.Context(), project, taskID, req.AndStopAsking)
 		} else {
 			res, err = s.eng.LandReject(r.Context(), project, taskID)
 		}

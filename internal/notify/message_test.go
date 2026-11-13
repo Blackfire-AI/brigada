@@ -21,6 +21,11 @@ func TestMessage(t *testing.T) {
 			ok:    true,
 		},
 		{
+			name: "an old approval_signature_wanted event is skipped",
+			ev:   Event{Kind: "approval_signature_wanted", Reason: "signature wanted out of band"},
+			ok:   false,
+		},
+		{
 			name:  "plan done",
 			ev:    Event{Kind: KindPlanDone, PlanID: 7, PlanTitle: "Fix the parser"},
 			title: "brigada",

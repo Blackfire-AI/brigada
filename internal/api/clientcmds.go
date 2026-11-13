@@ -62,7 +62,7 @@ type landDecisionRequest struct {
 func (c *Client) LandReject(ctx context.Context, id int64) (engine.LandDecision, error) {
 	var out engine.LandDecision
 	path := "/v1/tasks/" + strconv.FormatInt(id, 10) + "/land/reject"
-	if err := c.call(ctx, http.MethodPost, path, struct{}{}, &out); err != nil {
+	if err := c.call(ctx, http.MethodPost, path, landDecisionRequest{}, &out); err != nil {
 		return engine.LandDecision{}, err
 	}
 	return out, nil

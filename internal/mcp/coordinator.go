@@ -93,7 +93,7 @@ var CoordinatorTools = []Tool{
 	},
 	{
 		Name:        "plan_reject",
-		Description: "Reject a plan awaiting approval: its tasks are cancelled and its foreman hears of it. This is the USER's decision, never yours: call it only after you showed the user the plan and they said an explicit no (or asked to drop it) in this chat. Name the plan's id and the version you showed; a plan amended since is refused, then read status again and show it anew.",
+		Description: "Reject a plan awaiting approval: its tasks are cancelled and its foreman told. This is the USER's decision, never yours: call it only after you showed the user the plan and they said an explicit no (or asked to drop it) in this chat. Name the plan's id and the version you showed; a plan amended since is refused, then read status again and show it anew.",
 		InputSchema: planRejectSchema,
 		Call:        callPlanReject,
 	},

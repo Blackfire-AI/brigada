@@ -248,7 +248,7 @@ func TestInitKimiWriteOptIn(t *testing.T) {
 			if code != 1 || errOut != "" || !strings.Contains(out, "Declined") {
 				t.Fatalf("init = %d\n%s\n%s", code, out, errOut)
 			}
-			warning := "    kimi has no sandbox: when it writes code it can run any command on this\n    machine without asking. As a reviewer it only reads.\n    Let kimi write code too, not only review? [y/N]:\n"
+			warning := "    kimi has no sandbox: when it writes code it can run any command on this\n    machine without asking. Its reviews are not read-only either.\n    Let kimi write code too, not only review? [y/N]:\n"
 			if !strings.Contains(out, "    Use codex's models for tasks (CLI default)? [Y/n]:\n\n  kimi: signed in\n"+warning+"\n  opencode:") {
 				t.Fatalf("writing question is not right after Kimi sign-in:\n%s", out)
 			}
@@ -403,8 +403,8 @@ func TestInitNoInput(t *testing.T) {
 					t.Errorf("missing %q in %q", want, err)
 				}
 			}
-			if tc.name == "unscopable check reaches apply" && (!strings.Contains(out, "\nPlan\n") || !strings.Contains(out, "claude    edit files; no commands") || strings.Contains(out, "Worker tools")) {
-				t.Fatalf("unscopable command must reach apply with file tools only:\n%s", out)
+			if tc.name == "unscopable check reaches apply" && (!strings.Contains(out, "\nPlan\n") || !strings.Contains(out, "claude    edit files and run commands under permission bypassPermissions") || strings.Contains(out, "Worker tools")) {
+				t.Fatalf("unscopable command must reach apply under the default permission:\n%s", out)
 			}
 			if strings.Contains(out, "\nPlan\n") && tc.name == "no model input" {
 				t.Fatal("treated EOF as a default model answer")
@@ -710,7 +710,7 @@ func TestInitSuggestedCheckQuestion(t *testing.T) {
 			for _, want := range []string{
 				"Check: " + tc.check + " (init doesn't run it; change it later in .brigada/project.yaml)",
 				"default_check: " + strconv.Quote(tc.check),
-				"claude edit files; run only: " + initToolCommands(tc.tools),
+				"claude edit files and run commands under permission bypassPermissions",
 			} {
 				if !strings.Contains(strings.Join(strings.Fields(out), " "), want) {
 					t.Errorf("missing %q in:\n%s", want, out)
@@ -858,7 +858,7 @@ func TestInitCheckStepAnswers(t *testing.T) {
 			for _, want := range []string{
 				"Check: " + tc.check + " (init doesn't run it",
 				"default_check: " + strconv.Quote(tc.check),
-				"claude edit files; run only: " + tc.tools + " codex",
+				"claude edit files and run commands under permission bypassPermissions codex",
 			} {
 				if !strings.Contains(flat, want) {
 					t.Errorf("missing %q in:\n%s", want, out)
@@ -883,10 +883,10 @@ func TestInitCheckStepNoCandidates(t *testing.T) {
 		asked                            int
 		ok                               bool
 	}{
-		{"Enter", "", "none (work goes straight to review)", "edit files; no commands", 1, true},
-		{"blank Enter", "   ", "none (work goes straight to review)", "edit files; no commands", 1, true},
-		{"dash", "-", "none (work goes straight to review)", "edit files; no commands", 1, true},
-		{"typed on third try", "1\n2\ntrue", "true (", "edit files; run only: true", 3, true},
+		{"Enter", "", "none (work goes straight to review)", "edit files and run commands under permission bypassPermissions", 1, true},
+		{"blank Enter", "   ", "none (work goes straight to review)", "edit files and run commands under permission bypassPermissions", 1, true},
+		{"dash", "-", "none (work goes straight to review)", "edit files and run commands under permission bypassPermissions", 1, true},
+		{"typed on third try", "1\n2\ntrue", "true (", "edit files and run commands under permission bypassPermissions", 3, true},
 		{"three invalid numbers", "1\n2\n3", "", "", 3, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -934,7 +934,7 @@ func TestInitRerunShowsCurrentCheckFirst(t *testing.T) {
 		"    custom check  from .brigada/project.yaml  current\n  Found Makefile, uv.lock, so the suggestions are:\n    make check     Makefile: lint",
 		"    uv run pytest  pytest, from uv.lock\n  Check command [custom check]:\n",
 		"  Check: custom check (",
-		"    claude    edit files; no commands\n",
+		"    claude    edit files and run commands under permission bypassPermissions\n",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
@@ -943,7 +943,7 @@ func TestInitRerunShowsCurrentCheckFirst(t *testing.T) {
 	// Typing another suggestion moves the tools with it.
 	code, out, errOut = initCheckStep(t, "make check", existing)
 	flat := strings.Join(strings.Fields(out), " ")
-	if code != 1 || errOut != "" || !strings.Contains(flat, "Check: make check (") || !strings.Contains(flat, "claude edit files; run only: make check codex") {
+	if code != 1 || errOut != "" || !strings.Contains(flat, "Check: make check (") || !strings.Contains(flat, "claude edit files and run commands under permission bypassPermissions codex") {
 		t.Fatalf("got %d\n%s\n%s", code, out, errOut)
 	}
 	// A current check that is also a candidate is listed once, as current.
@@ -955,7 +955,7 @@ func TestInitRerunShowsCurrentCheckFirst(t *testing.T) {
 
 func TestInitWorkerPermissions(t *testing.T) {
 	for _, tc := range []struct{ tools, permissions string }{
-		{"", "edit files; run only: uv run pytest"},
+		{"", "edit files and run commands under permission bypassPermissions"},
 		{",tools=none", "edit files; no commands"},
 		{",tools=Bash(custom check:*)", "edit files; run only: custom check"},
 	} {
@@ -975,7 +975,8 @@ func TestInitWorkerPermissions(t *testing.T) {
 				"    claude    " + tc.permissions + "\n" +
 				"    codex     edit files and run commands inside codex's sandbox\n" +
 				"    kimi      edit files and run any command without asking\n" +
-				"    opencode  edit files; run only the commands of the worker tools scope\n"
+				"    opencode  edit files and run commands under OpenCode's rules for the\n" +
+				"              agent's permission=\n"
 			if !strings.Contains(out, want) {
 				t.Errorf("permissions table missing:\n%s", out)
 			}
@@ -1197,7 +1198,7 @@ func TestInitApplyDetachedAndRepeat(t *testing.T) {
 	if e != nil || !live || len(rec.Agents) != 2 {
 		t.Fatalf("runner=%+v %v %v", rec, live, e)
 	}
-	if rec.Agents[0].Tools != "Bash(npm test:*)" || rec.Agents[1].Tools != "" || rec.Agents[0].Family != "anthropic" || rec.Agents[1].Family != "openai" {
+	if rec.Agents[0].Permission != "bypassPermissions" || rec.Agents[1].Permission != "" || rec.Agents[0].Family != "anthropic" || rec.Agents[1].Family != "openai" {
 		t.Fatalf("wrong agents: %+v", rec.Agents)
 	}
 	assertInitSavedAgents(t, state, rec.Specs)
@@ -1632,8 +1633,8 @@ func assertInitAgentTable(t *testing.T, out string, longModels bool) {
 	}
 	if !longModels {
 		want = append(want,
-			"qwen-code qwen-subscription/qwen3.8-max Alibaba heavy writes code, answers questions",
-			"qwen-code qwen-subscription/qwen3.8-flash Alibaba light writes code, answers questions")
+			"qwen-code qwen-subscription/qwen3.8-max Alibaba heavy writes code, reviews",
+			"qwen-code qwen-subscription/qwen3.8-flash Alibaba light writes code, reviews")
 	}
 	if longModels {
 		want = append(want,

@@ -34,7 +34,7 @@ func TestLandGateEndpointsRefuseForeman(t *testing.T) {
 	}
 
 	// The client token may decide the land gate.
-	code, _, data := e.do(http.MethodPost, fmt.Sprintf("/v1/tasks/%d/land/approve", e.task), "alice", "", []byte(`{}`))
+	code, _, data := e.do(http.MethodPost, fmt.Sprintf("/v1/tasks/%d/land/approve", e.task), "alice", "", nil)
 	if code != http.StatusOK {
 		t.Fatalf("client approves the land gate: %d %s, want 200", code, data)
 	}
@@ -56,7 +56,7 @@ func TestLandRejectEndpoint(t *testing.T) {
 	e := newEnv(t)
 	e.seedLandHold()
 
-	code, _, data := e.do(http.MethodPost, fmt.Sprintf("/v1/tasks/%d/land/reject", e.task), "root", "", []byte(`{}`))
+	code, _, data := e.do(http.MethodPost, fmt.Sprintf("/v1/tasks/%d/land/reject", e.task), "root", "", nil)
 	if code != http.StatusOK {
 		t.Fatalf("admin rejects the land gate: %d %s, want 200", code, data)
 	}

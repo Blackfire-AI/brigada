@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"os"
 	"strings"
 	"testing"
 
@@ -38,13 +39,18 @@ func TestConfigStateDirSource(t *testing.T) {
 
 // A tools value wraps after a "+", never inside a "Bash(go vet:*)" pattern.
 func TestConfigToolsWrapAtPlus(t *testing.T) {
+	tools := "Bash(go build:*)+Bash(go test:*)+Bash(go vet:*)+Bash(gofmt:*)+Bash(git status:*)"
+	// The machine file sets the key itself: an unset key has no tools value.
+	configPath := t.TempDir() + "/config"
+	if err := os.WriteFile(configPath, []byte("tools.claude/sonnet = "+tools+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	var machine bytes.Buffer
-	rt := &runtime{stateDir: "/s", configPath: t.TempDir() + "/none"}
+	rt := &runtime{stateDir: "/s", configPath: configPath}
 	if code := printConfigMachine(rt, "", &machine, &machine); code != 0 {
 		t.Fatalf("code %d: %s", code, machine.String())
 	}
 	var project bytes.Buffer
-	tools := "Bash(go build:*)+Bash(go test:*)+Bash(go vet:*)+Bash(gofmt:*)+Bash(git status:*)"
 	printConfigProjectSettings(&project, engine.ProjectSettings{
 		RepoURL:  "github.com/example/app",
 		Settings: []engine.SettingValue{{Key: engine.SettingWorkerTools, Value: tools, Source: engine.SourceLocal}},

@@ -207,7 +207,7 @@ func TestCoordinatorApproveRefusals(t *testing.T) {
 	}
 
 	// The version the user was shown last goes through.
-	got, isErr := call(103, "plan_approve", map[string]any{"repo_url": coordRepo, "plan": plan, "version": 2})
+	got, isErr := call(200, "plan_approve", map[string]any{"repo_url": coordRepo, "plan": plan, "version": 2})
 	if isErr || !strings.Contains(got, "approved") {
 		t.Fatalf("plan_approve at the current version = %q (error %v)", got, isErr)
 	}
@@ -221,7 +221,7 @@ func TestCoordinatorApproveRefusals(t *testing.T) {
 
 	// Reject at the current version cancels the plan.
 	other := waitingPlan(t, e, "b")
-	got, isErr = call(105, "plan_reject", map[string]any{"repo_url": coordRepo, "plan": other, "version": 1})
+	got, isErr = call(210, "plan_reject", map[string]any{"repo_url": coordRepo, "plan": other, "version": 1})
 	if isErr || !strings.Contains(got, "rejected") {
 		t.Fatalf("plan_reject at the current version = %q (error %v)", got, isErr)
 	}
