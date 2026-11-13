@@ -30,9 +30,9 @@ tasks:
     effort: medium
     review_tier: standard
     skills: ["surface-parity", "docs-change"]
-    state: reviewing
+    state: running
     branch: "brigada/task-787"
-    rounds: 1
+    rounds: 2
   - id: 788
     name: "drop-approval-engine-store"
     title: "Remove GatedAct, internal/approval, `brigada approver`, the approval_requests table and ssh-keygen"
