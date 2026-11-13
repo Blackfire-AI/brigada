@@ -568,8 +568,9 @@ func registeredClasses(t *testing.T, harness string, args ...string) []string {
 	return got
 }
 
-// TestRunnerQwenCodeClasses: qwen-code runs no reviews, so an agent
-// registered with no classes takes implement and answer, on the
+// TestRunnerQwenCodeClasses: qwen-code's default classes leave review out
+// (an explicit review class is accepted), so an agent registered with no
+// classes takes implement and answer, on the
 // shorthand flags and the --agent form alike; other harnesses keep all
 // three classes (TestRunnerHarnessRegisters).
 func TestRunnerQwenCodeClasses(t *testing.T) {

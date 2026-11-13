@@ -511,8 +511,8 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 			var classes []string
 			if h == "qwen-code" {
 				// qwen-code runs with auto-approve, so it writes code and answers
-				// questions, never reviews, and gets no question about writing.
-				warning := "qwen-code runs with auto-approve: when it writes code it can run any command on this machine without asking. It does not review."
+				// questions, reviews only when its classes ask, and gets no question about writing.
+				warning := "qwen-code runs with auto-approve: when it writes code it can run any command on this machine without asking. It does not review by default."
 				if styled {
 					printInitWrapped(stdout, "    ", "    ", style.Warn(style.Warning()+" "+warning))
 				} else {
@@ -991,11 +991,11 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		case "kimi":
 			permissions = "edit files and run any command without asking"
 		case "qwen-code":
-			permissions = "edit files and run any command without asking; no reviews"
+			permissions = "edit files and run any command without asking; reviews opt-in"
 		case "opencode":
 			permissions = "edit files; run only the commands of the worker tools scope"
 		case "dsh":
-			permissions = "edit files and run commands inside dsh's workspace sandbox; reviews run read-only"
+			permissions = "edit files and run commands inside dsh's workspace sandbox; reviews follow the agent's permission="
 		}
 		prefix := fmt.Sprintf("    %-9s ", a.Harness)
 		printInitWrapped(stdout, prefix, strings.Repeat(" ", term.VisibleWidth(prefix)), permissions)

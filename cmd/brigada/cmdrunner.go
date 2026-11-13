@@ -246,9 +246,9 @@ func (s agentSpec) accountLabel() string {
 const defaultClasses = "implement,review,answer"
 
 // harnessDefaultClasses is what an agent of the harness takes when no
-// classes were given. qwen-code runs no reviews, so its default leaves
-// the review class out; an explicit review stays refused when the
-// runner resolves the agent.
+// classes were given. qwen-code's default still leaves the review class
+// out; an explicit review class is accepted and runs under the agent's
+// permission=.
 func harnessDefaultClasses(harness string) []string {
 	if harness == "qwen-code" {
 		return []string{"implement", "answer"}
