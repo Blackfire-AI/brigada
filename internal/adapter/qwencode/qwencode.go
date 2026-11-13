@@ -21,6 +21,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/Blackfire-AI/brigada/internal/adapter"
 )
@@ -266,6 +267,8 @@ type lineJSON struct {
 	Result    string          `json:"result"`
 	SessionID string          `json:"session_id"`
 	Message   messageJSON     `json:"message"`
+	Errors    []string        `json:"errors"`
+	ErrorCode string          `json:"error_code"`
 }
 
 type messageJSON struct {
@@ -394,17 +397,31 @@ func toolEnd(blocks []blockJSON) (adapter.Event, bool) {
 
 // resultEvent reads the final line. An error result is an error event
 // sorted by its text (unknown text stays ErrOther); a success result is
-// the session event with the final text in tow.
+// the session event with the final text in tow. An out-of-credits result
+// has no result field: its errors[] and error_code carry the failure, so
+// they are read before the result and subtype fallbacks.
 func resultEvent(lj lineJSON) (adapter.Event, bool) {
 	if lj.IsError || strings.HasPrefix(lj.Subtype, "error") {
 		text := lj.Result
+		if errs := strings.Join(lj.Errors, "; "); errs != "" {
+			text = errs
+		}
 		if text == "" {
 			text = lj.Subtype
 		}
-		if ev, ok := phraseEvent(text); ok {
-			return ev, true
+		classify := text
+		if lj.ErrorCode != "" {
+			classify += " " + lj.ErrorCode
 		}
-		return adapter.Event{Kind: adapter.EvError, ErrorKind: adapter.ErrOther, Text: text}, true
+		ev, ok := phraseEvent(classify)
+		if !ok {
+			ev = adapter.Event{Kind: adapter.EvError, ErrorKind: adapter.ErrOther}
+		}
+		ev.Text = text
+		if ev.ErrorKind == adapter.ErrBalance || ev.ErrorKind == adapter.ErrLimit {
+			ev.LimitUntil = resetAt(lj.Errors)
+		}
+		return ev, true
 	}
 	if lj.SessionID != "" {
 		return adapter.Event{Kind: adapter.EvSession, SessionID: lj.SessionID, Text: lj.Result}, true
@@ -413,6 +430,32 @@ func resultEvent(lj lineJSON) (adapter.Event, bool) {
 		return adapter.Event{Kind: adapter.EvMessage, Text: lj.Result}, true
 	}
 	return adapter.Event{}, false
+}
+
+// resetAt reads quota.reset_at (unix seconds) from the JSON object that
+// follows the status prefix in an errors[] string ("HTTP 402: {...}") and
+// returns it as RFC3339 UTC; "" when none is there or it is malformed.
+func resetAt(errs []string) string {
+	for _, e := range errs {
+		i := strings.Index(e, "{")
+		if i < 0 {
+			continue
+		}
+		var body struct {
+			Error struct {
+				Quota struct {
+					ResetAt float64 `json:"reset_at"`
+				} `json:"quota"`
+			} `json:"error"`
+		}
+		if json.NewDecoder(strings.NewReader(e[i:])).Decode(&body) != nil {
+			continue
+		}
+		if at := body.Error.Quota.ResetAt; at > 0 && at < 1<<40 {
+			return time.Unix(int64(at), 0).UTC().Format(time.RFC3339)
+		}
+	}
+	return ""
 }
 
 // errorPhrase is one row of the phrase table: what a failure's text looks
@@ -424,14 +467,21 @@ type errorPhrase struct {
 
 // errorPhrases is conservative on purpose: stderr also carries chatter
 // ("rate limited, retrying"), so only whole failure phrases are here.
-// UNVERIFIED against the real CLI: the live run met no failure, so these
-// phrases are still a best understanding, not seen output.
+// The out-of-credits result line (errors[] with HTTP 402 billing_error,
+// error_code insufficient_quota) is verified against a real transcript by
+// the failure-balance fixture; the other phrases are still UNVERIFIED
+// against the real CLI, a best understanding and not seen output.
 var errorPhrases = []errorPhrase{
 	// The session --resume named is gone (§5.6): a fresh run, not another resume.
 	{adapter.ErrResumeFailed, "session not found"},
 	{adapter.ErrResumeFailed, "no session found"},
 	{adapter.ErrResumeFailed, "no conversation found"},
 	{adapter.ErrResumeFailed, "conversation not found"},
+	// A spent balance (§8): ahead of the quota rows, since the
+	// out-of-credits text also says insufficient_quota and first match wins.
+	{adapter.ErrBalance, "http 402"},
+	{adapter.ErrBalance, "billing_error"},
+	{adapter.ErrBalance, "insufficient credits"},
 	// The account's quota window (§8).
 	{adapter.ErrLimit, "usage limit"},
 	{adapter.ErrLimit, "rate limit exceeded"},
