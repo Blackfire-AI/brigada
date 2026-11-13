@@ -43,7 +43,7 @@ tasks:
     effort: medium
     review_tier: standard
     skills: ["refactor", "docs-change"]
-    state: ready
+    state: running
     branch: ""
     rounds: 0
   - id: 789
