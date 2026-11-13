@@ -110,3 +110,10 @@ These may change in any release, including a patch release:
 ## Breaking changes
 
 Before 2.0, a breaking change is a bug, unless a security fix requires it. Deprecations are announced in CHANGELOG.md first.
+
+**Deprecated, removal deferred to 2.0.** The agent's `tools=` field (and the config key `tools.claude/<model>` and the `--tools` flag of `init` that write it) and the project's `worker_tools` are deprecated aliases of the agent's `permission=` (config key `permission.<harness>/<model>`; issue #228). They are still read and store the same value, and each prints a warning that names `permission=`. They keep working until 2.0 removes them, and a `.brigada/project.yaml` that uses `worker_tools` stays valid schema 1.
+
+**Breaks, as security fixes** (issue #228):
+
+- A worker can no longer push its own branch. A task worktree carries no push URL, so the runner is the only path to the remote and the affordance the runner's worker-push test pinned is gone.
+- Approving or rejecting a plan at its version, approving or rejecting a landing and approving a push now need an enrolled approval key and a signature over a one-time challenge (`brigada approver add`, then `--request` and `--signature` on the five approving commands). A client or admin token alone no longer approves, through the CLI, the API or the coordinator's `plan_approve` and `plan_reject`, which only request. These five acts are the only gated ones: a project import and a user message stay role-checked calls that take no signature.

@@ -5,7 +5,17 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- Permissions belong to the user's harness, and brigada passes them through per agent. An agent's `permission=` (or the config key `permission.<harness>/<model>`) reaches its CLI as that CLI's own permission flag or argument on claude, codex, opencode, dsh, kimi and qwen-code, and every job grant of the agent carries it, a review's included: brigada no longer sets a tool scope of its own, so a review is no longer read-only by brigada's doing. Claude defaults to `bypassPermissions`; a foreman turn on codex, opencode and qwen-code never reads it (issue #228).
+- The agent's `tools=`, the config key `tools.claude/<model>`, `init --tools` and the project's `worker_tools` are deprecated aliases of `permission=`. They still read and warn, are removed in the next major version, and a `project.yaml` that uses `worker_tools` stays schema 1. `brigada init` saves a Claude agent that has no permission with the harness default as its explicit `permission=`, and `brigada config` shows each agent's resolved `permission:` (issue #228).
+- The read-scope hook that confines a claude foreman's file reads to its reading checkout is a default the user can turn off per agent, with `read-scope=false` on the `--agent` or `read_scope.<harness>/<model> = false` in the config file (issue #228).
+- A worker can no longer push its own branch. A task worktree carries no push URL, so the runner is the only path to the remote and only its credentials reach it (issue #228).
+- Approving or rejecting a plan at its version, approving or rejecting a landing and approving a push need the user's signature beyond any token. A client or admin token alone no longer approves: the act refuses with the pending request, its challenge and the message to sign, and runs when `--request ID --signature FILE` carries a signature made with an enrolled key. The coordinator's `plan_approve` and `plan_reject` only request. A project import and a user message stay role-checked calls. The host that runs the API needs `ssh-keygen` on `PATH` (issue #228).
+
 ### Added
+
+- `brigada approver add`, `approver list` and `approver remove` enroll, list and remove the public keys approvals are signed with. The engine keeps public keys only, in `approval_keys` in the state directory, and never reads a private key. A private key that is an ordinary file the same OS user can read lets an agent with a shell sign; keep it where signing needs a human (issue #228).
 
 - The `qwen-code` adapter drives Alibaba's Qwen Code CLI (`qwen`) as an experimental, worker-only harness: it implements and answers but takes no reviews. `brigada init` offers it, marked experimental, when `qwen` is on `PATH`. Each job runs `qwen -p` with stream-json output, `--dangerously-skip-permissions` and `--setting-sources user`, checked against 1.0.0-preview.1 (issue #224).
 - `qwen-code` is a foreman harness as well, experimental: a foreman turn carries the `brigada` MCP bridge through `--mcp-config` and `--strict-mcp-config`, and the attach forks the session onto the client's id. It has no read-only foreman scope, so a foreman on it keeps auto-approve and its read-only confinement is not enforced (issue #226).
