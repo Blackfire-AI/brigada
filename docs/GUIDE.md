@@ -87,7 +87,7 @@ Before step 1, init checks the installed CLIs in order (`claude`, `codex`, `kimi
 2. **Workers.** Each agent CLI can run tasks, and init offers every model the CLI knows. For each task the foreman says how heavy a model it needs (light, standard or heavy) and how hard it should think, and brigada picks the model of that tier with the best record on this repo. The tier comes from the model's name, unless the local config sets `tier.HARNESS/MODEL`. For each installed CLI, in order, init prints its sign-in line and then asks:
 
    - Claude and Codex: `Use claude's models for tasks (opus, sonnet, haiku)? [Y/n]:`. The parenthesis lists the models heaviest tier first when there are at most three, else the first model and `and N more`. Enter is yes; a rerun defaults to whether that CLI had saved agents. Yes makes every model one agent.
-   - Kimi: the unchecked sign-in text and `Use kimi? [y/N]:`, then the warning that Kimi has no sandbox (when writing code it can run any command on this machine without asking; as a reviewer it only reads, [section 8](#8-agents-quota-and-health)) and `Let kimi write code too, not only review? [y/N]:`. Enter or no gives every configured Kimi model `classes=review`; yes also allows implementation and answers. A rerun defaults to the saved classes. Kimi's configured effort stays in `~/.kimi-code/config.toml`.
+   - Kimi: the unchecked sign-in text and `Use kimi? [y/N]:`, then the warning that Kimi has no sandbox (when writing code it can run any command on this machine without asking; its reviews are not read-only either, [section 8](#permissions-per-agent)) and `Let kimi write code too, not only review? [y/N]:`. Enter or no gives every configured Kimi model `classes=review`; yes also allows implementation and answers. A rerun defaults to the saved classes. Kimi's configured effort stays in `~/.kimi-code/config.toml`.
    - qwen-code: its unchecked sign-in text, `Use qwen-code? [y/N]:`, then the warning that with auto-approve it can run any command on this machine without asking and that it does not review. It gets every model it offers with the classes `implement+answer`; no question is asked about writing, and it never reviews.
    - Opencode: `Which models should opencode run?`, with the `provider/model` entries from `opencode models` (only models with a recognised family are numbered, and init reports how many it left out), a `-  don't use opencode` row, and `Pick numbers (1,3) or -, or type provider/model [-]:`. It takes several comma-separated numbers, one or more typed `provider/model` names (a bare `glm-5.3` is refused), or `-`; a bad number asks again. A rerun defaults to the saved picks.
    - Every chosen model is one agent with the classes `implement+review+answer`, except Kimi's and qwen-code's. A saved agent's other settings (account, tools, effort) are kept. The step ends with how to change this later: run `brigada init` again, or edit your own defaults in the CLIs' configs.
@@ -147,7 +147,7 @@ Then, after you confirm (`y` at the prompt, or `--yes`), init:
 | `--verbose` | Also print the full contents of new repository setup files. Diffs for existing files are always shown. |
 | `--yes` | Apply the displayed plan without prompting. It does not confirm authentication. `--yes` and `--probe` together are a usage error. |
 | `--now` | Restart a running runner at once when its agents or concurrency changed, cutting its running jobs; without it the restart waits out running jobs. |
-| `--agent SPEC` | Repeat once per model. The same syntax and defaults as `brigada runner --agent` ([section 8](#8-agents-quota-and-health)): `harness=<h>[,model=<m>][,classes=…][,account=<label>][,agent-file=<path>][,effort=<level>][,tools=…]`. Replaces the worker models questions and Kimi's writing question; the foreman model and effort are still chosen in step 1. Use `classes=review` to keep Kimi reviewing only. |
+| `--agent SPEC` | Repeat once per model. The same syntax and defaults as `brigada runner --agent` ([section 8](#8-agents-quota-and-health)): `harness=<h>[,model=<m>][,classes=…][,account=<label>][,agent-file=<path>][,effort=<level>][,permission=<mode>][,read-scope=true|false][,tools=…]` (`tools=` is deprecated for `permission=`). Replaces the worker models questions and Kimi's writing question; the foreman model and effort are still chosen in step 1. Use `classes=review` to keep Kimi reviewing only. |
 | `--signed-in HARNESS` | Confirm an installed harness is signed in (repeatable or comma-separated). Local only. |
 | `--foreman HARNESS/MODEL[@EFFORT]` | Choose a signed-in Claude, Codex, OpenCode or qwen-code foreman model and effort, for example `claude/sonnet@high`. `H/M` without `@E` skips the model question but still asks for effort in an interactive run. |
 | `--parallel N` | Tasks at once (1–64); answers step 3 without a question. |
@@ -327,7 +327,7 @@ The usual way in is through your own coding agent, the operator. `brigada init` 
 - **follows a landing**: merges the staging pull request with a merge commit once CI is green (when `land_target` is the default branch and `after_land` is none, there is no pull request to merge), and restarts the engine and runner after a brigada upgrade, or when their own code landed in the repository, once nothing pending needs the old behaviour;
 - **recovers** after an outage by asking again: an ask re-wakes the foreman, even when its wake budget for the day is spent.
 
-The operator has no approval authority. Plan approval, land approval, push approval, `--and-stop-asking`, tags and releases, and rule changes stay yours; the operator tells you what waits. `brigada attach` below is the other way in: your own conversation with the foreman.
+The operator has no approval authority. Plan approval, land approval, push approval, `--and-stop-asking`, tags and releases, and rule changes stay yours; the operator tells you what waits. The operator's client token does not approve: an approval is your signature, made with a key you enrolled ([approving by signature](#approving-by-signature)). `brigada attach` below is the other way in: your own conversation with the foreman.
 
 ### What the foreman can and cannot do
 
@@ -365,7 +365,7 @@ or the same entry by hand in `~/.claude.json` under `mcpServers` (the `brigada` 
 }
 ```
 
-It bears the state directory's client token, so it reaches every project of that engine, and it carries no foreman credential: it cannot plan or edit, only ask, read and carry your plan decisions. Its `ask_foreman` tool takes a `repo_url` (as `list_projects` shows it) and the `text`. Two replies to a parked task work through it as plain messages: `answer task N: <answer>` and `restart task N with this note: <note>`. The foreman receives your words as they are and acts on them with its own tools; the reply of `ask_foreman` is one line only: the foreman was woken (`waking up`), the message is queued for the next turn because one is running, or it waits, and why (an attached chat, no foreman, the foreman limited). The daily wake budget bounds the foreman's own headless wakes; it does not block a message you send, so a wake that carries your message goes ahead even when the budget is spent. It does not carry the foreman's report. Read that with `status` and `history` after the foreman's turn, which is when the answer or restart shows up in the timeline.
+It bears the state directory's client token, so it reaches every project of that engine, and it carries no foreman credential: it cannot plan or edit, only ask, read and request your plan decisions, which you sign yourself. Its `ask_foreman` tool takes a `repo_url` (as `list_projects` shows it) and the `text`. Two replies to a parked task work through it as plain messages: `answer task N: <answer>` and `restart task N with this note: <note>`. The foreman receives your words as they are and acts on them with its own tools; the reply of `ask_foreman` is one line only: the foreman was woken (`waking up`), the message is queued for the next turn because one is running, or it waits, and why (an attached chat, no foreman, the foreman limited). The daily wake budget bounds the foreman's own headless wakes; it does not block a message you send, so a wake that carries your message goes ahead even when the budget is spent. It does not carry the foreman's report. Read that with `status` and `history` after the foreman's turn, which is when the answer or restart shows up in the timeline.
 
 With `-` as the only argument, ask reads the message from standard input:
 
@@ -406,12 +406,12 @@ Registering a project this way gives it a foreman but no runner agents: run `bri
 
 ### The coordinator session
 
-Open your harness in the parent folder. The coordinator session has six tools over every project the engine knows, authorised as you (the client token), not as a foreman:
+Open your harness in the parent folder. The coordinator session has six tools over every project the engine knows, authorised by the client token, not as a foreman. The token says who may call; it does not approve ([approving by signature](#approving-by-signature)):
 
 - `list_projects`: every project by repository URL, with its foreman, active plans and how many things need you;
 - `ask_foreman`: send one project's foreman a message as you (`repo_url`, `text`);
 - `status` and `history`: across every project, or one with `repo_url`; `status` shows each plan awaiting approval with its id, version and why it waits, its tasks in the plans list (which trims finished plans like `brigada status`, `all=true` for every one);
-- `plan_approve` and `plan_reject`: your decision on a plan over the approval limit, naming the project, the plan id and the **plan version you were shown**. A plan amended since is refused, and the coordinator must read `status` and show you the plan again. `plan_approve` also takes `and_stop_asking`, which changes the rule that held the plan the way `brigada project set` would ([section 7](#gates-and-rules)). These tools act for you: the coordinator is told to call them only after you said an explicit yes or no in the chat.
+- `plan_approve` and `plan_reject`: your decision on a plan over the approval limit, naming the project, the plan id and the **plan version you were shown**. A plan amended since is refused, and the coordinator must read `status` and show you the plan again. `plan_approve` also takes `and_stop_asking`, which changes the rule that held the plan the way `brigada project set` would ([section 7](#gates-and-rules)). The coordinator is told to call them only after you said an explicit yes or no in the chat, and even then they only request the approval: they carry no signature, and the result gives the request's challenge and the command that confirms it. You confirm with your own key, outside the harness ([approving by signature](#approving-by-signature)).
 
 The coordinator never plans and never edits a task graph: it has no `plan_create`, `plan_amend` or task tool. Each project's own foreman plans.
 
@@ -517,7 +517,7 @@ Job ids are not task ids. `status` shows a running job as `task #N …`; find it
 
 Landing is brigada's. When a task is `done` and approved (an `approve` verdict on its last review) and every dependency of class `implement` has landed, the engine queues a **land job** for it. A runner with git for your repo — no worker, no model — squashes the task's own diff onto the target branch as one commit, reruns the project's default check on the result, and then pushes by the push gate. The commit message is built from the task's title, spec and the worker's summary, with `Brigada-Task`, `Brigada-Branch` and `Co-Authored-By` trailers. When the worker's result block carries a `commit_message`, written in the repo's own commit style (the one its AGENTS.md asks for and its git log shows), its subject and body become the message instead; the trailers stay brigada's.
 
-Landing is per task, not per plan: a stack lands in dependency order as its tasks finish, and the target moves with the plan. It happens in a clone under the runner's state directory, never in your working tree; the runner pushes the target with its own credentials, which never reach a worker ([section 8](#8-agents-quota-and-health)). Where approved work lands is `land_target` ([section 6](#6-configuring-a-project)): the project's default branch, or a staging branch such as `brigada/landed`. A new task's work starts from there too: its worktree is built on the land target, and the land job's diff is taken against that base. A land target that does not exist on the remote yet is not an error: the worktree is built on the default branch until the first landing creates it.
+Landing is per task, not per plan: a stack lands in dependency order as its tasks finish, and the target moves with the plan. It happens in a clone under the runner's state directory, never in your working tree; the runner pushes the target with its own credentials, which never reach a worker ([section 8](#what-a-worker-can-and-cannot-push)). Where approved work lands is `land_target` ([section 6](#6-configuring-a-project)): the project's default branch, or a staging branch such as `brigada/landed`. A new task's work starts from there too: its worktree is built on the land target, and the land job's diff is taken against that base. A land target that does not exist on the remote yet is not an error: the worktree is built on the default branch until the first landing creates it.
 
 Whether you land by hand or the land job does it, the engine learns the task landed: whenever the runner refreshes the project's land target (the default branch when none is set) — a headless foreman turn, or `brigada attach` — it scans the branch for `Brigada-Task: <id>` trailers and records each task it finds as landed with its commit. So `brigada status` and the foreman show `landed` for a task you merged by hand, and a plan whose tasks all landed says so in its done report. A task parked for a land conflict or a rejected push, or whose push waits for approval, that you then landed by hand returns to `done` and leaves the needs-you queue.
 
@@ -537,7 +537,7 @@ brigada land reject 45    # cancel it: the branch is left as it is, nothing reco
 brigada push approve      # release the push gate for every waiting landing
 ```
 
-Only you can say these: the foreman has no tool to pass a gate.
+Only you can say these: the foreman has no tool to pass a gate, and each of the three, like `brigada plan approve`, takes your signature beyond the token. Run bare, a command prints the request and the message to sign; run again with `--request ID --signature FILE`, it acts ([approving by signature](#approving-by-signature)).
 
 ### Conflicts and failed checks
 
@@ -626,7 +626,7 @@ The file is flat: `key: value` lines, no nesting except the `instructions` map o
 | `schema` | `1` | required | The file format version. |
 | `repo` | canonical URL, e.g. `github.com/org/app` | required | The repository this file belongs to, in its canonical form (`host[:port]/path`, or `file:<absolute path>` for a file remote). Import refuses a file that names another repository. |
 | `default_check` | command | none | The check a task runs when its spec names none; the land job reruns it on the landed result, and the hand-driven `brigada land` on the squashed tree. A task whose check is another command waits for you at the plan gate ([Gates and rules](#gates-and-rules)). |
-| `worker_tools` | `+`-separated Claude Code tool patterns, or `none` | brigada's default scope, `go build`, `go test`, `go vet` and `gofmt` | Deprecated alias of `permission=`: still read and warned about, but no job grant carries it and no harness takes a scope from it ([section 8](#8-agents-quota-and-health)). |
+| `worker_tools` | `+`-separated Claude Code tool patterns, or `none` | unset | Deprecated alias of `permission=`: still read and warned about, but no job grant carries it and no harness takes a scope from it; it is removed in the next major version, and a file that uses it stays schema 1 ([section 8](#permissions-per-agent)). |
 | `approval_max_tasks` | integer | `0` | A plan with more tasks than this waits for you. `0`, the default, turns the count rule off, and so does a negative value; the other approval rules still apply. |
 | `approval_budget` | a whole number of tokens, a `$` amount, or both joined with `+` | none | The plan budget, which stands in the task count's place: a plan whose recorded spend passes it holds its new jobs mid-run ([Gates and rules](#gates-and-rules)). |
 | `approval_classes` | list of class names | `implement`, `review`, `answer` | A task of a class outside the list holds the plan. |
@@ -656,7 +656,6 @@ An example:
 schema: 1
 repo: github.com/org/app
 default_check: go test ./...
-worker_tools: Bash(go build:*)+Bash(go test:*)
 approval_max_tasks: 8
 approval_protected_paths:
   - infra/**
@@ -756,7 +755,7 @@ The foreman reads imported descriptions from `status` and picks zero to two skil
 
 ### The foreman, effort and tools on agents
 
-The foreman's model and effort are chosen in `brigada init`, or with `brigada project foreman [--repo URL] [--harness H --model M [--effort E]]` ([section 11](#11-the-foremans-harness)). The foreman chooses each task's effort separately. An agent's `effort` and, for Claude, `tools` are set on the runner's `--agent` ([section 8](#8-agents-quota-and-health)), with `tools.claude/<model>` in the config file as the per-model default ([section 13](#13-configuration-reference)).
+The foreman's model and effort are chosen in `brigada init`, or with `brigada project foreman [--repo URL] [--harness H --model M [--effort E]]` ([section 11](#11-the-foremans-harness)). The foreman chooses each task's effort separately. An agent's `effort` and `permission` are set on the runner's `--agent` ([section 8](#8-agents-quota-and-health)), with `permission.<harness>/<model>` in the config file as the per-model default for the permission ([section 13](#13-configuration-reference)).
 
 ## 7. Plans, checks and reviews
 
@@ -805,11 +804,11 @@ The loop — plan, work, check, review, land, push — is brigada's; you stop it
 A held plan waits in `pending_approval`, and nothing is queued. The needs-you entry gives the reasons, for example `7 tasks, over the limit of 5`, `gate_plan is ask` or `check_command: check "make release" differs from default_check "go test ./..."`, with how to release or change it. An amendment of an already-active plan is judged by what it adds: each added task is checked on its own against the per-task rules — its class, the protected paths its spec or check mentions, its extra repositories, its check against `default_check` — and one that trips a rule is held alone, parked with a needs-you line naming the rule, while the plan stays active and the rest runs on. The task count and `gate_plan` never hold an amendment of a running plan, and cancelling, re-pointing or retiering never holds. A `respec` edit is judged on the text it adds and the task's check, with the same per-task hold. You decide:
 
 ```sh
-brigada plan approve 7    # queues the tasks; prints each task's job
-brigada plan reject 7     # cancels the plan's tasks
+brigada plan approve 7    # once signed: queues the tasks; prints each task's job
+brigada plan reject 7     # once signed: cancels the plan's tasks
 ```
 
-or through the coordinator's `plan_approve` and `plan_reject` ([section 3](#3-several-repositories)), which name the plan version you were shown.
+Run bare, either command is a request and acts on nothing: it prints the request and the message to sign. It acts only once you sign that message and run it again with the request and the signature, as [approving by signature](#approving-by-signature) shows. The coordinator's `plan_approve` and `plan_reject` ([section 3](#3-several-repositories)), which name the plan version you were shown, only request in the same way.
 
 On a running plan, `brigada plan approve` releases the tasks a rule holds alone, from an amendment or from the plan budget: they queue as their dependencies allow, and `--and-stop-asking` changes only the rules those tasks tripped. The foreman cannot release them: its `task_restart` and `answer` refuse a held task. `brigada plan reject` works only on a plan that waits whole; to drop a held task, ask the foreman to cancel it.
 
@@ -822,6 +821,31 @@ On a running plan, `brigada plan approve` releases the tasks a rule holds alone,
 **The push gate** (`gate_push`, `auto` by default) decides what follows a successful landing: `auto` pushes the target, `ask` holds the push until `brigada push approve` releases every waiting landing of the project, and `never` leaves the push to you. Both gates, their needs-you entries and `after_land` are described in [section 5](#5-finishing-the-land-job). A held task blocks nothing but its dependents' landings: work on the rest of the plan goes on.
 
 Only you can decide: no foreman tool approves a plan or passes a gate.
+
+### Approving by signature
+
+A token says who may call the engine; it does not say you approved. Approving or rejecting a plan at its version, approving or rejecting a landing and approving a push each need your signature beyond the client token, made with a key you enrolled. A client or admin token alone refuses these five acts. A project import and a user message stay role-checked calls and take no signature.
+
+**Enroll a key once.** Give brigada a public key file; it never reads the private half:
+
+```sh
+brigada approver add --label laptop --public-key ~/.ssh/id_ed25519.pub
+brigada approver list
+brigada approver remove --label laptop
+```
+
+The label takes letters, digits and `. _ @ -`; `--public-key -` reads standard input. The keys live in `approval_keys` in the state directory, public halves only, and the commands edit that file directly, so they need no running engine.
+
+**Sign a gated act.** Ask for the act with its bare command. It does nothing yet: the engine records a pending request with a one-time challenge for that act and the command refuses, printing the request, the challenge, its expiry (five minutes by default) and the message to sign, exactly these lines, to be saved to a file. Sign the file under the `brigada-approval` namespace:
+
+```sh
+brigada plan approve 7                      # refused: prints request #5 and the message to sign
+ssh-keygen -Y sign -f ~/.ssh/id_ed25519 -n brigada-approval msg.txt    # writes msg.txt.sig
+```
+
+Then run the command again with the request and the signature file, here `brigada plan approve --request 5 --signature msg.txt.sig 7`. The same two flags, `--request ID` and `--signature FILE`, go on `brigada plan approve`, `plan reject`, `land approve`, `land reject` and `push approve`, and they go together. A request that waits is an entry of the needs-you queue, as `signature wanted out of band to approve plan #7 at version 2 (request #5, challenge <nonce>, expires <time>)`, and raises a notification. A signature covers its one challenge: it cannot be used again, for another act, for another plan version or after it expires, and the refusal names which reason applies (no enrolled key, no signature, a signature that does not verify, a reused signature, an expired challenge, or an act other than the one signed). Ask again for a fresh challenge when one expires. The gate settings (`gate_plan`, `gate_land`, `gate_push`, `approval_tiers`) still decide what waits; the signature releases what they hold.
+
+**What this does and does not protect.** The engine verifies by running `ssh-keygen -Y verify`, so `ssh-keygen` must be on the `PATH` of the host that runs the engine; without it every approval is refused. A headless run never prompts on a terminal: an approval nobody signs stays waiting. The residual risk is plain: a private key that is an ordinary file the same OS user can read lets an agent with a shell sign. A key that needs a human at signing time defends against that: a hardware token that asks for a touch, an agent key constrained to ask for a touch on each use, or a key kept off the machine.
 
 ### The plan file
 
@@ -916,9 +940,11 @@ The fields of an `--agent` value:
 | `model` | Defaults to `sonnet` for claude, `deepseek-flash` for dsh, and to the CLI's own default for the others. For opencode, a model is `provider/model`. |
 | `classes` | A `+`-separated list; default `implement+review+answer`, `implement+answer` for qwen-code (it runs no reviews). `classes=none` advertises no task classes (foreman only). |
 | `account` | The login whose quota the agent spends; defaults to the harness name (see [Accounts](#accounts)). |
-| `agent-file=<path>` | kimi only. Starts work and fix sessions under your own agent definition. Reviews always use the runner's read-only definition. |
+| `agent-file=<path>` | kimi only. Starts work and fix sessions under your own agent definition. |
 | `effort=<level>` | Validated per harness (see [Effort](#effort)). |
-| `tools=<p1>+<p2>` | claude only (see [Worker tools (claude)](#worker-tools-claude)). |
+| `permission=<mode>` | The permission mode brigada passes to the agent's harness; claude defaults to `bypassPermissions` (see [Permissions](#permissions-per-agent)). |
+| `read-scope=<true\|false>` | `false` turns the read-scope hook off for this agent; default on (see [Permissions](#permissions-per-agent)). |
+| `tools=<p1>+<p2>` | Deprecated alias of `permission=`, removed in the next major version (see [Worker tools (claude)](#worker-tools-claude)). |
 
 Each agent serves one tier, derived from its model name:
 
@@ -960,9 +986,9 @@ The foreman can be `claude`, `codex`, `opencode` or `qwen-code`; `kimi` and `dsh
 
 **Kimi reviews only by default in interactive init.** After `Use kimi?`, init asks whether it may write code too. Enter or no keeps `classes=review`; yes enables `implement+review+answer`. With `--agent` there is no such question: set `classes=review` explicitly for a review-only Kimi agent. Omitting `classes` keeps the runner's default of all three classes.
 
-The runner writes a read-only Kimi agent definition to `<state-dir>/runner/kimi-readonly.md`. It allows only `Read`, `Grep` and `Glob`, with no `Bash`. Kimi reviews always use this definition; a custom `agent-file=` covers work and fix jobs only. A resumed session keeps the definition it started with.
+Kimi's headless mode approves every call and the CLI has no narrower mode, so brigada adds no read-only scope to a Kimi review: a Kimi agent runs `--yolo` or with no flag, whichever its `permission=` says ([section 8](#permissions-per-agent)). A custom `agent-file=` covers work and fix jobs only. A resumed session keeps the definition it started with.
 
-Letting Kimi write code is an opt-in. Init warns that Kimi has no sandbox: when writing code it can run any command on this machine without asking. Work and fix jobs use Kimi's normal agent, or your `agent-file=`, rather than the runner's read-only definition.
+Letting Kimi write code is an opt-in. Init warns that Kimi has no sandbox: when writing code it can run any command on this machine without asking. Work and fix jobs use Kimi's normal agent, or your `agent-file=`.
 
 **Keep the runner running.** A job nobody leases within ten minutes fails. The ten minutes do not count while every runner that could take the job is full, or while every agent that qualifies for it is cooling after a usage limit (a fix round is pinned to its author's agent). `brigada status` shows such a job as held: waiting for a runner slot, or `waiting: <harness>/<model> cooling until <time>`. A job pinned to a broken agent still fails after ten minutes, and the failure names the agent and its state.
 
@@ -1011,38 +1037,68 @@ A nonempty mapped task level overrides the agent's effort. When mapping yields n
 
 Effort is not part of an agent's identity: the dispatcher, `agent reset` and the outcome record still key by `harness/model`. `status` and `stats` print `claude/opus@high` only for an agent that has an effort set. The foreman's effort is chosen separately ([section 11](#11-the-foremans-harness)).
 
+### Permissions per agent
+
+What a worker or a reviewer may do is owned by your harness: brigada sets no tool scope of its own. Each agent carries a permission, and the adapter passes it to its CLI as that CLI's own permission flag or argument, so the CLI's configuration decides the rest.
+
+`permission=<mode>` on the `--agent` sets it for one agent; the config key `permission.<harness>/<model>` sets the default for that model. The value is one token with no spaces, commas or control characters. The `--agent` value wins over the config key, and the config key over the harness default. Only claude has a default, `bypassPermissions`; for the other harnesses no value leaves the choice to the adapter.
+
+```sh
+brigada runner --agent harness=claude,model=sonnet,permission=acceptEdits --agent harness=codex,permission=read-only
+```
+
+The runner advertises the resolved value with the agent, the engine stores it, and every job grant the agent takes carries it. A review takes the same permission as a work job: brigada adds no read-only scope of its own to a review. `brigada config` shows each agent's resolved `permission:`, and `brigada init` saves a Claude agent that has none with the harness default ([section 1](#1-install-and-brigada-init)). Each adapter maps the value to its CLI as below; claude passes any other value through as a mode name, and every other adapter refuses a value outside its list with an error that names the ones it takes.
+
+| Harness | No value | Values | Passed as |
+|---|---|---|---|
+| claude | `bypassPermissions` | any `--permission-mode` value; `none` for file tools only with no shell; a `+`-separated list of tool patterns for an allowlist | `--permission-mode`; `none` and a list run `acceptEdits`, the list adding `--allowedTools` |
+| codex | `workspace-write` | `read-only`, `workspace-write`, `danger-full-access` | the `-s` sandbox |
+| opencode | `allow` | `ask`, `allow`, `deny` | one `OPENCODE_PERMISSION` rule for bash, edit and webfetch; `external_directory` stays denied |
+| dsh | `workspace-write` | `read-only`, `workspace-write`, `danger-full-access` | `DSH_PERMISSION_MODE` |
+| kimi | no flag | `yolo` | `--yolo` |
+| qwen-code | its auto-approve flag | `plan`, `default`, `auto-edit`, `yolo` | `--approval-mode` |
+
+The foreman's own confinement is not the agent's to loosen on codex, opencode and qwen-code: a foreman turn there never reads `permission=`. On claude the foreman keeps brigada's tool scope, with `acceptEdits` when the agent sets none ([section 11](#what-a-foreman-harness-must-do)).
+
+**The read-scope hook is a default you can turn off.** It is on for every agent that has one. `read-scope=false` on the `--agent`, or `read_scope.<harness>/<model> = false` in the config file, turns it off for that agent; unset is on. A claude agent with the switch off installs no read-scope hook in its foreman session's settings, and its foreman then reads as wide as your own claude configuration lets it. Only the claude adapter reads the switch.
+
+**Deprecated aliases.** The agent's `tools=`, the config key `tools.claude/<model>` and the project's `worker_tools` are deprecated aliases of `permission=`. They still read and store the same value, and print `<key> is deprecated; use permission= instead (<key> is kept as an alias until the next major version)`. They are removed in the next major version, and a `project.yaml` that uses `worker_tools` stays schema 1 until then. An agent whose `tools=` and `permission=` disagree is refused: keep `permission=`.
+
+The worker's prompt names no shell scope: brigada appends no scope paragraph to any job's prompt. The worker template says instead that what its tools may do is set by its harness's own permission mode, that a refusal covers one call and not every tool, and that it needs no git because the runner commits and pushes.
+
+### What a worker can and cannot push
+
+A task worktree carries no push URL, and the runner is the only path to the remote. A worker therefore cannot push or force-push its own branch: it edits files, and the runner pushes the task's branch, then lands approved work by the push gate ([section 5](#gates-and-holds)). Only the runner's credentials reach the remote; the credential scrub keeps your forge credentials out of a worker's environment.
+
+That is not a sandbox. Git run as you against an explicit URL still pushes with whatever your account holds, and a worker whose harness grants a shell runs as you ([SECURITY.md](../SECURITY.md)).
+
 ### Worker tools (claude)
 
-A claude worker edits files in its worktree, and by default its shell is limited to `go build`, `go test`, `go vet` and `gofmt`. That default is Go only, so in a Node, Python or Rust repo the worker cannot run its own tests (the runner's check still runs on the finished tree). That is why `brigada init` suggests each claude agent's `permission=` default instead of a tool scope derived from your build files ([section 1](#1-install-and-brigada-init)).
-
-`tools=` replaces the default for one agent with a `+`-separated list of Claude Code tool patterns:
+Before `permission=`, a claude worker's shell was limited by default to `go build`, `go test`, `go vet` and `gofmt`, and `tools=` replaced that list for one agent with `+`-separated Claude Code tool patterns. The key still reads, as the deprecated alias of `permission=` ([above](#permissions-per-agent)); a claude agent with no permission now runs under `bypassPermissions`, which is why `brigada init` saves that default instead of a tool scope derived from your build files.
 
 ```sh
 brigada runner --agent 'harness=claude,tools=Bash(npm test:*)+Bash(npx jest:*)'
 ```
 
-- `tools=none` means the file tools only, no shell at all.
-- The config key `tools.claude/<model>` (same syntax) sets the default for that model's agent. `tools=` on the `--agent` wins over it, and an agent with neither keeps the Go default.
-- A pattern cannot contain a comma: the `--agent` value splits on commas.
-- The scope applies to workers only. The foreman's own tools (read-only file tools and brigada's MCP tools, no shell and no edits) never change, whatever `tools=` says.
-- `codex`, `kimi`, `opencode`, `dsh` and `qwen-code` refuse `tools=`. Dsh workers run under `DSH_PERMISSION_MODE=workspace-write` (reviews: `read-only`), an OS-level scope. Codex workers run in the `workspace-write` sandbox, codex reviews in `read-only`. A claude review gets only the file-reading tools and git's read commands, whatever the agent's scope or permission mode says, and an opencode review also denies edit and webfetch. Headless claude runs ignore the repository's own `.claude/settings.json` and `.mcp.json`, and qwen-code runs ignore the repository's own `.qwen/settings.json` (`--setting-sources user`; `QWEN.md` is not scoped), and opencode runs ignore its `opencode.json`, `.opencode/` and the project's own instruction files (`AGENTS.md`, `CLAUDE.md`); brigada's prompt carries the instructions. Kimi reviews always use the read-only agent definition above; an `agent-file=` applies to work and fix jobs, which then may also run commands without asking. What each harness's worker may run: claude, the agent's `tools=` scope (or `tools.claude/<model>`), else the Go default; the project's `worker_tools` is not read by claude; opencode, bash commands of the Go default scope until its adapter maps `permission=` (`Bash(X:*)` allows `X` and `X *`, and a compound command runs only if every part is allowed); a review runs none; dsh, bash sandboxed to writing the worktree and the temp directories, with `GOCACHE` set to a brigada directory under the temp directory and `GIT_OPTIONAL_LOCKS=0` for work and fix jobs. Every opencode worker also runs with `OPENCODE_PERMISSION` denying `external_directory`: a tool call that reaches outside its worktree fails with a permission error the model sees and can answer, instead of the ask a headless run auto-rejects. Should such an auto-reject still end a run without a word, the adapter reads the CLI's stderr notice and records it as the failure's reason.
-- The worker's prompt no longer names a shell scope: brigada appends no scope paragraph to any job's prompt. The worker template says instead that what its tools may do is set by its harness's own permission mode, that a refusal covers one call and not every tool, and that it needs no git because the runner commits and pushes.
-- `permission=` is the per-agent key that replaces `tools=` and the project's `worker_tools`: the permission mode brigada passes to that agent's harness, a string the adapter interprets (for claude, a `--permission-mode` value; `bypassPermissions` when the agent sets none). Config key `permission.<harness>/<model>`; the `--agent` flag wins over it, and it over the harness default. `tools=`, `tools.claude/<model>` and `worker_tools` stay as deprecated aliases that store the same value and print a warning naming the key; they are removed no earlier than the next major version, and a project.yaml that uses `worker_tools` stays schema 1. The runner advertises the resolved value with the agent, the engine stores it, and every job grant the agent takes carries it, a review's included, with no read-only default of brigada's: the runner hands it to the adapter, which passes it to its CLI as that CLI's own permission flag or argument. Each adapter's own mapping lands adapter by adapter; until then only the fake adapter (a `--permission <value>` argument) passes it on.
-- The read-scope hook is on for every agent that has one. `read-scope=false` on the `--agent`, or `read_scope.<harness>/<model> = false` in the config file, turns it off for that agent; unset is on. A claude agent with the switch off installs no read-scope hook in its foreman session's settings.
+- `tools=none` means the file tools only, no shell at all, as `permission=none` does. The config key `tools.claude/<model>` (same syntax) sets the default for that model's agent; `tools=` on the `--agent` wins over it. A pattern cannot contain a comma: the `--agent` value splits on commas.
+- The other harnesses refuse `tools=`.
+- Headless claude runs ignore the repository's own `.claude/settings.json` and `.mcp.json`, qwen-code runs ignore its `.qwen/settings.json` (`--setting-sources user`; `QWEN.md` is not scoped), and opencode runs ignore its `opencode.json`, `.opencode/` and the project's own instruction files (`AGENTS.md`, `CLAUDE.md`); brigada's prompt carries the instructions.
+- Every opencode worker also runs with `OPENCODE_PERMISSION` denying `external_directory`: a tool call that reaches outside its worktree fails with a permission error the model sees and can answer, instead of the ask a headless run auto-rejects. Should such an auto-reject still end a run without a word, the adapter reads the CLI's stderr notice and records it as the failure's reason.
+- Dsh work and fix jobs run with `GOCACHE` set to a brigada directory under the temp directory and `GIT_OPTIONAL_LOCKS=0`.
 - `brigada runner` prints each claude agent's scope at startup, and the foreman's capacity read shows it as `tools=` on the agent.
 
 ### Scope per harness
 
-What a worker or reviewer may do is set by its CLI's own permission scope, not by a container. Work and fix jobs and reviews differ:
+What a worker or reviewer may do is set by its harness's own permission mode, which brigada passes through per agent ([permissions per agent](#permissions-per-agent)), not by a container and not by a scope of brigada's. Work, fix and review jobs take the same permission; the foreman's scope is brigada's own:
 
-| Harness | Work and fix jobs | Reviews | Foreman |
-|---|---|---|---|
-| claude | `acceptEdits` with a tool allowlist: file tools and `go build`, `go test`, `go vet`, `gofmt` by default; `tools=` replaces the shell allowlist | file-reading tools and git's read commands; editing tools denied | brigada's MCP tools; `Read`, `Grep`, `Glob` confined to the reading checkout by a PreToolUse hook in the session's settings — refused outside it, subagents included, in a headless turn and an attach alike; `Bash`, `Edit`, `NotebookEdit`, `NotebookRead`, `Write`, `WebFetch`, `WebSearch` denied |
-| codex | `workspace-write` sandbox | `read-only` sandbox | `read-only` sandbox, with MCP approvals decided by a model; the sandbox keeps shell tools and does not confine file reads to the checkout |
-| kimi | no scope from brigada; the CLI's own permissions apply. `agent-file=` replaces the agent definition | the runner's read-only agent file, which disallows `Bash` | not available |
-| opencode | `OPENCODE_PERMISSION` rules, with external directories denied unless a checkout is named | also denies edit and webfetch | brigada's MCP tools; `OPENCODE_PERMISSION` denies bash, edit, webfetch and reads outside the reading checkout, in a headless turn and an attach alike |
-| dsh | OS-level `workspace-write` (`DSH_PERMISSION_MODE`) | OS-level `read-only` | not available |
-| qwen-code | headless `qwen -p` with its auto-approve flag; no scope from brigada | none: its agents never take the review class | brigada's MCP tools through `--mcp-config` with `--strict-mcp-config`, but no read-only scope: a headless turn keeps the auto-approve flag, so it can edit files and run any command in the reading checkout, and its reads are not confined to it; an attach runs without that flag, under the CLI's own approval prompts |
+| Harness | Work, fix and review jobs | Foreman |
+|---|---|---|
+| claude | the agent's `permission=`: `--permission-mode`, `bypassPermissions` by default; `none` or a tool list runs `acceptEdits` with the file tools alone or that allowlist | brigada's MCP tools; `Read`, `Grep`, `Glob` confined to the reading checkout by a PreToolUse hook in the session's settings, a default the agent's `read-scope=false` turns off — refused outside it, subagents included, in a headless turn and an attach alike; `Bash`, `Edit`, `NotebookEdit`, `NotebookRead`, `Write`, `WebFetch`, `WebSearch` denied |
+| codex | the `-s` sandbox the permission names, `workspace-write` by default | `read-only` sandbox, with MCP approvals decided by a model; the sandbox keeps shell tools and does not confine file reads to the checkout |
+| kimi | `--yolo` or nothing: the CLI's headless mode approves every call and has no narrower one. `agent-file=` replaces the agent definition of work and fix jobs | not available |
+| opencode | an `OPENCODE_PERMISSION` rule (`ask`, `allow` or `deny`, `allow` by default) for bash, edit and webfetch, with external directories denied unless a checkout is named | brigada's MCP tools; `OPENCODE_PERMISSION` denies bash, edit, webfetch and reads outside the reading checkout, in a headless turn and an attach alike |
+| dsh | `DSH_PERMISSION_MODE`, the OS-level mode the permission names, `workspace-write` by default | not available |
+| qwen-code | headless `qwen -p` with its auto-approve flag, or the `--approval-mode` the permission names | brigada's MCP tools through `--mcp-config` with `--strict-mcp-config`, but no read-only scope: a headless turn keeps the auto-approve flag, so it can edit files and run any command in the reading checkout, and its reads are not confined to it; an attach runs without that flag, under the CLI's own approval prompts |
 
 Every harness runs in a git worktree on your machine. Workers inherit your environment minus the credential scrub ([design §5.8](design/05-workers.md#the-credential-scrub)), so none of these scopes keeps a check command, a test run or a kimi worker away from your remaining credentials or the network.
 
@@ -1384,9 +1440,9 @@ The config file is optional. Its format:
 | `caps.model.<model>` | integer, 0 or more | no cap | Most parallel jobs on one model. |
 | `cost.<harness>/<model>` | integer, 0 or more | `1` | Relative cost weight of an agent, shown to the foreman. Dispatch ranks the agents of a tier by weight / p, p being a draw from the agent's success record, so a higher weight is picked less often. `0` means free: ranked before every agent with a positive weight. |
 | `tier.<harness>/<model>` | `light`, `standard` or `heavy` | from the model name | Override the tier for every agent of this harness/model, shown in stats and capacity. |
-| `tools.claude/<model>` | `+`-separated Claude Code tool patterns, or `none` | the Go scope | Default shell scope of the claude worker agent on that model; `--agent ...,tools=` overrides it ([section 8](#worker-tools-claude)). Other harnesses are refused. Deprecated alias of `permission.<harness>/<model>`: it stores the same value and warns. |
-| `permission.<harness>/<model>` | a permission mode: one token, no spaces or commas (claude: a `--permission-mode` value) | claude `bypassPermissions`; other harnesses none | Permission mode brigada passes to that agent's harness; `--agent ...,permission=` overrides it ([section 8](#worker-tools-claude)). The runner advertises the resolved value and every job grant of the agent carries it to the adapter. |
-| `read_scope.<harness>/<model>` | `true` or `false` | `true` (on) | Whether the read-scope hook is on for that agent; `--agent ...,read-scope=` overrides it. Off installs no read-scope hook in a claude foreman session's settings. |
+| `tools.claude/<model>` | `+`-separated Claude Code tool patterns, or `none` | none: the claude default `bypassPermissions` applies | Deprecated alias of `permission.claude/<model>`: it stores the same value for the claude agent on that model and warns, and it is removed in the next major version; `--agent ...,tools=` is the agent-level alias ([section 8](#worker-tools-claude)). Other harnesses are refused. |
+| `permission.<harness>/<model>` | a permission mode: one token, no spaces or commas (claude: a `--permission-mode` value) | claude `bypassPermissions`; other harnesses none | Permission mode brigada passes to that agent's harness; `--agent ...,permission=` overrides it ([section 8](#permissions-per-agent)). The runner advertises the resolved value and every job grant of the agent carries it to the adapter. |
+| `read_scope.<harness>/<model>` | `true` or `false` | `true` (on) | Whether the read-scope hook is on for that agent; `--agent ...,read-scope=` overrides it. Off installs no read-scope hook in a claude foreman session's settings ([section 8](#permissions-per-agent)). |
 | `env.<harness>.<VAR>` | `keychain:<item>` or `file:<path>` | the ambient variable | A variable for that harness's jobs only, resolved when the runner starts: `keychain:` reads the macOS keychain item through `security find-generic-password -w -s <item>`, `file:` reads a file that must be mode 0600. The config holds the reference, never the value, and the value never reaches a log, the store, status or an error. `PWD`, `BRIGADA_*`, `DSH_PERMISSION_MODE`, `DSH_TELEMETRY_MODE`, `OPENCODE_PERMISSION` and `OPENCODE_DISABLE_PROJECT_CONFIG` are set by the runner and refused as `<VAR>`. See [dsh](#dsh-experimental). |
 
 A cap of `0` caps the layer at nothing, which is different from leaving it out. Init writes `caps.global = N` from tasks at once, `caps.plan = 3` and `caps.account.<label>` for each usable account: Claude 3, Codex 2, Kimi 1 and OpenCode 2, each clamped to N. If harnesses share a label, the smaller cap wins. It preserves other config entries and comments, adds a cap key only when it is absent, and groups newly added keys under `# set by brigada init`. An existing cap keeps its value — the plan names each value it keeps and each one it changes — unless the tasks-at-once answer was explicit (`--parallel N` or a typed number, which sets `caps.global`) or `--overwrite-config` is passed. The engine reads the config at startup; restart it after changing caps or tier overrides.
@@ -1450,9 +1506,9 @@ A command's flags go after its name and before its positional arguments (`diff`,
 
 ### Starting
 
-- `brigada init [--repo URL] [--remote NAME] [--probe | --yes] [--verbose] [--agent SPEC]... [--signed-in HARNESS]... [--foreman HARNESS/MODEL[@EFFORT]] [--parallel N] [--check CMD] [--tools SCOPE] [--accept-limited] [--no-wiring] [--all]`: set up one repository, or, in a folder that is not a repository, the projects under it. `brigada init --take-default <role|skill>` instead resets one generated role file or default skill to the new default under a fresh header and does nothing else. See [sections 1](#1-install-and-brigada-init) and [3](#3-several-repositories).
+- `brigada init [--repo URL] [--remote NAME] [--probe | --yes] [--verbose] [--agent SPEC]... [--signed-in HARNESS]... [--foreman HARNESS/MODEL[@EFFORT]] [--parallel N] [--check CMD] [--tools SCOPE (deprecated)] [--accept-limited] [--no-wiring] [--all]`: set up one repository, or, in a folder that is not a repository, the projects under it. `brigada init --take-default <role|skill>` instead resets one generated role file or default skill to the new default under a fresh header and does nothing else. See [sections 1](#1-install-and-brigada-init) and [3](#3-several-repositories).
 - `brigada start`: start the engine and detached runner with the agents and tasks-at-once limit saved by init; succeeds when the runner is already running. Use it after a reboot or `brigada stop`. It lifts the drain pause an interrupted `brigada stop --engine --drain` left; a pause you set with `brigada pause` stays. See [section 1](#changing-your-setup-later).
-- `brigada runner [--agent SPEC]... [--harness HARNESS] [--model MODEL] [--classes CLASSES] [--agent-file PATH] [--worker-script PATH] [--labels LABELS] [--max-parallel N]`, where SPEC is `harness=<h>[,model=<m>][,classes=<c1>+<c2>|none][,account=<label>][,agent-file=<path>][,effort=<level>][,tools=<p1>+<p2>|none]`: run a runner that leases jobs, runs workers and checks, and pushes branches. The shorthand agent flags cannot be mixed with `--agent`; `--worker-script` is for the `fake` harness used by tests. See [section 8](#8-agents-quota-and-health).
+- `brigada runner [--agent SPEC]... [--harness HARNESS] [--model MODEL] [--classes CLASSES] [--agent-file PATH] [--worker-script PATH] [--labels LABELS] [--max-parallel N]`, where SPEC is `harness=<h>[,model=<m>][,classes=<c1>+<c2>|none][,account=<label>][,agent-file=<path>][,effort=<level>][,permission=<mode>][,read-scope=true|false][,tools=<p1>+<p2>|none]` (`tools=` is deprecated for `permission=`): run a runner that leases jobs, runs workers and checks, and pushes branches. The shorthand agent flags cannot be mixed with `--agent`; `--worker-script` is for the `fake` harness used by tests. See [section 8](#8-agents-quota-and-health).
 - `brigada instructions diff <role|skill>`: compare one generated role file or default skill with the default it was generated from and with the new default, run inside the repository. It finds the generated text in the archive of shipped defaults by the version in the file's header, checked against the header's digest (an untagged build's version names no archive directory, so the digest alone is then matched against every shipped version), then prints one three-way diff, diff3 style, of your file, the generated default and the new default. When no shipped text matches, or the file has no header, it gives a two-way diff of your file against the new default, with the reason. Unknown names are a usage error listing the roles and skills. `brigada init --take-default <role|skill>` resets the file.
 - `brigada stop [--engine] [--drain]`: stop the detached runner in the selected state directory; `--engine` also stops the engine. `--drain` (with `--engine`) first pauses the engine, waits until no job of it is leased or running — naming the jobs it still waits on — and only then stops; an interrupt stops nothing and leaves the pause for `brigada start` to lift. Sends SIGTERM and waits up to 10 seconds per process; succeeds if nothing is running, and never starts the engine. See [section 1](#stopping).
 - `brigada pause [--repo URL]`, `brigada resume [--repo URL]`: pause dispatch — the whole engine bare, one project with `--repo` — and lift that scope's pause and no other. Running jobs run to their end; queued jobs and foreman wakes of the scope wait, and the time a job was paused does not count against its queue clocks. See [section 1](#stopping).
@@ -1480,13 +1536,18 @@ A command's flags go after its name and before its positional arguments (`diff`,
 ### Finishing
 
 - `brigada land <task-id>... [--onto BRANCH] [--repo URL] [--landed ID]... [--no-check]`: the hand-driven squash of approved tasks onto the checked-out branch, one commit each, in dependency order; rerun the default check; print the push command and stop. See [section 5](#5-finishing-the-land-job).
-- `brigada land approve <task>`, `brigada land reject <task>`: your decision on a landing held at the land gate; approve queues its land job, reject cancels the landing and leaves the branch; `--and-stop-asking` also changes the rule that held it. See [section 5](#gates-and-holds).
-- `brigada push approve [--repo URL]`: release the push gate; every waiting landing of the project gets its push queued. See [section 5](#gates-and-holds).
-- `brigada approver add --label L --public-key FILE`, `brigada approver list`, `brigada approver remove --label L`: enroll, list and remove the public keys your approvals are signed with. The keys live in `approval_keys` in the state directory, mode 0600, public halves only: brigada never reads or stores a private key. The settings `gate_plan`, `gate_land`, `gate_push` and `approval_tiers` keep deciding what waits; this is the authority behind a gate, and it asks for `ssh-keygen` to verify a signature. No gate asks for a signature yet.
+- `brigada land approve [--and-stop-asking] [--request ID --signature FILE] <task>`, `brigada land reject [--request ID --signature FILE] <task>`: your decision on a landing held at the land gate; approve queues its land job, reject cancels the landing and leaves the branch; `--and-stop-asking` also changes the rule that held it. Both take your signature ([approving](#approving)). See [section 5](#gates-and-holds).
+- `brigada push approve [--repo URL] [--request ID --signature FILE]`: release the push gate; every waiting landing of the project gets its push queued. It takes your signature ([approving](#approving)). See [section 5](#gates-and-holds).
+
+### Approving
+
+An approval is your signature beyond any token ([section 7](#approving-by-signature)). Five commands take it: `brigada plan approve`, `brigada plan reject`, `brigada land approve`, `brigada land reject` and `brigada push approve`, each with `--request ID --signature FILE`. Bare, they print the request and the message to sign and exit 1; with both flags they act. The flags go together, and the signature file is what `ssh-keygen -Y sign -n brigada-approval` wrote for the request's message.
+
+- `brigada approver add --label L --public-key FILE`, `brigada approver list`, `brigada approver remove --label L`: enroll, list and remove the public keys your approvals are signed with. The keys live in `approval_keys` in the state directory, mode 0600, public halves only: brigada never reads or stores a private key. The settings `gate_plan`, `gate_land`, `gate_push` and `approval_tiers` keep deciding what waits; the signature releases what they hold, and the engine's host needs `ssh-keygen` on `PATH` to verify one.
 
 ### Deciding
 
-- `brigada plan approve <id>`, `brigada plan reject <id>`: your answer on a plan held at the plan gate; `--and-stop-asking` also changes the rule that held it. See [section 7](#gates-and-rules).
+- `brigada plan approve [--and-stop-asking] [--request ID --signature FILE] <id>`, `brigada plan reject [--request ID --signature FILE] <id>`: your answer on a plan held at the plan gate; `--and-stop-asking` also changes the rule that held it. Both take your signature ([approving](#approving)). See [section 7](#gates-and-rules).
 - `brigada budget [--repo URL] [--wakes N]`: show the project's foreman wake budget, with today's use and the UTC reset time; `--wakes N` (1 to 1000) sets it. See [section 4](#the-wake-budget).
 - `brigada agent reset <harness>/<model>`: clear a broken or cooling agent. See [section 8](#broken-agents).
 - `brigada cancel <job-id>`: stop one live job. See [section 4](#cancelling-and-retiring).
