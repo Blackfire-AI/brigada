@@ -7,7 +7,7 @@ title: "#228 revert: approval is a convention, not security; remove the approval
 repo: "github.com/Blackfire-AI/brigada"
 state: reviewing
 created: 2026-11-13T07:43:01.195601Z
-updated: 2026-11-13T08:34:56.192344Z
+updated: 2026-11-13T08:36:26.657041Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -30,7 +30,7 @@ tasks:
     effort: medium
     review_tier: standard
     skills: ["surface-parity", "docs-change"]
-    state: ready
+    state: running
     branch: "brigada/task-787"
     rounds: 0
   - id: 788
