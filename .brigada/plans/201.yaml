@@ -228,7 +228,7 @@ tasks:
     skills: ["surface-parity"]
     state: running
     branch: "brigada/task-777-r1"
-    rounds: 1
+    rounds: 2
   - id: 778
     name: "leftovers-permission"
     title: "Leftovers of the permission pass-through: the dead kimi read-only wiring, the retired qwen-code review reason, TERMS.md rule 2"
