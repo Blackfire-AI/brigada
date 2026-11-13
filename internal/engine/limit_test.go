@@ -81,6 +81,29 @@ func TestForemanBalanceMarksTheProjectLimited(t *testing.T) {
 	}
 }
 
+// TestForemanBalanceWithAResetTimeKeepsIt: a spent balance whose error
+// names a reset time ahead limits the project until then, and the
+// foreman_limited event carries it.
+func TestForemanBalanceWithAResetTimeKeepsIt(t *testing.T) {
+	e := newEnv(t)
+	until := e.clock.Now().Add(3 * time.Hour)
+	e.park("which file?")
+	g := e.leaseForeman()
+	c := Completion{Error: "foreman CLI failed (balance): insufficient credits", ErrorKind: "balance", LimitUntil: until.Format(time.RFC3339)}
+	if ans := e.complete(g, c); ans != AnsOK {
+		t.Fatalf("complete the balance-failed turn: %s", ans)
+	}
+	if got, want := e.limitedState(), fmtTime(until); got != want {
+		t.Errorf("limited state = %q, want %q", got, want)
+	}
+	if got := e.countEvents(evForemanLimited); got != 1 {
+		t.Errorf("foreman_limited events = %d, want 1", got)
+	}
+	if got := e.str("SELECT payload FROM events WHERE kind = ?", evForemanLimited); !strings.Contains(got, fmtTime(until)) {
+		t.Errorf("event payload %s does not carry %s", got, fmtTime(until))
+	}
+}
+
 // TestForemanLimitUnknownUntil: a limit error with no usable reset time
 // is limited(unknown), and the event carries no until.
 func TestForemanLimitUnknownUntil(t *testing.T) {

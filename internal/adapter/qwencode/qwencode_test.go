@@ -349,6 +349,48 @@ func TestParseIgnoresNoise(t *testing.T) {
 	}
 }
 
+// balanceResult is the out-of-credits result line of a real transcript.
+const balanceResult = `{"type":"result","subtype":"error_during_execution","is_error":true,"num_turns":1,"errors":["inference.chatCompletions.stream: HTTP 402: {\"error\":{\"type\":\"billing_error\",\"code\":\"insufficient_quota\",\"message\":\"insufficient credits: top up and retry\",\"retryable\":false,\"quota\":{\"member_type\":\"plus\",\"reset_at\":1795080981}}}"],"error_code":"insufficient_quota"}`
+
+// TestBalanceFixtureStdout runs the out-of-credits stdout through ParseEvent:
+// the last error event is a spent balance with the reset time of the 402.
+func TestBalanceFixtureStdout(t *testing.T) {
+	a := &Adapter{}
+	var last adapter.Event
+	var found bool
+	for _, l := range readLines(t, "failure-balance.jsonl") {
+		if ev, ok := a.ParseEvent([]byte(l)); ok && ev.Kind == adapter.EvError {
+			last, found = ev, true
+		}
+	}
+	if !found {
+		t.Fatal("no error event")
+	}
+	if last.ErrorKind != adapter.ErrBalance {
+		t.Errorf("kind = %q, want %q", last.ErrorKind, adapter.ErrBalance)
+	}
+	if want := "2026-11-19T09:36:21Z"; last.LimitUntil != want {
+		t.Errorf("LimitUntil = %q, want %q", last.LimitUntil, want)
+	}
+	if !strings.Contains(last.Text, "HTTP 402") {
+		t.Errorf("Text = %q, want the errors text", last.Text)
+	}
+}
+
+func TestBalanceResetAtMalformed(t *testing.T) {
+	a := &Adapter{}
+	for _, l := range []string{
+		`{"type":"result","is_error":true,"errors":["HTTP 402: {\"error\":{\"type\":\"billing_error\",\"quota\":{\"reset_at\":\"soon\"}}}"]}`,
+		`{"type":"result","is_error":true,"errors":["HTTP 402: {not json"]}`,
+		`{"type":"result","is_error":true,"errors":["HTTP 402: billing_error"]}`,
+	} {
+		ev, ok := a.ParseEvent([]byte(l))
+		if !ok || ev.ErrorKind != adapter.ErrBalance || ev.LimitUntil != "" {
+			t.Errorf("%s = %+v, %v; want balance with no LimitUntil", l, ev, ok)
+		}
+	}
+}
+
 func TestErrorResult(t *testing.T) {
 	a := &Adapter{}
 	cases := []struct {
@@ -358,6 +400,8 @@ func TestErrorResult(t *testing.T) {
 		{`{"type":"result","subtype":"error_during_execution","is_error":true,"result":"Usage limit reached"}`, adapter.ErrLimit},
 		{`{"type":"result","is_error":true,"result":"something odd happened"}`, adapter.ErrOther},
 		{`{"type":"result","subtype":"error_max_turns","is_error":true}`, adapter.ErrOther},
+		{balanceResult, adapter.ErrBalance},
+		{`{"type":"result","subtype":"error_during_execution","is_error":true,"error_code":"insufficient_quota"}`, adapter.ErrLimit},
 	}
 	for _, tc := range cases {
 		for name, parse := range map[string]func([]byte) (adapter.Event, bool){"stdout": a.ParseEvent, "stderr": a.ParseErrEvent} {
