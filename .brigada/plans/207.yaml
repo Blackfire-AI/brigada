@@ -30,6 +30,6 @@ tasks:
     tier: light
     effort: low
     skills: ["config-setting"]
-    state: ready
+    state: running
     branch: "brigada/task-791"
     rounds: 0
