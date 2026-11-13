@@ -83,20 +83,20 @@ func foremanToolScope() (allowed, disallowed []string) {
 	return allowed, []string{"Bash", "Edit", "NotebookEdit", "NotebookRead", "Write", "WebFetch", "WebSearch"}
 }
 
-// DefaultWorkerTools is the Go scope list the deprecated tools= display
-// name (ScopeText) renders for a nil scope; the claude adapter no longer
-// passes it to the CLI.
+// DefaultWorkerTools is the Go scope list `brigada init` suggests as a
+// check's tools; the claude adapter does not pass it to the CLI.
 func DefaultWorkerTools() []string {
 	return []string{"Bash(go build:*)", "Bash(go test:*)", "Bash(go vet:*)", "Bash(gofmt:*)"}
 }
 
-// ScopeText renders a worker scope as the agent registration records it
-// and the runner prints it: the patterns joined by "+", the --agent
-// tools= spelling, and "none" for the explicitly empty scope. A nil
-// scope is the default and renders as the Go default's patterns.
+// ScopeText renders an explicit worker scope as the agent registration
+// records it and the runner prints it: the patterns joined by "+", the
+// --agent tools= spelling, and "none" for the explicitly empty scope. A
+// nil scope is no tools= at all and renders as "": the agent runs under
+// its permission, which the displays show instead.
 func ScopeText(tools []string) string {
 	if tools == nil {
-		tools = DefaultWorkerTools()
+		return ""
 	}
 	if len(tools) == 0 {
 		return "none"

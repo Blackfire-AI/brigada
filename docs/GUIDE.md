@@ -1085,7 +1085,7 @@ brigada runner --agent 'harness=claude,tools=Bash(npm test:*)+Bash(npx jest:*)'
 - Headless claude runs ignore the repository's own `.claude/settings.json` and `.mcp.json`, qwen-code runs ignore its `.qwen/settings.json` (`--setting-sources user`; `QWEN.md` is not scoped), and opencode runs ignore its `opencode.json`, `.opencode/` and the project's own instruction files (`AGENTS.md`, `CLAUDE.md`); brigada's prompt carries the instructions.
 - Every opencode worker also runs with `OPENCODE_PERMISSION` denying `external_directory`: a tool call that reaches outside its worktree fails with a permission error the model sees and can answer, instead of the ask a headless run auto-rejects. Should such an auto-reject still end a run without a word, the adapter reads the CLI's stderr notice and records it as the failure's reason.
 - Dsh work and fix jobs run with `GOCACHE` set to a brigada directory under the temp directory and `GIT_OPTIONAL_LOCKS=0`.
-- `brigada runner` prints each claude agent's scope at startup, and the foreman's capacity read shows it as `tools=` on the agent.
+- `brigada runner` prints each agent's permission at startup, and the foreman's capacity read shows it as `permission=` on the agent; an agent with an explicit `tools=` scope shows that scope as `tools` and `tools=` instead.
 
 ### Scope per harness
 

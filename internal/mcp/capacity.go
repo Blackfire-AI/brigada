@@ -42,9 +42,14 @@ func callCapacity(ctx context.Context, c *api.Client, _ json.RawMessage) (string
 		if a.Quota == "cooling" {
 			quota += " until " + a.CoolingUntil
 		}
+		// An explicit tools= scope is shown as the alias still changes what
+		// claude runs; otherwise the resolved permission is the scope.
 		tools := ""
-		if a.Tools != "" {
+		switch {
+		case a.Tools != "":
 			tools = " tools=" + a.Tools
+		case a.Permission != "":
+			tools = " permission=" + a.Permission
 		}
 		fmt.Fprintf(&b, "agent %d %s/%s tier=%s effort=%s account=%s cap=%s running=%d quota=%s cost=%d%s\n",
 			a.ID, a.Harness, a.Model, a.Tier, a.Effort, a.Account, cap, a.Running, quota, a.Cost, tools)

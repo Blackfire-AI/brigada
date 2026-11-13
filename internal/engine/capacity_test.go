@@ -325,6 +325,7 @@ func TestCapacityAgentTools(t *testing.T) {
 	scoped := e.addAgent(e.runner1, "claude", "sonnet", "work")
 	plain := e.addAgent(e.runner1, "codex", "gpt", "work")
 	e.exec("UPDATE agents SET tools = ? WHERE id = ?", "Bash(npm test:*)+Bash(npx jest:*)", scoped)
+	e.exec("UPDATE agents SET permission = ? WHERE id = ?", "workspace-write", plain)
 
 	snap, err := e.eng.Capacity(e.ctx, e.project)
 	if err != nil {
@@ -335,6 +336,9 @@ func TestCapacityAgentTools(t *testing.T) {
 	}
 	if got := snapAgent(t, snap, plain).Tools; got != "" {
 		t.Errorf("unscoped agent's tools = %q, want empty", got)
+	}
+	if got := snapAgent(t, snap, plain).Permission; got != "workspace-write" {
+		t.Errorf("unscoped agent's permission = %q", got)
 	}
 }
 
