@@ -128,7 +128,7 @@ tasks:
     skills: ["docs-change"]
     state: running
     branch: "brigada/task-769"
-    rounds: 1
+    rounds: 2
   - id: 770
     name: "approval-primitive"
     title: "Approval authority: internal/approval, the challenge-signature primitive"
