@@ -238,9 +238,10 @@ tasks:
     effort: medium
     caps: {fix_rounds: 3, review_rounds: 2, restart: 2}
     skills: ["refactor", "docs-change"]
-    state: running
+    state: needs_foreman
     branch: "brigada/task-778"
     rounds: 2
+    question: "Can the foreman or land job run `git rm internal/adapter/kimi/readonly.md` on branch brigada/task-778 (or give me a tool that can delete files)?"
   - id: 779
     name: "scope-display"
     title: "The registered scope display: capacity and the runner's startup line say what the harness actually runs"
