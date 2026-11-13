@@ -30,7 +30,7 @@ tasks:
     effort: medium
     review_tier: standard
     skills: ["surface-parity", "docs-change"]
-    state: ready
+    state: running
     branch: "brigada/task-787"
     rounds: 0
   - id: 788
