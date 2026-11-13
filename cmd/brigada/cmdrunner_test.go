@@ -39,33 +39,8 @@ func TestRunnerKimiReviewAgentFile(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			file := filepath.Join(state, "runner", "kimi-readonly.md")
-			if _, err := os.Stat(file); !os.IsNotExist(err) {
-				t.Fatalf("resolving agents wrote the file: %v", err)
-			}
-			if err := writeKimiReviewAgentFiles(ads); err != nil {
-				t.Fatal(err)
-			}
-			{
-				data, err := os.ReadFile(file)
-				if err != nil || string(data) != kimi.ReadOnlyAgentDefinition {
-					t.Fatalf("review agent = %q, %v", data, err)
-				}
-				for _, want := range []string{"description:", "tools: [Read, Grep, Glob]", "disallowedTools: [Bash]", "You are a read-only reviewer"} {
-					if !strings.Contains(string(data), want) {
-						t.Errorf("agent missing %q", want)
-					}
-				}
-				info, err := os.Stat(file)
-				if err != nil || info.Mode().Perm() != 0600 {
-					t.Fatalf("review agent permissions: %v, %v", info, err)
-				}
-			}
-			// The runner still writes the read-only agent file above (an
-			// idle leftover: nothing reads ReadOnlyAgentFile any more), but
-			// Command no longer picks it for a review — a review takes the
-			// configured agent exactly as a work job does (§5.2; task 773's
-			// note).
+			// A review takes the configured agent exactly as a work job
+			// does (§5.2): the runner writes no definition of its own.
 			ad := ads[0].(*kimi.Adapter)
 			ad.Binary = "/unused/kimi"
 			for _, review := range []bool{false, true} {
@@ -84,6 +59,32 @@ func TestRunnerKimiReviewAgentFile(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestRunnerQwenCodeTakesTheReviewClass pins that qwen-code takes the three
+// classes like every harness: the default and an explicit review class both
+// resolve, in either flag form.
+func TestRunnerQwenCodeTakesTheReviewClass(t *testing.T) {
+	for _, spec := range []agentSpec{
+		{harness: "qwen-code", classes: splitList(defaultClasses)},
+		{harness: "qwen-code", classes: []string{"implement", "review"}},
+		{harness: "qwen-code", classes: []string{"review"}},
+	} {
+		_, adverts, err := resolveRunnerAgents(&runtime{stateDir: t.TempDir()}, []agentSpec{spec}, "")
+		if err != nil {
+			t.Fatalf("classes %v: %v", spec.classes, err)
+		}
+		if !slices.Equal(adverts[0].Classes, spec.classes) {
+			t.Errorf("classes = %v, want %v", adverts[0].Classes, spec.classes)
+		}
+	}
+	var specs agentSpecs
+	if err := specs.Set("harness=qwen-code"); err != nil {
+		t.Fatal(err)
+	}
+	if got := specs.specs[0].classes; !slices.Equal(got, splitList(defaultClasses)) {
+		t.Errorf("default classes = %v, want %v", got, splitList(defaultClasses))
 	}
 }
 
@@ -154,7 +155,7 @@ func TestResolveRunnerAgentModels(t *testing.T) {
 		{"qwen-code", "qwen3.8-max", "qwen3.8-max", "alibaba"},
 	} {
 		t.Run(tc.harness+"/"+tc.model, func(t *testing.T) {
-			spec := agentSpec{harness: tc.harness, model: tc.model, classes: harnessDefaultClasses(tc.harness)}
+			spec := agentSpec{harness: tc.harness, model: tc.model, classes: splitList(defaultClasses)}
 			ads, agents, err := resolveRunnerAgents(&runtime{}, []agentSpec{spec}, "")
 			if err != nil {
 				t.Fatal(err)
@@ -352,18 +353,6 @@ func TestRunnerHarnessFlags(t *testing.T) {
 			args:     []string{"runner", "--agent", "harness=qwen-code,agent-file=" + agentFile, "--state-dir", state},
 			wantCode: 2,
 			wantErr:  "--agent-file is a --harness kimi flag",
-		},
-		{
-			name:     "a review class with the qwen-code harness is a usage error",
-			args:     []string{"runner", "--agent", "harness=qwen-code,classes=implement+review", "--state-dir", state},
-			wantCode: 2,
-			wantErr:  "no read-only review policy",
-		},
-		{
-			name:     "a review class with --harness qwen-code is a usage error",
-			args:     []string{"runner", "--harness", "qwen-code", "--classes", "review", "--state-dir", state},
-			wantCode: 2,
-			wantErr:  "no read-only review policy",
 		},
 		{
 			name:     "tools with the qwen-code harness is a usage error",
@@ -582,20 +571,33 @@ func registeredClasses(t *testing.T, harness string, args ...string) []string {
 	return got
 }
 
-// TestRunnerQwenCodeClasses: qwen-code runs no reviews, so an agent
-// registered with no classes takes implement and answer, on the
-// shorthand flags and the --agent form alike; other harnesses keep all
-// three classes (TestRunnerHarnessRegisters).
+// TestRunnerQwenCodeClasses: qwen-code takes the three classes like every
+// harness, so an agent registered with no classes takes all three, and an
+// explicit review class registers, on the shorthand flags and the --agent
+// form alike.
 func TestRunnerQwenCodeClasses(t *testing.T) {
+	all := []string{"implement", "review", "answer"}
 	t.Run("the shorthand flags", func(t *testing.T) {
 		classes := registeredClasses(t, "qwen-code", "--harness", "qwen-code")
-		if want := []string{"implement", "answer"}; !reflect.DeepEqual(classes, want) {
-			t.Errorf("classes = %q, want %q", classes, want)
+		if !reflect.DeepEqual(classes, all) {
+			t.Errorf("classes = %q, want %q", classes, all)
 		}
 	})
 	t.Run("the agent form", func(t *testing.T) {
 		classes := registeredClasses(t, "qwen-code", "--agent", "harness=qwen-code,model=qwen3.8-max")
-		if want := []string{"implement", "answer"}; !reflect.DeepEqual(classes, want) {
+		if !reflect.DeepEqual(classes, all) {
+			t.Errorf("classes = %q, want %q", classes, all)
+		}
+	})
+	t.Run("an explicit review class", func(t *testing.T) {
+		classes := registeredClasses(t, "qwen-code", "--agent", "harness=qwen-code,classes=implement+review")
+		if want := []string{"implement", "review"}; !reflect.DeepEqual(classes, want) {
+			t.Errorf("classes = %q, want %q", classes, want)
+		}
+	})
+	t.Run("an explicit review class on the shorthand flags", func(t *testing.T) {
+		classes := registeredClasses(t, "qwen-code", "--harness", "qwen-code", "--classes", "review")
+		if want := []string{"review"}; !reflect.DeepEqual(classes, want) {
 			t.Errorf("classes = %q, want %q", classes, want)
 		}
 	})

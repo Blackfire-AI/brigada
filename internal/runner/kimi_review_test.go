@@ -27,26 +27,20 @@ func (a *kimiCommandRecorder) Command(job adapter.Job, workdir, resume string) (
 	return nil, errors.New("command captured")
 }
 
-// TestKimiReviewPolicyReachesWorker: a review job no longer picks the
-// runner's read-only agent file over the configured one — kimi has no
-// permission mechanism to vary by job kind (§5.2; task 773's note), so a
-// review, a work and a fix job build the identical command.
-func TestKimiReviewPolicyReachesWorker(t *testing.T) {
+// TestKimiReviewBuildsTheWorkCommand: kimi has no permission mechanism to
+// vary by job kind (§5.2), so a review, a work and a fix job build the
+// identical command.
+func TestKimiReviewBuildsTheWorkCommand(t *testing.T) {
 	var commands []*exec.Cmd
 	for _, kind := range []engine.Kind{engine.KindReview, engine.KindWork, engine.KindFix} {
 		t.Run(string(kind), func(t *testing.T) {
-			ad := &kimiCommandRecorder{Adapter: kimi.Adapter{Binary: "/unused/kimi", ReadOnlyAgentFile: "/runner/kimi-readonly.md"}}
+			ad := &kimiCommandRecorder{Adapter: kimi.Adapter{Binary: "/unused/kimi"}}
 			r := &jobRun{cfg: &Config{}, grant: &api.JobGrant{Kind: string(kind), Prompt: "p"}}
 			if err := r.runWorker(context.Background(), ad, "default", t.TempDir(), nil); err == nil {
 				t.Fatal("capture did not stop the worker")
 			}
 			if ad.cmd == nil {
 				t.Fatal("command was not built")
-			}
-			for i, arg := range ad.cmd.Args {
-				if arg == "--agent-file" && i+1 < len(ad.cmd.Args) && ad.cmd.Args[i+1] == ad.ReadOnlyAgentFile {
-					t.Fatalf("%s command = %v, carries the read-only agent file it no longer should", kind, ad.cmd.Args)
-				}
 			}
 			commands = append(commands, ad.cmd)
 		})

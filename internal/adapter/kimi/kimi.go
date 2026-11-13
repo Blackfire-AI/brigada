@@ -13,7 +13,6 @@ package kimi
 import (
 	"bytes"
 	"context"
-	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -41,14 +40,6 @@ type Adapter struct {
 	// so the field is read only when the run is fresh.
 	AgentFile string
 
-	// ReadOnlyAgentFile named the runner-owned read-only definition a
-	// review job used to force regardless of AgentFile. Command no longer
-	// branches on job.Review to pick it (§5.2: a review takes the same
-	// permission= pass-through as a worker, which here is none at all);
-	// the field stays so the runner's wiring that still sets it keeps
-	// compiling, but nothing in this package reads it any more.
-	ReadOnlyAgentFile string
-
 	// ExtraArgs are further flags the agent's configuration passes
 	// through, appended verbatim after the adapter's own. Empty adds
 	// nothing.
@@ -62,13 +53,6 @@ var _ adapter.Adapter = (*Adapter)(nil)
 // the agent's configuration sets no --model, and the adapter's answer
 // to it is no -m flag at all.
 const DefaultModel = "default"
-
-// ReadOnlyAgentDefinition uses Kimi Code's Markdown agent format:
-// https://moonshotai.github.io/kimi-code/en/customization/agents
-// The frontmatter includes its required description and an exact tool allowlist.
-//
-//go:embed readonly.md
-var ReadOnlyAgentDefinition string
 
 // Name implements adapter.Adapter: the harness this adapter drives,
 // which the runner's advertisement pairs it with (§5.1).

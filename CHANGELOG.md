@@ -22,6 +22,8 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - A task's worktree carries no push URL any more; only the runner, from its own clone, pushes a landed task's commit, and only at landing. A worker (or a reviewer) cannot push or force-push its own branch (issue #228).
 - A review now takes the identical `permission=` as a work or fix job on every harness, with no read-only default of brigada's own: the review's own detached, discarded worktree is what keeps it from changing anything (issue #228).
 
+- A `qwen-code` agent now takes the review class: it defaults to `implement,review,answer` like every harness, and `--agent classes=` or `--classes` naming `review` is no longer refused. Its review runs under the same `permission=` pass-through as a worker, with no read-only default of brigada's (issue #228).
+
 ### Fixed
 
 - A task restarted while its landing waited at the push gate, or sat for a hand push under `gate_push = never`, could not land its reworked head, and `brigada push approve` still pushed the old commit. A restart now forgets that landing and the landings stacked on the same waiting ref, the next landing of the target deletes `refs/brigada/land/<target>` before it stacks, and the re-made landings wait at the push gate again (issue #205). Restart the engine and runner after you upgrade.

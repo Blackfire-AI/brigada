@@ -47,26 +47,23 @@ func TestCommand(t *testing.T) {
 		wantArg []string // the arguments after the executable
 	}{
 		{
-			// ReadOnlyAgentFile no longer picks a different agent for a
-			// review: kimi has no permission mechanism to vary by job.Review
-			// or permission=, so a review keeps whatever AgentFile names,
-			// exactly as a work job does (§5.2; task 773's note).
-			name:    "review keeps the configured agent, not the runner's read-only one",
-			ad:      Adapter{AgentFile: "custom.md", ReadOnlyAgentFile: "/runner/kimi-readonly.md"},
+			// kimi has no permission mechanism to vary by job.Review, so a
+			// review keeps whatever AgentFile names, exactly as a work job
+			// does (§5.2).
+			name:    "review keeps the configured agent",
+			ad:      Adapter{AgentFile: "custom.md"},
 			job:     adapter.Job{Prompt: prompt, Review: true},
 			wantExe: "kimi",
 			wantArg: []string{"-p", prompt, "--output-format", "stream-json", "--agent-file", "custom.md"},
 		},
 		{
 			name:    "review with no agent file carries none either",
-			ad:      Adapter{ReadOnlyAgentFile: "/runner/kimi-readonly.md"},
 			job:     adapter.Job{Prompt: prompt, Review: true},
 			wantExe: "kimi",
 			wantArg: []string{"-p", prompt, "--output-format", "stream-json"},
 		},
 		{
 			name:    "review resume keeps its bound agent",
-			ad:      Adapter{ReadOnlyAgentFile: "/runner/kimi-readonly.md"},
 			job:     adapter.Job{Prompt: prompt, Review: true},
 			resume:  "review-session",
 			wantExe: "kimi",
