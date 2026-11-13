@@ -126,7 +126,7 @@ tasks:
     continue: "adapter-dsh-kimi-qwen"
     effort: medium
     skills: ["docs-change"]
-    state: ready
+    state: running
     branch: "brigada/task-769"
     rounds: 0
   - id: 770
