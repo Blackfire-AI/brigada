@@ -271,7 +271,7 @@ func printConfigMachine(rt *runtime, flagStateDir string, stdout, stderr io.Writ
 		{"review.tier", "below"}, {"review.effort", "medium"}, {"review.family", "prefer"},
 		{"caps.global", "no cap"}, {"caps.plan", "no cap"}, {"caps.runner", "no cap"},
 		{"caps.account.<label>", "no cap"}, {"caps.model.<model>", "no cap"},
-		{"cost.<harness>/<model>", "1"}, {"tier.<harness>/<model>", "from the model name"},
+		{"cost.<harness>/<model>", "1"}, {"tier.<harness>/<model>", "from the model table"},
 		{"permission.<harness>/<model>", "the harness default"},
 		{"tools.claude/<model>", "unset: the claude permission applies"},
 	}

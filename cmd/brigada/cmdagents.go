@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -42,6 +43,9 @@ type agentsOffer struct {
 type agentsDiff struct {
 	unregistered []string
 	gone         []string
+	// superseded maps a registered pair whose model a newer version of the
+	// same line replaces, among what its CLI offers, to the newer pair.
+	superseded map[string]string
 }
 
 // agentsCache is the listing kept between status and top calls.
@@ -179,22 +183,59 @@ func diffAgents(offer agentsOffer, registered []agentSpec) agentsDiff {
 	for _, spec := range registered {
 		have[agentPair(spec)] = true
 	}
-	var d agentsDiff
+	superseded := supersededPairs(offer.models, registered)
+	d := agentsDiff{superseded: map[string]string{}}
 	for _, pair := range offer.models {
 		harness, model, _ := strings.Cut(pair, "/")
-		if have[pair] || (offer.defaults[harness] == model && have[harness+"/default"]) {
+		if have[pair] || (offer.defaults[harness] == model && have[harness+"/default"]) || superseded[pair] != "" {
 			continue
 		}
 		d.unregistered = append(d.unregistered, pair)
 	}
 	for _, spec := range registered {
 		pair := agentPair(spec)
-		if !offer.complete[spec.harness] || strings.HasSuffix(pair, "/default") || slices.Contains(offer.models, pair) || slices.Contains(d.gone, pair) {
+		if strings.HasSuffix(pair, "/default") || slices.Contains(d.gone, pair) {
 			continue
 		}
-		d.gone = append(d.gone, pair)
+		if offer.complete[spec.harness] && !slices.Contains(offer.models, pair) {
+			d.gone = append(d.gone, pair)
+			continue
+		}
+		if newer := superseded[pair]; newer != "" {
+			d.superseded[pair] = newer
+		}
 	}
 	return d
+}
+
+// supersededPairs maps each offered or registered harness/model pair that a
+// newer version of the same line, offered by the same CLI or registered,
+// replaces to the newest pair of that line (adapter.Superseded).
+func supersededPairs(offered []string, registered []agentSpec) map[string]string {
+	models := map[string][]string{}
+	var harnesses []string
+	add := func(pair string) {
+		harness, model, _ := strings.Cut(pair, "/")
+		if _, ok := models[harness]; !ok {
+			harnesses = append(harnesses, harness)
+		}
+		if !slices.Contains(models[harness], model) {
+			models[harness] = append(models[harness], model)
+		}
+	}
+	for _, pair := range offered {
+		add(pair)
+	}
+	for _, spec := range registered {
+		add(agentPair(spec))
+	}
+	out := map[string]string{}
+	for _, harness := range harnesses {
+		for model, newer := range adapter.Superseded(models[harness]) {
+			out[harness+"/"+model] = harness + "/" + newer
+		}
+	}
+	return out
 }
 
 // agentsHint is the one line status and top show when the CLIs offer models
@@ -275,11 +316,11 @@ func runAgentsList(ctx context.Context, args []string, stdout, stderr io.Writer)
 	offer := listOfferedAgents(ctx)
 	writeAgentsCache(rt, offer.cache(time.Now()))
 	registered := registeredAgents(lines)
-	printAgentsReport(stdout, filepath.Join(runnerStateDir(rt), "agents"), offer, registered, diffAgents(offer, registered))
+	printAgentsReport(stdout, filepath.Join(runnerStateDir(rt), "agents"), offer, registered, diffAgents(offer, registered), rt.file.Caps.TierOf)
 	return 0
 }
 
-func printAgentsReport(w io.Writer, path string, offer agentsOffer, registered []agentSpec, d agentsDiff) {
+func printAgentsReport(w io.Writer, path string, offer agentsOffer, registered []agentSpec, d agentsDiff, tier func(harness, model string) string) {
 	if len(offer.models) == 0 {
 		fmt.Fprintln(w, "No model listing came back: none of the claude, codex or opencode CLIs listed models.")
 	}
@@ -295,11 +336,24 @@ func printAgentsReport(w io.Writer, path string, offer agentsOffer, registered [
 		}
 		for _, pair := range d.unregistered {
 			harness, model, _ := strings.Cut(pair, "/")
-			fmt.Fprintf(w, "  %-*s  tier %s, shares account %s\n", width, pair, adapter.AgentTier(harness, model), agentsAccount(registered, harness))
+			fmt.Fprintf(w, "  %-*s  tier %s, shares account %s\n", width, pair, tier(harness, model), agentsAccount(registered, harness))
 		}
 		fmt.Fprintln(w, "Register one with: brigada agents add <harness>/<model> [--classes ...] [--effort ...]")
 		fmt.Fprintln(w, "Nothing is registered automatically: a new model can spend a paid account.")
-		fmt.Fprintln(w, "A tier here is a guess from the model name. Correct a wrong one with tier.<harness>/<model> in the config file; for example -highspeed is a faster serving of the same model, not a light one.")
+		fmt.Fprintln(w, "A tier here comes from brigada's model table unless tier.<harness>/<model> in the config file sets it. Models a newer version of the same line replaces are left out.")
+	}
+	if len(d.superseded) > 0 {
+		fmt.Fprintln(w)
+		fmt.Fprintf(w, "Registered, but a newer version of the model is listed or registered (%d):\n", len(d.superseded))
+		pairs := slices.Sorted(maps.Keys(d.superseded))
+		width := 0
+		for _, pair := range pairs {
+			width = max(width, len(pair))
+		}
+		for _, pair := range pairs {
+			fmt.Fprintf(w, "  %-*s  replaced by %s\n", width, pair, d.superseded[pair])
+		}
+		fmt.Fprintf(w, "To retire one, remove its line from %s and restart the runner.\n", initHomePath(path))
 	}
 	if len(d.gone) > 0 {
 		fmt.Fprintln(w)
@@ -415,7 +469,7 @@ func runAgentsAdd(ctx context.Context, args []string, stdout, stderr io.Writer) 
 	if len(spec.classes) == 0 {
 		classesText = "none"
 	}
-	fmt.Fprintf(stdout, "registered %s (tier %s, classes %s)\n", pair, adapter.AgentTier(harness, model), classesText)
+	fmt.Fprintf(stdout, "registered %s (tier %s, classes %s)\n", pair, rt.file.Caps.TierOf(harness, model), classesText)
 	fmt.Fprintf(stdout, "added to %s: %s\n", initHomePath(filepath.Join(dir, "agents")), line)
 	// A running runner is handed a restart request it honours between
 	// jobs, so no running job is cut — unless --now asked for exactly

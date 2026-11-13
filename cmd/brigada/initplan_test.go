@@ -169,7 +169,7 @@ func TestInitPlanLongModelStacks(t *testing.T) {
 			}
 			continue
 		}
-		family, tier := "Moonshot", "light"
+		family, tier := "Moonshot", "standard"
 		if i == 3 {
 			family, tier = "Anthropic", "heavy"
 		}

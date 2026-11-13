@@ -125,12 +125,11 @@ func runRunner(ctx context.Context, args []string, stdout, stderr io.Writer) int
 		if a.Effort != "" {
 			model += "@" + a.Effort
 		}
-		// This is the table's tier: the runner does not read the engine's override.
 		classes := strings.Join(a.Classes, ",")
 		if len(a.Classes) == 0 {
 			classes = "none"
 		}
-		parts[i] = fmt.Sprintf("%s (model %s, tier %s, classes %s)", a.Harness, model, adapter.AgentTier(a.Harness, a.Model), classes)
+		parts[i] = fmt.Sprintf("%s (model %s, tier %s, classes %s)", a.Harness, model, rt.file.Caps.TierOf(a.Harness, a.Model), classes)
 		// An explicit tools= scope is shown as the alias still changes what
 		// claude runs; otherwise the resolved permission is the scope.
 		switch {
