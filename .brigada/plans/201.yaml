@@ -252,8 +252,8 @@ tasks:
     review_tier: standard
     caps: {fix_rounds: 3, review_rounds: 2, restart: 2}
     skills: ["surface-parity"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-779"
     rounds: 0
   - id: 780
     name: "leftovers-permission-2"
