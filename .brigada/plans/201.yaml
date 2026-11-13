@@ -7,7 +7,7 @@ title: "#228 implementation: harness-owned permissions, runner-only push, approv
 repo: "github.com/Blackfire-AI/brigada"
 state: reviewing
 created: 2026-11-12T21:47:35.965112Z
-updated: 2026-11-13T02:19:23.630308Z
+updated: 2026-11-13T02:20:27.589868Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -277,6 +277,17 @@ tasks:
     effort: medium
     caps: {fix_rounds: 3, review_rounds: 2, restart: 2}
     skills: ["surface-parity", "docs-change"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 782
+    name: "approval-docs-gaps"
+    title: "Gaps left by #228: config-key list, approval test skip, docs verifier and approval flags"
+    class: "implement"
+    deps: ["docs-followups"]
+    base: "docs-followups"
+    effort: medium
+    skills: ["bugfix", "docs-change"]
     state: pending
     branch: ""
     rounds: 0
