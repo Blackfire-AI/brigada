@@ -7,7 +7,6 @@
 - `sessions` (key, agent, runner, harness session id, state)
 - attach holds (§4.2)
 - pauses (§8.3: scope, the engine or a project; start; origin)
-- `approval_requests` (§12.2: the act's kind and identity, the challenge's nonce and expiry, state `waiting`|`signed`|`refused`|`expired`, and the signature and enrolled key label that satisfied it; a request leaves `waiting` once, so a signature cannot verify twice across a restart)
 - `runners`
 - `agents` (runner, adapter, harness, model, family, account, classes, health, cooling until)
 - `outcomes`
