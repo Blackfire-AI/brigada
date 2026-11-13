@@ -109,3 +109,7 @@ These may change in any release, including a patch release:
 ## Breaking changes
 
 Before 2.0, a breaking change is a bug, unless a security fix requires it. Deprecations are announced in CHANGELOG.md first.
+
+- **A worker can no longer push its own branch.** A task's worktree carries no push URL; only the runner pushes, from its own clone, and only at landing. (Repositories relying on a worker pushing directly had no documented support for it, but the affordance existed; it is gone.)
+- **Approving or rejecting a plan at its version, approving or rejecting a landing and approving a push now need a signature**, beyond the `client` or `admin` token making the call, from a key enrolled with the engine beforehand. A token alone no longer approves, rejects or releases these acts; a project import and a user message are unaffected and stay ordinary role-checked calls.
+- `tools=` on the claude `--agent`, the config key `tools.claude/<model>` and the project's `worker_tools` are **deprecated aliases of `permission=`** (`permission.<harness>/<model>` in the config file): each stores the same value under `permission=`'s syntax and warns. Their removal waits for 2.0 at the earliest; `project.yaml` schema 1 stays compatible with `worker_tools` until then.

@@ -7,12 +7,20 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `permission=` is a new per-agent key: the permission mode brigada passes to that agent's harness, as its own flag or argument — `--permission-mode` on claude, `-s` on codex, a per-tool rule on opencode, `DSH_PERMISSION_MODE` on dsh, the auto-approve flag on qwen-code; kimi's CLI has no such mechanism and refuses a non-empty value. The claude agent's `tools=`, the config key `tools.claude/<model>` and the project's `worker_tools` become deprecated aliases that store the same value under `permission=` and print a warning naming the key (issue #228).
+- `brigada approver add|list|remove` enrolls, lists and removes the public keys your approvals are signed with; the private key never reaches brigada (issue #228).
 - The `qwen-code` adapter drives Alibaba's Qwen Code CLI (`qwen`) as an experimental, worker-only harness: it implements and answers but takes no reviews. `brigada init` offers it, marked experimental, when `qwen` is on `PATH`. Each job runs `qwen -p` with stream-json output, `--dangerously-skip-permissions` and `--setting-sources user`, checked against 1.0.0-preview.1 (issue #224).
 - `qwen-code` is a foreman harness as well, experimental: a foreman turn carries the `brigada` MCP bridge through `--mcp-config` and `--strict-mcp-config`, and the attach forks the session onto the client's id. It has no read-only foreman scope, so a foreman on it keeps auto-approve and its read-only confinement is not enforced (issue #226).
 - A cancel can say why. Each `plan_amend` cancel entry may be `{task, reason}` beside the bare task name or id, and `task_cancel` takes an optional `reason`, in the foreman's MCP tools and the API alike. Every task an amendment newly cancels records one `task_cancelled_by_amend` event with the plan, the reason verbatim and the caller (foreman or user), and `brigada history` shows the reason. A reason is expected on every cancel; one without is still accepted, as before, and recorded as "no reason given".
 - A restarted dependent now rebuilds on the land target, or on the waiting landings' ref `refs/brigada/land/<target>`, when its dependency already landed (squashed or not) or was cancelled or retired, instead of on the dependency's old result branch, whose landing conflicted. The `task_base_stale` reason names that base. A task base may now be the waiting ref, which the runner fetches by name.
 - `plan_file_branch`, a project setting (`brigada project set`, `project show` and `.brigada/project.yaml`), names the branch the plan files are pushed to; `main` or the repository's default branch name commits them to the default branch. The mirror read the key, but nothing could set it (issue #215).
 - `retention_days` in the config file prunes messages and artifacts older than that many days on the engine's sweep; 0, the default, keeps everything, and the event log is never pruned. The engine could prune, but no key set it (issue #217).
+
+### Changed
+
+- Approving or rejecting a plan at its version, approving or rejecting a landing and approving a push now need a signature over a one-time challenge from an enrolled key, beyond the token making the call: `brigada plan approve`/`reject`, `brigada land approve`/`reject` and `brigada push approve` take `--request`/`--signature` and take effect only once the engine verifies the signature (with `ssh-keygen -Y verify`), failing closed with no enrolled key or an expired challenge (issue #228).
+- A task's worktree carries no push URL any more; only the runner, from its own clone, pushes a landed task's commit, and only at landing. A worker (or a reviewer) cannot push or force-push its own branch (issue #228).
+- A review now takes the identical `permission=` as a work or fix job on every harness, with no read-only default of brigada's own: the review's own detached, discarded worktree is what keeps it from changing anything (issue #228).
 
 ### Fixed
 
