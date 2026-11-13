@@ -126,10 +126,9 @@ tasks:
     continue: "adapter-dsh-kimi-qwen"
     effort: medium
     skills: ["docs-change"]
-    state: needs_foreman
+    state: ready
     branch: ""
     rounds: 0
-    question: "I need the exact CLI surface for the approval-signature chain (771's enrollment, 764/775's gating, 765's commands), since nothing in my tree shows it and the design docs describe the mechanism only abstractly: (1) the command and flags that enroll an approval public key; (2) how a signature is supplied to `plan approve`/`reject`, `land approve`/`reject` and `push approve` -- a flag, a separate command, or stdin; (3) whether the coordinator's `plan_approve`/`plan_reject` MCP tools take a signatur"
   - id: 770
     name: "approval-primitive"
     title: "Approval authority: internal/approval, the challenge-signature primitive"
