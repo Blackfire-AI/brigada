@@ -1517,7 +1517,7 @@ A command's flags go after its name and before its positional arguments (`diff`,
 
 ### Approving
 
-- `brigada approver add --label L --public-key FILE`, `brigada approver list`, `brigada approver remove --label L`: enroll, list and remove the public keys your approvals are signed with. The keys live in `approval_keys` in the state directory, mode 0600, public halves only: brigada never reads or stores a private key. The settings `gate_plan`, `gate_land`, `gate_push` and `approval_tiers` keep deciding what waits; the signature releases what they hold, and the engine's host needs `ssh-keygen` on `PATH` to verify one.
+- `brigada approver add --label L --public-key FILE`, `brigada approver list`, `brigada approver remove --label L`: enroll, list and remove public keys in `approval_keys` in the state directory, mode 0600. No approval command checks them: approving is your decision by convention, and the settings `gate_plan`, `gate_land`, `gate_push` and `approval_tiers` decide what waits.
 
 ### Deciding
 

@@ -421,7 +421,7 @@ func isFlagSetPtr(t ast.Expr) bool {
 // flagSetsFromSource reads Go source (file name to text) without running
 // any of it and returns the flag names each newFlagSet call's set defines.
 // A set passed to a function of the package that takes a *flag.FlagSet
-// (addApprovalFlags) also gets the flags that function defines on it.
+// (a helper such as addCommon) also gets the flags that function defines on it.
 func flagSetsFromSource(files map[string]string) ([]sourceFlagSet, error) {
 	var out []sourceFlagSet
 	fset := token.NewFileSet()

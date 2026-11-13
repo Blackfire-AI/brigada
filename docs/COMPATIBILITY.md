@@ -116,4 +116,3 @@ Before 2.0, a breaking change is a bug, unless a security fix requires it. Depre
 **Breaks, as security fixes** (issue #228):
 
 - A worker can no longer push its own branch. A task worktree carries no push URL, so the runner is the only path to the remote and the affordance the runner's worker-push test pinned is gone.
-- Approving or rejecting a plan at its version, approving or rejecting a landing and approving a push now need an enrolled approval key and a signature over a one-time challenge (`brigada approver add`, then `--request` and `--signature` on the five approving commands). A client or admin token alone no longer approves, through the CLI, the API or the coordinator's `plan_approve` and `plan_reject`, which only request. These five acts are the only gated ones: a project import and a user message stay role-checked calls that take no signature.
