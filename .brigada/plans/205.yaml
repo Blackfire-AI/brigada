@@ -43,8 +43,8 @@ tasks:
     effort: medium
     review_tier: standard
     skills: ["refactor", "docs-change"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-788"
     rounds: 0
   - id: 789
     name: "drop-approval-requests"
