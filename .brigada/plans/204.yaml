@@ -29,6 +29,6 @@ tasks:
     base: ""
     effort: medium
     skills: ["bugfix"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-786"
     rounds: 0
