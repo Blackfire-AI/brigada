@@ -102,7 +102,7 @@ tasks:
     base: "permission-plumbing"
     effort: medium
     skills: ["config-setting"]
-    state: ready
+    state: running
     branch: "brigada/task-767"
     rounds: 0
   - id: 768
