@@ -167,7 +167,7 @@ func TestOpenCreatesEveryTable(t *testing.T) {
 		t.Fatalf("open did not create the file: %v", err)
 	}
 	want := []string{
-		"agents", "approval_requests", "artifacts", "attach_holds", "events", "foreman_inbox", "hold_tokens",
+		"agents", "artifacts", "attach_holds", "events", "foreman_inbox", "hold_tokens",
 		"idempotency", "jobs", "land_holds", "landings", "lease_tokens", "messages", "meta", "outcomes", "pauses", "plan_mirror_dirty", "plans",
 		"projects", "questions", "role_instructions", "runners", "sessions", "skills", "stale_land_refs", "task_deps", "tasks", "tokens",
 	}
