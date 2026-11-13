@@ -15,6 +15,11 @@ type planDecider interface {
 	RejectPlan(ctx context.Context, plan int64) (api.PlanDecisionResult, error)
 }
 
+// connectGate is how the decision commands (plan, land and push approve and
+// reject) reach the engine; tests swap it to serve them over an in-process
+// API, as connectPause does.
+var connectGate = connect
+
 const planUsage = "usage: brigada plan approve [--and-stop-asking] <id> | brigada plan reject <id>"
 
 func runPlan(ctx context.Context, args []string, stdout, stderr io.Writer) int {
@@ -39,17 +44,12 @@ func runPlanDecision(ctx context.Context, verb string, args []string, stdout, st
 	if verb == "approve" {
 		fs.BoolVar(stopAsking, "and-stop-asking", false, "also change the rule that held the plan, the way brigada project set does, so the same question is not asked twice")
 	}
-	approvalFlags := addApprovalFlags(fs)
 	if code, stop := common.parse(stdout, stderr, args); stop {
 		return code
 	}
 	rest := fs.Args()
 	if len(rest) != 1 {
 		return usagef(stderr, "usage: brigada plan %s <id>", verb)
-	}
-	proof, code := approvalFlags.proof(stderr)
-	if code != 0 {
-		return code
 	}
 	id, ok := parseID(stderr, "plan id", rest[0])
 	if !ok {
@@ -63,7 +63,7 @@ func runPlanDecision(ctx context.Context, verb string, args []string, stdout, st
 	if code != 0 {
 		return code
 	}
-	return printPlanDecision(ctx, client.WithApproval(proof), verb, id, *stopAsking, stdout, stderr)
+	return printPlanDecision(ctx, client, verb, id, *stopAsking, stdout, stderr)
 }
 
 func printPlanDecision(ctx context.Context, client planDecider, verb string, id int64, stopAsking bool, stdout, stderr io.Writer) int {

@@ -2,12 +2,12 @@
 
 ## 12.1 Engine API
 
-JSON over HTTP on a Unix socket; a remote TLS listener is backlog (§2). Bearer tokens with roles: `client`, `foreman` (scoped to its project), `runner`, `admin`. A role authorizes API calls; approving a plan, a landing or a push is the user's act and needs the user's signature beyond any token (§12.2).
+JSON over HTTP on a Unix socket; a remote TLS listener is backlog (§2). Bearer tokens with roles: `client`, `foreman` (scoped to its project), `runner`, `admin`. A role authorizes API calls; approving a plan, a landing or a push is the user's decision by convention (Approval is the user's decision, §12.2).
 
 Groups:
 
 - projects,
-- plans (approve and reject are calls a `client` or `admin` token may make, and they take effect only with the user's signature for that act beside the token, §12.2; a `foreman` credential cannot call them),
+- plans (approve and reject are calls a `client` or `admin` token may make; a `foreman` credential cannot call them, §12.2),
 - tasks (create, amend, cancel, retire, restart),
 - questions (answer),
 - foreman messages (a user message, §4.2 item 3: `client` and `admin` only, idempotent; a message identical to one the same token sent to the same project within the last minute is a duplicate — a double Enter, a shell retry — answered with the first one's id),
@@ -30,7 +30,7 @@ Task jobs are keyed `task:<id>`: one live job per key makes duplicate job creati
 
 **Not implemented: land batches (§7.1).** brigada lands one task per land job, on the task's own key, and no task carries a batch reservation. In the design, a land batch is keyed `land-batch:<project>` — a project has one land target, so one key covers it — and every member's reservation, a `land_batch_job` field on the task that §11 does not have (it is part of the unbuilt design), holds its `task:<id>` key the way a live job holds it, so a second batch for the target, a second landing job or a duplicate approval coalesces the same way (§7.1).
 
-**Credentials.** Foreman credentials are short-lived and scoped to one turn or one chat: a headless turn keeps the job-lease-scoped credential of §12.2, and an attached chat gets a hold-scoped foreman token, minted at attach, carried by the MCP config the client writes for the chat and revoked at detach, so the chat's tools die with it. A token's role authorizes API calls and carries no approval authority: an approval needs the user's signature beyond the token, and no token of any role holds one (§12.2). No direct store access and the engine-as-mailbox rule stand.
+**Credentials.** Foreman credentials are short-lived and scoped to one turn or one chat: a headless turn keeps the job-lease-scoped credential of §12.2, and an attached chat gets a hold-scoped foreman token, minted at attach, carried by the MCP config the client writes for the chat and revoked at detach, so the chat's tools die with it. A token's role authorizes API calls; the role checks keep a foreman credential out of the user's decisions (§12.2). No direct store access and the engine-as-mailbox rule stand.
 
 ## 12.2 MCP tools: three sets on one bridge
 
@@ -80,29 +80,16 @@ The MCP server is a `brigada mcp` stdio process started by the foreman's harness
 
 ### Client and coordinator tools
 
-**Ordinary client set.** `brigada mcp --client` is the same bridge for any other harness acting for the user: `ask_foreman` (a user message, §4.2 item 3), `status`, `history`. It authenticates with a client token from the state directory and never holds a foreman token, so a harness can talk to the foreman and watch the work without a person relaying between the two. Every client token speaks with the user's voice, which is the point; the token file can hold several, each with its own label (one per device or harness) and revocable on its own, and the label travels with each message into the foreman's prompt and the history (§9), so it's clear which surface sent what. A client token authenticates its caller and carries no approval authority. Any local process that can read the state directory, a task worker or a foreman with a shell included, can use one to talk to the foreman and watch the work, and none can approve with it: approving a plan, a landing or a push is the user's act, made with a signature (Approval by signature, below), so reading the state directory does not reach it.
+**Ordinary client set.** `brigada mcp --client` is the same bridge for any other harness acting for the user: `ask_foreman` (a user message, §4.2 item 3), `status`, `history`. It authenticates with a client token from the state directory and never holds a foreman token, so a harness can talk to the foreman and watch the work without a person relaying between the two. Every client token speaks with the user's voice, which is the point; the token file can hold several, each with its own label (one per device or harness) and revocable on its own, and the label travels with each message into the foreman's prompt and the history (§9), so it's clear which surface sent what. A client token authenticates its caller. Any local process that can read the state directory, a task worker or a foreman with a shell included, can use one to talk to the foreman and watch the work; approving a plan, a landing or a push is the user's decision by convention (Approval is the user's decision, below).
 
 **Coordinator set.** `brigada mcp --coordinator` is the client set plus `list_projects`, `plan_approve` and `plan_reject`, every tool taking the project's canonical repo URL (§4.6). It authenticates with a client token, never a foreman credential. Approval is an explicitly user-directed act with a visible confirmation (§4.6): the result "awaiting approval" is never itself a reason to approve.
 
-### Approval by signature
+### Approval is the user's decision
 
-An approval is a signature over a one-time challenge for one named act. The engine issues a challenge that names the act (approving or rejecting a plan at its version, a landing, a push) and expires; the user signs it with a private key, and the engine verifies the signature against a public key it stores. The engine stores public keys only: the private key is the user's, held outside the state directory and never in it, so reading the state directory yields nothing that signs. A signature covers its one challenge, so it cannot be replayed for another act, another plan version or a later moment.
+Approval, landing and push decisions are the user's by convention: approving or rejecting a plan at its version, approving or rejecting a landing, approving a push. They are role-checked API calls, and the role checks keep the foreman token out of them: `POST /v1/plans/{id}/approve|reject`, `POST /v1/tasks/{id}/land/approve|reject` and `POST /v1/push/approve` take a `client` or `admin` token and refuse a `foreman` credential. The coordinator's `plan_approve` and `plan_reject` act on the user's explicit yes or no in the chat, and "awaiting approval" is never itself a reason to approve. An act that could not run now (a plan amended past the version named, a landing nothing holds) is refused. A project import and a user message are role-checked calls too.
 
-The signature is a check on the user's own acts through the API. It is not a security boundary against a process running as the same OS user with a shell: such a process can change brigada's state directory, settings and binary as the user can. The signature raises the bar only together with an OS boundary around the agents, such as a harness sandbox, a separate OS user or a container, and brigada does not provide that boundary today.
+These are not a security boundary against a process running as the same OS user with a shell: such a process can change brigada's state directory, settings and binary as the user can.
 
-Within such a boundary, signing should need something only a human holds:
-
-- a hardware token that asks for a touch,
-- an agent key constrained to ask for a touch on each use, or
-- a key kept off the machine.
-
-The residual risk is plain: without an OS boundary, a worker or foreman whose harness grants a shell runs as the user, and a private key that is an ordinary file the user can read does not stop it. Such a key is part of raising the bar together with that boundary, not a defense on its own.
-
-The engine keeps each challenge as a pending request (the `approval_requests` table, §11). Asking for a gated act — the user's yes or no on a plan at its version, the yes or no on a landing, the yes on a push — creates the request, or finds the one already waiting for that act, and answers its challenge; the act runs only when a signature for that request's challenge verifies, and the request is then spent, across an engine restart too. The gate settings (`gate_plan`, `gate_land`, `gate_push`, `approval_tiers`) still decide what waits; the signature releases what they hold. A request that waits is an entry of the needs-you queue and a notification, in the same words everywhere: `signature wanted out of band to approve plan #7 at version 2 (request #5, challenge <nonce>, expires <time>)`. A refusal says which reason applies: no enrolled key, no signature, a wrong or reused signature, an expired challenge, or an act other than the one signed.
-
-The API gates the acts behind their role check: `POST /v1/plans/{id}/approve|reject`, `POST /v1/tasks/{id}/land/approve|reject` and `POST /v1/push/approve` take `request_id` and `signature` (the armored output of `ssh-keygen -Y sign -n brigada-approval` over the challenge's message) beside their usual body. A call without them, or with a signature that does not verify, is a 403 `approval_required` whose body names the reason, the pending request, its challenge and the exact message to sign, and leaves a request waiting for a signature; the same text is the CLI's refusal on stderr (`--request` and `--signature FILE` on `brigada plan|land approve|reject` and `brigada push approve`) and the coordinator's result. The coordinator's `plan_approve` and `plan_reject` take no signature: they only request, returning the pending request's challenge and the command the user runs, `brigada plan approve|reject --request N --signature FILE <id>`, to confirm out of band with a key of their own; a harness never carries the signature, and "awaiting approval" is never itself a reason to approve. An act that could not run now (a plan amended past the version named, a landing nothing holds) is refused as before, with no challenge. A project import and a user message are role-checked calls and take no signature.
-
-The mechanism fails closed. With no enrolled key there is no signature, and the act is refused; a signature over an expired challenge refuses the act too. A headless run does not prompt on a terminal: it waits for a signature that arrives out of band, and an approval nobody signs stays waiting.
 
 ### Set selection
 

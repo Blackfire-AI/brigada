@@ -30,7 +30,6 @@ func (s *Server) handleTaskLandDecision(approve bool) handler {
 		}
 		var req struct {
 			AndStopAsking bool `json:"and_stop_asking"`
-			ApprovalProof
 		}
 		if body, ok := readBody(w, r); ok {
 			if len(bytes.TrimSpace(body)) > 0 {
@@ -42,23 +41,17 @@ func (s *Server) handleTaskLandDecision(approve bool) handler {
 		} else {
 			return
 		}
-		// The role was checked by the route; the landing's yes or no
-		// needs the user's signature for this task (§12.2).
-		act := engine.GatedActRequest{Action: engine.GatedLandReject, Project: project, Task: taskID}
+		// The route checked the role; the decision runs as asked.
+		var res engine.LandDecision
+		var err error
 		if approve {
-			act = engine.GatedActRequest{Action: engine.GatedLandApprove, Project: project, Task: taskID, StopAsking: req.AndStopAsking}
-		}
-		gated, written, err := s.runGated(w, r, act, req.ApprovalProof)
-		if written {
-			return
+			res, err = s.eng.LandApprove(r.Context(), project, taskID, req.AndStopAsking)
+		} else {
+			res, err = s.eng.LandReject(r.Context(), project, taskID)
 		}
 		if err != nil {
 			writeError(w, http.StatusBadRequest, codeBadRequest, err.Error())
 			return
-		}
-		var res engine.LandDecision
-		if gated.Land != nil {
-			res = *gated.Land
 		}
 		writeJSON(w, http.StatusOK, res)
 	}
@@ -73,24 +66,14 @@ func (s *Server) handlePushApprove(w http.ResponseWriter, r *http.Request, id id
 	}
 	var req struct {
 		RepoURL string `json:"repo_url"`
-		ApprovalProof
 	}
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	// The role was checked by the route; the push's yes needs the user's
-	// signature for this project (§12.2).
-	gated, written, err := s.runGated(w, r, engine.GatedActRequest{Action: engine.GatedPushApprove, RepoURL: req.RepoURL}, req.ApprovalProof)
-	if written {
-		return
-	}
+	res, err := s.eng.PushApprove(r.Context(), req.RepoURL)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, codeBadRequest, err.Error())
 		return
-	}
-	var res engine.PushApproveResult
-	if gated.Push != nil {
-		res = *gated.Push
 	}
 	writeJSON(w, http.StatusOK, res)
 }

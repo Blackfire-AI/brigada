@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/Blackfire-AI/brigada/internal/api"
-	"github.com/Blackfire-AI/brigada/internal/approval"
 	"github.com/Blackfire-AI/brigada/internal/engine"
 )
 
@@ -88,13 +87,13 @@ var CoordinatorTools = []Tool{
 	},
 	{
 		Name:        "plan_approve",
-		Description: "Request the approval of a plan awaiting approval. The call creates a pending approval and returns its challenge; it approves nothing. The user confirms out of band, in their own terminal with a key of their own (`brigada plan approve --request N --signature FILE`), and only then does the plan's first wave of work start; you cannot sign for them. On an active plan it releases the tasks a plan rule holds alone (status lists each under needs you), and the plan budget may hold one again. This is the USER's decision, never yours: call it only after you showed the user the plan (status shows it) and they said an explicit yes in this chat. \"Awaiting approval\" is a result to present, not a permission. Name the plan's id and the version you showed; a plan amended since is refused, then read status again and show it anew. With and_stop_asking true, the approval also changes the rule that held the plan — the one setting each hold reason maps to — the way `brigada project set` would, so the same question is not asked twice; use it only when the user said to change the rule, and show them what changed.",
+		Description: "Approve a plan awaiting approval: its first wave of work starts. On an active plan it releases the tasks a plan rule holds alone (status lists each under needs you), and the plan budget may hold one again. This is the USER's decision, never yours: call it only after you showed the user the plan (status shows it) and they said an explicit yes in this chat. \"Awaiting approval\" is a result to present, not a permission. Name the plan's id and the version you showed; a plan amended since is refused, then read status again and show it anew. With and_stop_asking true, the approval also changes the rule that held the plan — the one setting each hold reason maps to — the way `brigada project set` would, so the same question is not asked twice; use it only when the user said to change the rule, and show them what changed.",
 		InputSchema: planDecisionSchema,
 		Call:        callPlanApprove,
 	},
 	{
 		Name:        "plan_reject",
-		Description: "Request the rejection of a plan awaiting approval. The call creates a pending approval and returns its challenge; it rejects nothing. The user confirms out of band, in their own terminal with a key of their own (`brigada plan reject --request N --signature FILE`), and only then are its tasks cancelled and its foreman told; you cannot sign for them. This is the USER's decision, never yours: call it only after you showed the user the plan and they said an explicit no (or asked to drop it) in this chat. Name the plan's id and the version you showed; a plan amended since is refused, then read status again and show it anew.",
+		Description: "Reject a plan awaiting approval: its tasks are cancelled and its foreman told. This is the USER's decision, never yours: call it only after you showed the user the plan and they said an explicit no (or asked to drop it) in this chat. Name the plan's id and the version you showed; a plan amended since is refused, then read status again and show it anew.",
 		InputSchema: planRejectSchema,
 		Call:        callPlanReject,
 	},
@@ -284,31 +283,6 @@ type planDecisionArgs struct {
 	AndStopAsking bool   `json:"and_stop_asking"`
 }
 
-// approvalRequested words the answer of a plan_approve or plan_reject
-// (§12.2). The tools only request: the engine makes the pending approval
-// and this returns its challenge, the same text the CLI prints, and says
-// the user confirms out of band — the signature never passes through a
-// tool. A request that waits is a result, not an error; a refusal that
-// leaves nothing to sign yet (no approval key enrolled) is the tool's
-// error, with the same text.
-func approvalRequested(err error, verb string, a planDecisionArgs) (string, error) {
-	pending, ok := api.ApprovalOf(err)
-	if !ok {
-		return "", err
-	}
-	stop := ""
-	if verb == "approve" && a.AndStopAsking {
-		stop = " --and-stop-asking"
-	}
-	confirm := fmt.Sprintf("brigada plan %s%s --request %d --signature <file>.sig %d", verb, stop, pending.RequestID, a.Plan)
-	past := map[string]string{"approve": "approved", "reject": "rejected"}[verb]
-	if pending.NoKey || pending.Reason != approval.ErrNoSignature.Error() {
-		return "", fmt.Errorf("%s\nplan %d is not %s; the user confirms out of band with: %s", pending.Text(), a.Plan, past, confirm)
-	}
-	return fmt.Sprintf("plan %d is NOT %s: this call only requested it. The user confirms out of band, with a key of their own, in their own terminal; \"awaiting approval\" is not a reason to approve, and you cannot sign for them.\n%s\nthe user confirms with: %s",
-		a.Plan, past, pending.Text(), confirm), nil
-}
-
 func readPlanDecision(args json.RawMessage) (planDecisionArgs, error) {
 	var a planDecisionArgs
 	if err := json.Unmarshal(args, &a); err != nil {
@@ -332,7 +306,7 @@ func callPlanApprove(ctx context.Context, c *api.Client, args json.RawMessage) (
 	}
 	res, err := c.ApprovePlanVersion(ctx, a.RepoURL, a.Plan, a.Version, a.AndStopAsking)
 	if err != nil {
-		return approvalRequested(err, "approve", a)
+		return "", err
 	}
 	text := fmt.Sprintf("plan %d approved (state %s): %d tasks queued", res.PlanID, res.State, len(res.Tasks))
 	for _, t := range res.Tasks {
@@ -354,7 +328,7 @@ func callPlanReject(ctx context.Context, c *api.Client, args json.RawMessage) (s
 	}
 	res, err := c.RejectPlanVersion(ctx, a.RepoURL, a.Plan, a.Version)
 	if err != nil {
-		return approvalRequested(err, "reject", a)
+		return "", err
 	}
 	return fmt.Sprintf("plan %d rejected (state %s): its tasks are cancelled", res.PlanID, res.State), nil
 }

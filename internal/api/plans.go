@@ -217,19 +217,12 @@ func (s *Server) handlePlanDecision(approve bool) handler {
 			}
 			project = named
 		}
-		// The role was checked by the route; the act itself needs the
-		// user's signature for this plan at this version (§12.2).
-		act := engine.GatedActRequest{Action: engine.GatedPlanReject, Project: project, Plan: planID, Version: req.Version}
-		if approve {
-			act = engine.GatedActRequest{Action: engine.GatedPlanApprove, Project: project, Plan: planID, Version: req.Version, StopAsking: req.AndStopAsking}
-		}
-		gated, written, err := s.runGated(w, r, act, req.ApprovalProof)
-		if written {
-			return
-		}
+		// The route checked the role; the decision runs as asked.
 		var res engine.PlanDecision
-		if gated.Plan != nil {
-			res = *gated.Plan
+		if approve {
+			res, err = s.eng.ApprovePlanVersion(r.Context(), project, planID, req.Version, req.AndStopAsking)
+		} else {
+			res, err = s.eng.RejectPlanVersion(r.Context(), project, planID, req.Version)
 		}
 		switch {
 		case errors.Is(err, engine.ErrNoPlan):
@@ -266,8 +259,6 @@ type planDecisionRequest struct {
 	RepoURL       string `json:"repo_url,omitempty"`
 	Version       int64  `json:"version,omitempty"`
 	AndStopAsking bool   `json:"and_stop_asking,omitempty"`
-	// ApprovalProof answers the pending request of this act (§12.2).
-	ApprovalProof
 }
 
 // planDecisionResponse names the plan's new state and, for an approval,
