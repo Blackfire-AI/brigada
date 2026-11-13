@@ -111,9 +111,6 @@ func runRunner(ctx context.Context, args []string, stdout, stderr io.Writer) int
 		}
 		return usagef(stderr, "%v", err)
 	}
-	if err := writeKimiReviewAgentFiles(ads); err != nil {
-		return fail(stderr, err)
-	}
 
 	if code := ensureEngine(ctx, rt, noStart, stderr); code != 0 {
 		return code
@@ -239,20 +236,15 @@ func (s agentSpec) accountLabel() string {
 	return s.harness
 }
 
-// defaultClasses is what an agent takes when nothing narrows it — the
-// shorthand --classes default and the --agent form's own, kept one
-// constant so the two forms cannot drift. harnessDefaultClasses carries
-// the per-harness exceptions.
+// defaultClasses is what an agent takes when nothing narrows it, in every
+// harness — the shorthand --classes default and the --agent form's own,
+// kept one constant so the two forms cannot drift. A review runs under the
+// agent's permission= like any job.
 const defaultClasses = "implement,review,answer"
 
 // harnessDefaultClasses is what an agent of the harness takes when no
-// classes were given. qwen-code's default still leaves the review class
-// out; an explicit review class is accepted and runs under the agent's
-// permission=.
+// classes were given: the same for every harness.
 func harnessDefaultClasses(harness string) []string {
-	if harness == "qwen-code" {
-		return []string{"implement", "answer"}
-	}
 	return splitList(defaultClasses)
 }
 
@@ -482,7 +474,7 @@ func resolveRunnerAgents(rt *runtime, specs []agentSpec, workerScript string) ([
 				}
 				spec.agentFile = abs
 			}
-			ad = &kimi.Adapter{AgentFile: spec.agentFile, ReadOnlyAgentFile: filepath.Join(runnerStateDir(rt), "kimi-readonly.md")}
+			ad = &kimi.Adapter{AgentFile: spec.agentFile}
 		case "codex":
 			if spec.agentFile != "" {
 				return nil, nil, fmt.Errorf("--agent-file is a --harness kimi flag; the codex harness takes none")
@@ -502,9 +494,6 @@ func resolveRunnerAgents(rt *runtime, specs []agentSpec, workerScript string) ([
 			if spec.agentFile != "" {
 				return nil, nil, fmt.Errorf("--agent-file is a --harness kimi flag; the qwen-code harness takes none")
 			}
-			// A review takes the agent's permission= like any job, so an
-			// explicit review class is accepted; the default classes still
-			// leave it out.
 			ad = &qwencode.Adapter{}
 		case "fake":
 			if spec.agentFile != "" {
@@ -539,28 +528,6 @@ func resolveRunnerAgents(rt *runtime, specs []agentSpec, workerScript string) ([
 	}
 
 	return ads, adverts, nil
-}
-
-// writeKimiReviewAgentFiles runs once at runner startup, never while init is
-// displaying its plan or per job. Reviews use it even when the agent names
-// its own agent file, which stays the work jobs' definition.
-func writeKimiReviewAgentFiles(ads []adapter.Adapter) error {
-	for _, ad := range ads {
-		k, ok := ad.(*kimi.Adapter)
-		if !ok {
-			continue
-		}
-		if err := os.MkdirAll(filepath.Dir(k.ReadOnlyAgentFile), 0700); err != nil {
-			return err
-		}
-		if err := os.WriteFile(k.ReadOnlyAgentFile, []byte(kimi.ReadOnlyAgentDefinition), 0600); err != nil {
-			return err
-		}
-		if err := os.Chmod(k.ReadOnlyAgentFile, 0600); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func runnerSpecStrings(specs []agentSpec) []string {

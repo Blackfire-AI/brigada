@@ -10,80 +10,15 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/Blackfire-AI/brigada/internal/adapter"
-	"github.com/Blackfire-AI/brigada/internal/adapter/kimi"
 	"github.com/Blackfire-AI/brigada/internal/lifecycle"
 	"github.com/Blackfire-AI/brigada/internal/store"
 	"github.com/Blackfire-AI/brigada/internal/testsupport"
 )
-
-func TestRunnerKimiReviewAgentFile(t *testing.T) {
-	for _, explicit := range []bool{false, true} {
-		t.Run(strconv.FormatBool(explicit), func(t *testing.T) {
-			state := t.TempDir()
-			spec := agentSpec{harness: "kimi", classes: splitList(defaultClasses)}
-			if explicit {
-				spec.agentFile = filepath.Join(t.TempDir(), "custom.md")
-				if err := os.WriteFile(spec.agentFile, []byte("custom agent"), 0644); err != nil {
-					t.Fatal(err)
-				}
-			}
-			ads, _, err := resolveRunnerAgents(&runtime{stateDir: state}, []agentSpec{spec}, "")
-			if err != nil {
-				t.Fatal(err)
-			}
-			file := filepath.Join(state, "runner", "kimi-readonly.md")
-			if _, err := os.Stat(file); !os.IsNotExist(err) {
-				t.Fatalf("resolving agents wrote the file: %v", err)
-			}
-			if err := writeKimiReviewAgentFiles(ads); err != nil {
-				t.Fatal(err)
-			}
-			{
-				data, err := os.ReadFile(file)
-				if err != nil || string(data) != kimi.ReadOnlyAgentDefinition {
-					t.Fatalf("review agent = %q, %v", data, err)
-				}
-				for _, want := range []string{"description:", "tools: [Read, Grep, Glob]", "disallowedTools: [Bash]", "You are a read-only reviewer"} {
-					if !strings.Contains(string(data), want) {
-						t.Errorf("agent missing %q", want)
-					}
-				}
-				info, err := os.Stat(file)
-				if err != nil || info.Mode().Perm() != 0600 {
-					t.Fatalf("review agent permissions: %v, %v", info, err)
-				}
-			}
-			ad := ads[0].(*kimi.Adapter)
-			ad.Binary = "/unused/kimi"
-			for _, review := range []bool{false, true} {
-				cmd, err := ad.Command(adapter.Job{Prompt: "p", Review: review}, t.TempDir(), "")
-				if err != nil {
-					t.Fatal(err)
-				}
-				i := slices.Index(cmd.Args, "--agent-file")
-				// The adapter no longer swaps in the read-only agent for a
-				// review (Job.Permission is the grant now); the wiring that
-				// writes the file is dead until a follow-up removes it.
-				want := spec.agentFile
-				if want == "" {
-					if i >= 0 {
-						t.Fatalf("review=%v got an agent file: %v", review, cmd.Args)
-					}
-				} else if i < 0 || i+1 >= len(cmd.Args) || cmd.Args[i+1] != want {
-					t.Fatalf("args = %v, want agent file %q", cmd.Args, want)
-				}
-			}
-		})
-	}
-}
 
 // syncBuffer is a bytes.Buffer a running goroutine writes to while the
 // test reads: the runner's startup line is read while the runner runs.
@@ -568,24 +503,27 @@ func registeredClasses(t *testing.T, harness string, args ...string) []string {
 	return got
 }
 
-// TestRunnerQwenCodeClasses: qwen-code's default classes leave review out
-// (an explicit review class is accepted), so an agent registered with no
-// classes takes implement and answer, on the
-// shorthand flags and the --agent form alike; other harnesses keep all
-// three classes (TestRunnerHarnessRegisters).
+// TestRunnerQwenCodeClasses: qwen-code takes the review class like every
+// harness, by default and when named, on the shorthand flags and the --agent
+// form alike.
 func TestRunnerQwenCodeClasses(t *testing.T) {
-	t.Run("the shorthand flags", func(t *testing.T) {
-		classes := registeredClasses(t, "qwen-code", "--harness", "qwen-code")
-		if want := []string{"implement", "answer"}; !reflect.DeepEqual(classes, want) {
-			t.Errorf("classes = %q, want %q", classes, want)
-		}
-	})
-	t.Run("the agent form", func(t *testing.T) {
-		classes := registeredClasses(t, "qwen-code", "--agent", "harness=qwen-code,model=qwen3.8-max")
-		if want := []string{"implement", "answer"}; !reflect.DeepEqual(classes, want) {
-			t.Errorf("classes = %q, want %q", classes, want)
-		}
-	})
+	all := []string{"implement", "review", "answer"}
+	for _, tc := range []struct {
+		name string
+		args []string
+		want []string
+	}{
+		{"the shorthand flags", []string{"--harness", "qwen-code"}, all},
+		{"the agent form", []string{"--agent", "harness=qwen-code,model=qwen3.8-max"}, all},
+		{"an explicit review class on the shorthand flags", []string{"--harness", "qwen-code", "--classes", "review"}, []string{"review"}},
+		{"an explicit review class in the agent form", []string{"--agent", "harness=qwen-code,classes=implement+review"}, []string{"implement", "review"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if classes := registeredClasses(t, "qwen-code", tc.args...); !reflect.DeepEqual(classes, tc.want) {
+				t.Errorf("classes = %q, want %q", classes, tc.want)
+			}
+		})
+	}
 }
 
 // TestAgentSpecAccount: the --agent parser keeps the account= key and
