@@ -126,8 +126,8 @@ tasks:
     continue: "adapter-dsh-kimi-qwen"
     effort: medium
     skills: ["docs-change"]
-    state: running
-    branch: "brigada/task-769"
+    state: reviewing
+    branch: "brigada/task-769-r1"
     rounds: 0
   - id: 770
     name: "approval-primitive"
