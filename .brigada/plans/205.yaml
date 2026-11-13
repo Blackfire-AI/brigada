@@ -30,9 +30,10 @@ tasks:
     effort: medium
     review_tier: standard
     skills: ["surface-parity", "docs-change"]
-    state: running
+    state: needs_foreman
     branch: "brigada/task-787"
     rounds: 0
+    question: "Please enable `git rm` for this worktree shell, or confirm the runner will delete internal/api/approvalgate.go, internal/api/approvalgate_test.go, cmd/brigada/cmdapproval.go, cmd/brigada/cmdapproval_test.go (and internal/mcp/approval_test.go if it covers only signing). My shell refuses `git rm` with 'This command requires approval' and allows only go build/test/vet and gofmt, so I cannot delete files and must not leave stubs."
   - id: 788
     name: "drop-approval-engine-store"
     title: "Remove GatedAct, internal/approval, `brigada approver`, the approval_requests table and ssh-keygen"
