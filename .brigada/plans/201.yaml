@@ -186,9 +186,9 @@ tasks:
     base: "permission-plumbing"
     effort: medium
     skills: ["config-setting"]
-    state: needs_foreman
+    state: ready
     branch: "brigada/task-774-r1"
-    rounds: 1
+    rounds: 0
   - id: 775
     name: "approval-api-gates"
     title: "Approval authority: the API's gated acts require a verified signature"
