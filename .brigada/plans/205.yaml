@@ -5,9 +5,9 @@
 plan: 205
 title: "#228 revert: approval is a convention, not security; remove the approval-signature machinery"
 repo: "github.com/Blackfire-AI/brigada"
-state: needs_foreman
+state: reviewing
 created: 2026-11-13T07:43:01.195601Z
-updated: 2026-11-13T07:49:05.15012Z
+updated: 2026-11-13T07:53:32.852373Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -42,6 +42,18 @@ tasks:
     continue: "ungate-api-cli-mcp"
     effort: medium
     review_tier: standard
+    skills: ["refactor", "docs-change"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 789
+    name: "drop-approval-requests"
+    title: "Drop the approval_requests table (migration 0077), README/CHANGELOG, final sweep"
+    class: "implement"
+    deps: ["drop-approval-engine-store"]
+    base: "drop-approval-engine-store"
+    continue: "drop-approval-engine-store"
+    effort: low
     skills: ["schema-migration", "docs-change"]
     state: pending
     branch: ""
