@@ -57,9 +57,10 @@ type LeaseGrant struct {
 	RepoURL      string // the task's own repo, else the project's (§6.1)
 	BaseRef      string // the ref the worktree starts from; for a review, the diff's base end (§7)
 	CheckCmd     string // the check the runner runs after a done (§5.5); '' = none — always for a review
-	// WorkerTools is the project's worker_tools in its stored text, for a
-	// work or fix job; '' = unset, the harness's default scope.
-	WorkerTools string
+	// Permission is the picked agent's resolved permission= value (§5.2), as
+	// its runner advertised it: the harness's own permission mode, for every
+	// job the agent runs, a review included. '' = none to pass.
+	Permission string
 	// Setup is the environment step the runner runs before the worker and
 	// again before the check (§5.7); nil = the project had none.
 	Setup *SetupSpec
@@ -793,10 +794,10 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 			}
 			extraRepos = def.repos
 		}
-		workerTools := ""
-		if j.Kind == KindWork || j.Kind == KindFix {
-			if workerTools, err = projectWorkerToolsTx(tx, j.ProjectID); err != nil {
-				return nil, err
+		permission := ""
+		if agent != 0 && j.Kind != KindForeman {
+			if err := tx.QueryRow("SELECT permission FROM agents WHERE id = ?", agent).Scan(&permission); err != nil && !errors.Is(err, sql.ErrNoRows) {
+				return nil, fmt.Errorf("read the permission of agent %d: %w", agent, err)
 			}
 		}
 		resume, reviewSince := "", ""
@@ -857,7 +858,7 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 			BaseRef:         baseRef,
 			DefaultBranch:   defaultBranch,
 			CheckCmd:        checkCmd,
-			WorkerTools:     workerTools,
+			Permission:      permission,
 			Setup:           setup,
 			ExtraRepos:      extraRepos,
 			ReviewBranch:    reviewBranch,

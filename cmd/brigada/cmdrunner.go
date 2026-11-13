@@ -448,6 +448,10 @@ func resolveRunnerAgents(rt *runtime, specs []agentSpec, workerScript string) ([
 		}
 		seen[pair] = true
 		var ad adapter.Adapter
+		// The agent's resolved permission= value rides its advertisement to
+		// the job grant; the read-scope switch goes to the code that
+		// installs the hook.
+		permission, readScope := spec.resolve(rt.file)
 		if spec.tools != nil && spec.harness != "claude" {
 			return nil, nil, fmt.Errorf("--agent tools=: %s", lifecycle.ToolsRefusal(spec.harness))
 		}
@@ -462,7 +466,7 @@ func resolveRunnerAgents(rt *runtime, specs []agentSpec, workerScript string) ([
 			if tools == nil {
 				tools = rt.file.Tools["claude/"+spec.model]
 			}
-			ad = &claude.Adapter{AllowedTools: tools}
+			ad = &claude.Adapter{AllowedTools: tools, NoReadScope: !readScope}
 			spec.toolsText = claude.ScopeText(tools)
 		case "kimi":
 			// The agent file is resolved and checked here, not at the
@@ -531,6 +535,8 @@ func resolveRunnerAgents(rt *runtime, specs []agentSpec, workerScript string) ([
 			Account: spec.accountLabel(),
 			Classes: spec.classes,
 			Tools:   spec.toolsText,
+
+			Permission: permission,
 		})
 	}
 

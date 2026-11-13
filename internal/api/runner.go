@@ -36,7 +36,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request, id ident
 		agents[i] = engine.AgentAdvert{
 			Adapter: a.Adapter, Harness: a.Harness, Model: a.Model,
 			Family: a.Family, Account: a.Account, Classes: a.Classes,
-			Effort: a.Effort, Tools: a.Tools,
+			Effort: a.Effort, Tools: a.Tools, Permission: a.Permission,
 		}
 	}
 	var startedAt time.Time
@@ -336,6 +336,8 @@ type agentAdvert struct {
 	// Effort is the agent's reasoning-effort level; empty when unset.
 	Effort string `json:"effort,omitempty"`
 	Tools  string `json:"tools,omitempty"`
+	// Permission is the agent's resolved permission= value (§5.2).
+	Permission string `json:"permission,omitempty"`
 }
 
 // jobLeaseRequest names a job and the lease the runner holds on it:
@@ -420,9 +422,10 @@ type jobGrant struct {
 	RepoURL      string `json:"repo_url"`
 	BaseRef      string `json:"base_ref"`
 	CheckCmd     string `json:"check_cmd"`
-	// WorkerTools is the project's worker tool scope (Claude spelling,
-	// "+"-joined, or "none"); empty when unset.
-	WorkerTools string `json:"worker_tools,omitempty"`
+	// Permission is the picked agent's resolved permission= value (§5.2),
+	// which the runner hands the harness as its own permission mode; empty
+	// when the agent has none to pass. A review's grant carries it as well.
+	Permission string `json:"permission,omitempty"`
 	// Setup is the environment step (§5.7) the runner runs before the
 	// worker and again before the check; absent when the task has none.
 	Setup *engine.SetupSpec `json:"setup,omitempty"`
@@ -529,7 +532,7 @@ func jobGrantOf(g *engine.LeaseGrant) *jobGrant {
 		RepoURL:         g.RepoURL,
 		BaseRef:         g.BaseRef,
 		CheckCmd:        g.CheckCmd,
-		WorkerTools:     g.WorkerTools,
+		Permission:      g.Permission,
 		Setup:           g.Setup,
 		ExtraRepos:      g.ExtraRepos,
 		ReviewBranch:    g.ReviewBranch,

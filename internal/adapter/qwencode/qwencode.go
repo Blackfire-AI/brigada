@@ -84,9 +84,9 @@ func (a *Adapter) ProbeCommand(ctx context.Context) *exec.Cmd {
 // offers no read-only scope brigada maps the foreman's onto, so the
 // foreman's confinement (§4) is not enforced by the harness.
 //
-// job.ReadDirs and job.Tools are ignored for now: reading extra
-// directories and mapping a tool scope onto qwen's permission rules are
-// follow-ups.
+// job.ReadDirs and job.Permission are ignored for now: reading extra
+// directories and passing the permission value to qwen's own permission
+// flag are follow-ups.
 func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*exec.Cmd, error) {
 	if job.Review {
 		return nil, errors.New("qwen-code: no read-only review policy yet; review jobs cannot run on it")

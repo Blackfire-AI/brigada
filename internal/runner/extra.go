@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/Blackfire-AI/brigada/internal/adapter"
 	"github.com/Blackfire-AI/brigada/internal/api"
 	"github.com/Blackfire-AI/brigada/internal/engine"
 )
@@ -17,8 +16,8 @@ import (
 // and never changes. The runner checks each out beside the task's worktree,
 // at <worktree>.extra/<name>, with its own git credentials; the checkout has
 // no remote and read-only files, and the runner never pushes it: it pushes
-// the task's own branch alone. Whatever a worker with a wider tool scope than
-// the default does to it is discarded with the checkout.
+// the task's own branch alone. Whatever a worker with a wide permission mode
+// does to it is discarded with the checkout.
 
 // extraRoot is the directory the job's extra checkouts live in: a sibling of
 // the worktree, inside the runner's state directory, never in the worktree
@@ -113,8 +112,8 @@ func (r *jobRun) extraPromptOf() string {
 
 // extraPromptNote is the short fixed paragraph the runner appends to a
 // job's prompt when the job has extra repositories (§5.8): the worker may
-// have no shell for echo or ls — claude's default worker scope is the Go
-// toolchain alone — so the prompt itself must name each checkout's
+// have no shell for echo or ls — its permission mode may refuse one — so
+// the prompt itself must name each checkout's
 // absolute path. One sentence per repository, in the grant's order, in
 // the grant's own naming; no repositories, no paragraph, and a job
 // without them keeps its prompt unchanged.
@@ -127,57 +126,6 @@ func extraPromptNote(repos []engine.ExtraRepo, dirs []string) string {
 	for i := range repos {
 		fmt.Fprintf(&b, "%s at %s (also in $%s).\n", repos[i].Name, dirs[i], repos[i].EnvVar())
 	}
-	return b.String()
-}
-
-// claudeCompoundNote is what a claude worker is told about compound
-// commands, pinned to what a claude worker under the Go default scope was
-// seen to run: `2>&1`, a pipe into tail, `&&` and `;` between allowed
-// commands, and a `cd` that persists to the next call. A command outside
-// the scope, git for one, is refused ("requires approval").
-const claudeCompoundNote = "A line that chains allowed commands with &&, ; or a pipe into tail, or adds 2>&1, runs. A cd persists into your next call, so stay at the worktree root."
-
-// opencodeCompoundNote is opencode's own rule for a compound command
-// (docs/GUIDE.md, Worker tools): it runs only if every part is allowed.
-const opencodeCompoundNote = "A compound command runs only if every part of it is an allowed command."
-
-// shellScopeNote is the fixed paragraph the runner appends to a work or fix
-// job's prompt, naming the shell scope in force: a worker told only that
-// "tools may let it run commands" took one refusal for no shell at all and
-// parked. The harness's adapter reports the scope (adapter.ShellScoped);
-// a harness that does not, a scope naming the whole shell, a review and a
-// foreman turn (an MCP config) get no paragraph. A scope with no shell
-// command gets its own wording.
-func shellScopeNote(ad adapter.Adapter, grant *api.JobGrant, tools []string, mcpConfig string) string {
-	if isReviewJob(grant) || mcpConfig != "" {
-		return ""
-	}
-	s, ok := ad.(adapter.ShellScoped)
-	if !ok {
-		return ""
-	}
-	cmds, whole := s.ShellCommands(tools)
-	if whole {
-		return ""
-	}
-	if len(cmds) == 0 {
-		return "\nShell scope: you have no shell. Edit files, then report done; the runner runs the check. You need no git: the runner commits and pushes.\n"
-	}
-	compound := opencodeCompoundNote
-	if ad.Name() == "claude" {
-		compound = claudeCompoundNote
-	}
-	var b strings.Builder
-	b.WriteString("\nShell scope: your shell runs only these commands, and nothing else: ")
-	for i, c := range cmds {
-		if i > 0 {
-			b.WriteString(", ")
-		}
-		b.WriteString("`" + c + "`")
-	}
-	b.WriteString(".\nRun them from the worktree root, one command per call where you can. " + compound)
-	b.WriteString(" A refusal (\"requires approval\") covers that command, not the shell: try the allowed form before asking anyone, and do not conclude you have no shell.")
-	b.WriteString(" You need no git: the runner commits and pushes.\n")
 	return b.String()
 }
 

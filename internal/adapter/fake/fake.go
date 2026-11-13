@@ -61,7 +61,13 @@ func (a *Adapter) ProbeCommand(ctx context.Context) *exec.Cmd {
 // ride in the environment, never the prompt: they are the adapter's
 // plumbing, not the worker's business.
 func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*exec.Cmd, error) {
-	cmd := exec.Command(a.Script)
+	// The grant's permission value rides the command line as the fake
+	// CLI's own permission flag, so a test sees what the runner passed.
+	var args []string
+	if job.Permission != "" {
+		args = append(args, "--permission", job.Permission)
+	}
+	cmd := exec.Command(a.Script, args...)
 	cmd.Dir = workdir
 	cmd.Stdin = strings.NewReader(job.Prompt)
 	cmd.Env = append(os.Environ(),
