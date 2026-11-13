@@ -30,6 +30,6 @@ tasks:
     tier: light
     effort: low
     skills: ["config-setting"]
-    state: ready
+    state: running
     branch: ""
     rounds: 0
