@@ -21,7 +21,6 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Approving or rejecting a plan at its version, approving or rejecting a landing and approving a push now need a signature over a one-time challenge from an enrolled key, beyond the token making the call: `brigada plan approve`/`reject`, `brigada land approve`/`reject` and `brigada push approve` take `--request`/`--signature` and take effect only once the engine verifies the signature (with `ssh-keygen -Y verify`), failing closed with no enrolled key or an expired challenge (issue #228).
 - A task's worktree carries no push URL any more; only the runner, from its own clone, pushes a landed task's commit, and only at landing. A worker (or a reviewer) cannot push or force-push its own branch (issue #228).
 - A review now takes the identical `permission=` as a work or fix job on every harness, with no read-only default of brigada's own: the review's own detached, discarded worktree is what keeps it from changing anything (issue #228).
-
 - A `qwen-code` agent now takes the review class: it defaults to `implement,review,answer` like every harness, and `--agent classes=` or `--classes` naming `review` is no longer refused. Its review runs under the same `permission=` pass-through as a worker, with no read-only default of brigada's (issue #228).
 
 ### Fixed

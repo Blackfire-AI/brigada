@@ -72,7 +72,8 @@ type Adapter interface {
 type Job struct {
 	Prompt string
 	Model  string
-	// Review selects the harness's read-only review policy, where supported.
+	// Review marks a review job. No adapter varies its command by it: a
+	// review takes the same permission= pass-through as a worker (§5.2).
 	Review bool
 	// Effort is the reasoning-effort level for the run, one of the harness's
 	// accepted levels (ValidateEffort); empty adds nothing. An adapter whose
