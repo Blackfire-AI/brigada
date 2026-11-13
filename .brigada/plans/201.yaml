@@ -126,9 +126,9 @@ tasks:
     continue: "adapter-dsh-kimi-qwen"
     effort: medium
     skills: ["docs-change"]
-    state: reviewing
+    state: running
     branch: "brigada/task-769-r1"
-    rounds: 0
+    rounds: 1
   - id: 770
     name: "approval-primitive"
     title: "Approval authority: internal/approval, the challenge-signature primitive"
