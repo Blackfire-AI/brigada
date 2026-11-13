@@ -26,6 +26,7 @@ type initModelEntry struct {
 	value          string
 	isDefault      bool
 	isCurrent      bool     // A saved choice, displayed as a tag after the note.
+	saved          bool     // In the agents file, so kept when a newer version supersedes it.
 	effortLevels   []string // Source order; Kimi metadata is display-only.
 	defaultEffort  string   // Empty if unknown; Claude uses a descriptive default.
 	effortFromUser bool     // The default effort comes from the user's CLI config.

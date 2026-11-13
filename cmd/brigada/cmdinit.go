@@ -327,6 +327,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 				source = initCurrentModel(source, spec)
 			}
 		}
+		source = initMarkSaved(source, saved[h])
 		sources[h] = source
 		probes[h] = source.signIn
 	}
@@ -1227,6 +1228,19 @@ func initPickedModel(harness, model string, sources map[string]initModelSource) 
 		entry.effortLevels = adapter.EffortLevels(harness)
 	}
 	return entry
+}
+
+// initMarkSaved marks the source's models that the agents file registers, of
+// any harness, so the superseded filter of initEligibleEntries keeps them and a
+// rerun does not drop their lines.
+func initMarkSaved(source initModelSource, saved []agentSpec) initModelSource {
+	source.entries = slices.Clone(source.entries)
+	for i := range source.entries {
+		if slices.ContainsFunc(saved, func(spec agentSpec) bool { return spec.model == source.entries[i].value }) {
+			source.entries[i].saved = true
+		}
+	}
+	return source
 }
 
 // Use the numbered menu's defaultID for saved models, including models no

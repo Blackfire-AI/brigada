@@ -88,7 +88,7 @@ func initEligibleEntries(harness string, source initModelSource) []initModelEntr
 	superseded := adapter.Superseded(values)
 	var entries []initModelEntry
 	for _, entry := range source.entries {
-		if superseded[entry.value] != "" && !entry.isCurrent {
+		if superseded[entry.value] != "" && !entry.saved {
 			continue
 		}
 		if _, err := initModelFamily(harness, entry.value); err == nil {

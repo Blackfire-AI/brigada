@@ -192,7 +192,7 @@ func TestInitEligibleEntriesLeavesOutSuperseded(t *testing.T) {
 	source := initModelSource{entries: []initModelEntry{
 		{id: 1, name: "gpt-6.1-sol", value: "gpt-6.1-sol"},
 		{id: 2, name: "gpt-6-sol", value: "gpt-6-sol"},
-		{id: 3, name: "gpt-5.6-luna", value: "gpt-5.6-luna", isCurrent: true},
+		{id: 3, name: "gpt-5.6-luna", value: "gpt-5.6-luna", saved: true},
 		{id: 4, name: "gpt-6-luna", value: "gpt-6-luna"},
 	}}
 	got := initEligibleEntries("codex", source)
@@ -203,5 +203,35 @@ func TestInitEligibleEntriesLeavesOutSuperseded(t *testing.T) {
 	// A saved superseded model stays; the rest are numbered without a gap.
 	if want := []string{"1 gpt-6.1-sol", "2 gpt-5.6-luna", "3 gpt-6-luna"}; !slices.Equal(pairs, want) {
 		t.Errorf("entries = %q, want %q", pairs, want)
+	}
+}
+
+func TestInitMarkSavedKeepsSupersededForEveryHarness(t *testing.T) {
+	// The "Use <cli>'s models?" answer rebuilds a harness's lines from the
+	// eligible entries, so a saved model left out there would lose its line.
+	for _, tc := range []struct {
+		harness string
+		models  []string
+		saved   string
+		want    []string
+	}{
+		{"codex", []string{"gpt-6.1-sol", "gpt-5.6-sol", "gpt-6-luna"}, "gpt-5.6-sol", []string{"gpt-6.1-sol", "gpt-5.6-sol", "gpt-6-luna"}},
+		{"claude", []string{"fable", "claude-fable-5-2[1m]", "claude-fable-5-1[1m]"}, "claude-fable-5-1[1m]", []string{"fable", "claude-fable-5-2[1m]", "claude-fable-5-1[1m]"}},
+		{"codex", []string{"gpt-6.1-sol", "gpt-5.6-sol"}, "gpt-6.1-sol", []string{"gpt-6.1-sol"}},
+	} {
+		t.Run(tc.harness+"/"+tc.saved, func(t *testing.T) {
+			var source initModelSource
+			for i, model := range tc.models {
+				source.entries = append(source.entries, initModelEntry{id: i + 1, name: model, value: model})
+			}
+			source = initMarkSaved(source, []agentSpec{{harness: tc.harness, model: tc.saved}})
+			var got []string
+			for _, entry := range initEligibleEntries(tc.harness, source) {
+				got = append(got, entry.value)
+			}
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("eligible = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
