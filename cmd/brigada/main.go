@@ -16,7 +16,6 @@ import (
 	"syscall"
 
 	"github.com/Blackfire-AI/brigada/internal/adapter/claude"
-	"github.com/Blackfire-AI/brigada/internal/api"
 	"github.com/Blackfire-AI/brigada/internal/logo"
 	"github.com/Blackfire-AI/brigada/internal/version"
 )
@@ -304,13 +303,6 @@ func commandStderr(stderr io.Writer, name string) io.Writer {
 
 // fail prints an error and returns exit code 1.
 func fail(stderr io.Writer, err error) int {
-	// A gated act that waits for the user's signature, or one whose
-	// signature was refused (§12.2), reads the same on every call: the
-	// reason, the pending request and how to sign it.
-	if pending, ok := api.ApprovalOf(err); ok {
-		fmt.Fprintf(stderr, "brigada: %s\nthat is, run the same command again with --request %d --signature <file>.sig\n", pending.Text(), pending.RequestID)
-		return 1
-	}
 	fmt.Fprintf(stderr, "brigada: %v\n", err)
 	return 1
 }

@@ -33,8 +33,8 @@ func TestLandGateEndpointsRefuseForeman(t *testing.T) {
 		}
 	}
 
-	// The client token may decide the land gate, with the user's signature.
-	code, data := e.signedCall(t, e.enroll(t), fmt.Sprintf("/v1/tasks/%d/land/approve", e.task), "alice", nil)
+	// The client token may decide the land gate.
+	code, _, data := e.do(http.MethodPost, fmt.Sprintf("/v1/tasks/%d/land/approve", e.task), "alice", "", nil)
 	if code != http.StatusOK {
 		t.Fatalf("client approves the land gate: %d %s, want 200", code, data)
 	}
@@ -56,7 +56,7 @@ func TestLandRejectEndpoint(t *testing.T) {
 	e := newEnv(t)
 	e.seedLandHold()
 
-	code, data := e.signedCall(t, e.enroll(t), fmt.Sprintf("/v1/tasks/%d/land/reject", e.task), "root", nil)
+	code, _, data := e.do(http.MethodPost, fmt.Sprintf("/v1/tasks/%d/land/reject", e.task), "root", "", nil)
 	if code != http.StatusOK {
 		t.Fatalf("admin rejects the land gate: %d %s, want 200", code, data)
 	}
@@ -80,7 +80,7 @@ func TestPushApproveEndpoint(t *testing.T) {
 	e.exec(`INSERT INTO landings (task_id, project_id, target_branch, commit_sha, pushed, created_at)
 		VALUES (?, ?, 'main', 'abc123', 'waiting', ?)`, e.task, e.project1, seedTS)
 
-	code, data := e.signedCall(t, e.enroll(t), "/v1/push/approve", "alice", map[string]any{"repo_url": "https://example.invalid/one.git"})
+	code, _, data := e.do(http.MethodPost, "/v1/push/approve", "alice", "", []byte(`{"repo_url":"https://example.invalid/one.git"}`))
 	if code != http.StatusOK {
 		t.Fatalf("client approves the push: %d %s, want 200", code, data)
 	}

@@ -45,7 +45,7 @@ func (c *Client) TaskLand(ctx context.Context, id int64) (engine.TaskLandInfo, e
 func (c *Client) LandApprove(ctx context.Context, id int64, andStopAsking bool) (engine.LandDecision, error) {
 	var out engine.LandDecision
 	path := "/v1/tasks/" + strconv.FormatInt(id, 10) + "/land/approve"
-	if err := c.call(ctx, http.MethodPost, path, landDecisionRequest{AndStopAsking: andStopAsking, ApprovalProof: c.approval}, &out); err != nil {
+	if err := c.call(ctx, http.MethodPost, path, landDecisionRequest{AndStopAsking: andStopAsking}, &out); err != nil {
 		return engine.LandDecision{}, err
 	}
 	return out, nil
@@ -55,7 +55,6 @@ func (c *Client) LandApprove(ctx context.Context, id int64, andStopAsking bool) 
 // an approval may carry.
 type landDecisionRequest struct {
 	AndStopAsking bool `json:"and_stop_asking,omitempty"`
-	ApprovalProof
 }
 
 // LandReject cancels a task's landing (§6.3): the branch stays, nothing
@@ -63,7 +62,7 @@ type landDecisionRequest struct {
 func (c *Client) LandReject(ctx context.Context, id int64) (engine.LandDecision, error) {
 	var out engine.LandDecision
 	path := "/v1/tasks/" + strconv.FormatInt(id, 10) + "/land/reject"
-	if err := c.call(ctx, http.MethodPost, path, landDecisionRequest{ApprovalProof: c.approval}, &out); err != nil {
+	if err := c.call(ctx, http.MethodPost, path, landDecisionRequest{}, &out); err != nil {
 		return engine.LandDecision{}, err
 	}
 	return out, nil
@@ -75,8 +74,7 @@ func (c *Client) PushApprove(ctx context.Context, repoURL string) (engine.PushAp
 	var out engine.PushApproveResult
 	if err := c.call(ctx, http.MethodPost, "/v1/push/approve", struct {
 		RepoURL string `json:"repo_url"`
-		ApprovalProof
-	}{repoURL, c.approval}, &out); err != nil {
+	}{repoURL}, &out); err != nil {
 		return engine.PushApproveResult{}, err
 	}
 	return out, nil
@@ -566,7 +564,6 @@ func (c *Client) decidePlan(ctx context.Context, plan int64, verb string) (PlanD
 
 func (c *Client) decidePlanBody(ctx context.Context, plan int64, verb string, body planDecisionRequest) (PlanDecisionResult, error) {
 	var out planDecisionResponse
-	body.ApprovalProof = c.approval
 	path := "/v1/plans/" + strconv.FormatInt(plan, 10) + "/" + verb
 	if err := c.call(ctx, http.MethodPost, path, body, &out); err != nil {
 		return PlanDecisionResult{}, err

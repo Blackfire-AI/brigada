@@ -327,7 +327,7 @@ The usual way in is through your own coding agent, the operator. `brigada init` 
 - **follows a landing**: merges the staging pull request with a merge commit once CI is green (when `land_target` is the default branch and `after_land` is none, there is no pull request to merge), and restarts the engine and runner after a brigada upgrade, or when their own code landed in the repository, once nothing pending needs the old behaviour;
 - **recovers** after an outage by asking again: an ask re-wakes the foreman, even when its wake budget for the day is spent.
 
-The operator has no approval authority. Plan approval, land approval, push approval, `--and-stop-asking`, tags and releases, and rule changes stay yours; the operator tells you what waits. The operator's client token does not approve: an approval is your signature, made with a key you enrolled ([approving by signature](#approving-by-signature)). `brigada attach` below is the other way in: your own conversation with the foreman.
+The operator has no approval authority. Plan approval, land approval, push approval, `--and-stop-asking`, tags and releases, and rule changes stay yours; the operator tells you what waits. `brigada attach` below is the other way in: your own conversation with the foreman.
 
 ### What the foreman can and cannot do
 
@@ -406,12 +406,11 @@ Registering a project this way gives it a foreman but no runner agents: run `bri
 
 ### The coordinator session
 
-Open your harness in the parent folder. The coordinator session has six tools over every project the engine knows, authorised by the client token, not as a foreman. The token says who may call; it does not approve ([approving by signature](#approving-by-signature)):
-
+Open your harness in the parent folder. The coordinator session has six tools over every project the engine knows, authorised by the client token, not as a foreman.
 - `list_projects`: every project by repository URL, with its foreman, active plans and how many things need you;
 - `ask_foreman`: send one project's foreman a message as you (`repo_url`, `text`);
 - `status` and `history`: across every project, or one with `repo_url`; `status` shows each plan awaiting approval with its id, version and why it waits, its tasks in the plans list (which trims finished plans like `brigada status`, `all=true` for every one);
-- `plan_approve` and `plan_reject`: your decision on a plan over the approval limit, naming the project, the plan id and the **plan version you were shown**. A plan amended since is refused, and the coordinator must read `status` and show you the plan again. `plan_approve` also takes `and_stop_asking`, which changes the rule that held the plan the way `brigada project set` would ([section 7](#gates-and-rules)). The coordinator is told to call them only after you said an explicit yes or no in the chat, and even then they only request the approval: they carry no signature, and the result gives the request's challenge and the command that confirms it. You confirm with your own key, outside the harness ([approving by signature](#approving-by-signature)).
+- `plan_approve` and `plan_reject`: your decision on a plan over the approval limit, naming the project, the plan id and the **plan version you were shown**. A plan amended since is refused, and the coordinator must read `status` and show you the plan again. `plan_approve` also takes `and_stop_asking`, which changes the rule that held the plan the way `brigada project set` would ([section 7](#gates-and-rules)). The coordinator is told to call them only after you said an explicit yes or no in the chat; "awaiting approval" is never a reason to approve.
 
 The coordinator never plans and never edits a task graph: it has no `plan_create`, `plan_amend` or task tool. Each project's own foreman plans.
 
@@ -537,7 +536,7 @@ brigada land reject 45    # cancel it: the branch is left as it is, nothing reco
 brigada push approve      # release the push gate for every waiting landing
 ```
 
-Only you can say these: the foreman has no tool to pass a gate, and each of the three, like `brigada plan approve`, takes your signature beyond the token. Run bare, a command prints the request and the message to sign; run again with `--request ID --signature FILE`, it acts ([approving by signature](#approving-by-signature)).
+Only you can say these: the foreman has no tool to pass a gate.
 
 ### Conflicts and failed checks
 
@@ -804,11 +803,11 @@ The loop — plan, work, check, review, land, push — is brigada's; you stop it
 A held plan waits in `pending_approval`, and nothing is queued. The needs-you entry gives the reasons, for example `7 tasks, over the limit of 5`, `gate_plan is ask` or `check_command: check "make release" differs from default_check "go test ./..."`, with how to release or change it. An amendment of an already-active plan is judged by what it adds: each added task is checked on its own against the per-task rules — its class, the protected paths its spec or check mentions, its extra repositories, its check against `default_check` — and one that trips a rule is held alone, parked with a needs-you line naming the rule, while the plan stays active and the rest runs on. The task count and `gate_plan` never hold an amendment of a running plan, and cancelling, re-pointing or retiering never holds. A `respec` edit is judged on the text it adds and the task's check, with the same per-task hold. You decide:
 
 ```sh
-brigada plan approve 7    # once signed: queues the tasks; prints each task's job
-brigada plan reject 7     # once signed: cancels the plan's tasks
+brigada plan approve 7    # queues the tasks; prints each task's job
+brigada plan reject 7     # cancels the plan's tasks
 ```
 
-Run bare, either command is a request and acts on nothing: it prints the request and the message to sign. It acts only once you sign that message and run it again with the request and the signature, as [approving by signature](#approving-by-signature) shows. The coordinator's `plan_approve` and `plan_reject` ([section 3](#3-several-repositories)), which name the plan version you were shown, only request in the same way.
+The coordinator's `plan_approve` and `plan_reject` ([section 3](#3-several-repositories)) name the plan version you were shown, and act on your explicit yes or no in the chat.
 
 On a running plan, `brigada plan approve` releases the tasks a rule holds alone, from an amendment or from the plan budget: they queue as their dependencies allow, and `--and-stop-asking` changes only the rules those tasks tripped. The foreman cannot release them: its `task_restart` and `answer` refuse a held task. `brigada plan reject` works only on a plan that waits whole; to drop a held task, ask the foreman to cancel it.
 
@@ -821,31 +820,6 @@ On a running plan, `brigada plan approve` releases the tasks a rule holds alone,
 **The push gate** (`gate_push`, `auto` by default) decides what follows a successful landing: `auto` pushes the target, `ask` holds the push until `brigada push approve` releases every waiting landing of the project, and `never` leaves the push to you. Both gates, their needs-you entries and `after_land` are described in [section 5](#5-finishing-the-land-job). A held task blocks nothing but its dependents' landings: work on the rest of the plan goes on.
 
 Only you can decide: no foreman tool approves a plan or passes a gate.
-
-### Approving by signature
-
-A token says who may call the engine; it does not say you approved. Approving or rejecting a plan at its version, approving or rejecting a landing and approving a push each need your signature beyond the client token, made with a key you enrolled. A client or admin token alone refuses these five acts. A project import and a user message stay role-checked calls and take no signature.
-
-**Enroll a key once.** Give brigada a public key file; it never reads the private half:
-
-```sh
-brigada approver add --label laptop --public-key ~/.ssh/id_ed25519.pub
-brigada approver list
-brigada approver remove --label laptop
-```
-
-The label takes letters, digits and `. _ @ -`; `--public-key -` reads standard input. The keys live in `approval_keys` in the state directory, public halves only, and the commands edit that file directly, so they need no running engine.
-
-**Sign a gated act.** Ask for the act with its bare command. It does nothing yet: the engine records a pending request with a one-time challenge for that act and the command refuses, printing the request, the challenge, its expiry (five minutes by default) and the message to sign, exactly these lines, to be saved to a file. Sign the file under the `brigada-approval` namespace:
-
-```sh
-brigada plan approve 7                      # refused: prints request #5 and the message to sign
-ssh-keygen -Y sign -f ~/.ssh/id_ed25519 -n brigada-approval msg.txt    # writes msg.txt.sig
-```
-
-Then run the command again with the request and the signature file, here `brigada plan approve --request 5 --signature msg.txt.sig 7`. The same two flags, `--request ID` and `--signature FILE`, go on `brigada plan approve`, `plan reject`, `land approve`, `land reject` and `push approve`, and they go together. A request that waits is an entry of the needs-you queue, as `signature wanted out of band to approve plan #7 at version 2 (request #5, challenge <nonce>, expires <time>)`, and raises a notification. A signature covers its one challenge: it cannot be used again, for another act, for another plan version or after it expires, and the refusal names which reason applies (no enrolled key, no signature, a signature that does not verify, a reused signature, an expired challenge, or an act other than the one signed). Ask again for a fresh challenge when one expires. The gate settings (`gate_plan`, `gate_land`, `gate_push`, `approval_tiers`) still decide what waits; the signature releases what they hold.
-
-**What this does and does not protect.** The engine verifies by running `ssh-keygen -Y verify`, so `ssh-keygen` must be on the `PATH` of the host that runs the engine; without it every approval is refused. A headless run never prompts on a terminal: an approval nobody signs stays waiting. The residual risk is plain: a private key that is an ordinary file the same OS user can read lets an agent with a shell sign. A key that needs a human at signing time defends against that: a hardware token that asks for a touch, an agent key constrained to ask for a touch on each use, or a key kept off the machine.
 
 ### The plan file
 
@@ -1100,7 +1074,7 @@ What a worker or reviewer may do is set by its harness's own permission mode, wh
 | dsh | `DSH_PERMISSION_MODE`, the OS-level mode the permission names, `workspace-write` by default | not available |
 | qwen-code | headless `qwen -p` with its auto-approve flag, or the `--approval-mode` the permission names | brigada's MCP tools through `--mcp-config` with `--strict-mcp-config`, but no read-only scope: a headless turn keeps the auto-approve flag, so it can edit files and run any command in the reading checkout, and its reads are not confined to it; an attach runs without that flag, under the CLI's own approval prompts |
 
-For real confinement, choose a harness that sandboxes (codex `workspace-write`, dsh `workspace-write`) or a narrower `permission=` for claude, for example `acceptEdits`. Claude's `bypassPermissions`, opencode `allow`, kimi and qwen-code run with an unconfined shell, so the approval signature does not hold against them ([approving by signature](#approving-by-signature)).
+For real confinement, choose a harness that sandboxes (codex `workspace-write`, dsh `workspace-write`) or a narrower `permission=` for claude, for example `acceptEdits`. Claude's `bypassPermissions`, opencode `allow`, kimi and qwen-code run with an unconfined shell, which runs as you and can change brigada's state as you can: approval is your decision by convention, not a boundary against such a process.
 
 Every harness runs in a git worktree on your machine. Workers inherit your environment minus the credential scrub ([design §5.8](design/05-workers.md#the-credential-scrub)), so none of these scopes keeps a check command, a test run or a kimi worker away from your remaining credentials or the network.
 
@@ -1538,18 +1512,16 @@ A command's flags go after its name and before its positional arguments (`diff`,
 ### Finishing
 
 - `brigada land <task-id>... [--onto BRANCH] [--repo URL] [--landed ID]... [--no-check]`: the hand-driven squash of approved tasks onto the checked-out branch, one commit each, in dependency order; rerun the default check; print the push command and stop. See [section 5](#5-finishing-the-land-job).
-- `brigada land approve [--and-stop-asking] [--request ID --signature FILE] <task>`, `brigada land reject [--request ID --signature FILE] <task>`: your decision on a landing held at the land gate; approve queues its land job, reject cancels the landing and leaves the branch; `--and-stop-asking` also changes the rule that held it. Both take your signature ([approving](#approving)). See [section 5](#gates-and-holds).
-- `brigada push approve [--repo URL] [--request ID --signature FILE]`: release the push gate; every waiting landing of the project gets its push queued. It takes your signature ([approving](#approving)). See [section 5](#gates-and-holds).
+- `brigada land approve [--and-stop-asking] <task>`, `brigada land reject <task>`: your decision on a landing held at the land gate; approve queues its land job, reject cancels the landing and leaves the branch; `--and-stop-asking` also changes the rule that held it. See [section 5](#gates-and-holds).
+- `brigada push approve [--repo URL]`: release the push gate; every waiting landing of the project gets its push queued. See [section 5](#gates-and-holds).
 
 ### Approving
-
-An approval is your signature beyond any token ([section 7](#approving-by-signature)). Five commands take it: `brigada plan approve`, `brigada plan reject`, `brigada land approve`, `brigada land reject` and `brigada push approve`, each with `--request ID --signature FILE`. Bare, they print the request and the message to sign and exit 1; with both flags they act. The flags go together, and the signature file is what `ssh-keygen -Y sign -n brigada-approval` wrote for the request's message.
 
 - `brigada approver add --label L --public-key FILE`, `brigada approver list`, `brigada approver remove --label L`: enroll, list and remove the public keys your approvals are signed with. The keys live in `approval_keys` in the state directory, mode 0600, public halves only: brigada never reads or stores a private key. The settings `gate_plan`, `gate_land`, `gate_push` and `approval_tiers` keep deciding what waits; the signature releases what they hold, and the engine's host needs `ssh-keygen` on `PATH` to verify one.
 
 ### Deciding
 
-- `brigada plan approve [--and-stop-asking] [--request ID --signature FILE] <id>`, `brigada plan reject [--request ID --signature FILE] <id>`: your answer on a plan held at the plan gate; `--and-stop-asking` also changes the rule that held it. Both take your signature ([approving](#approving)). See [section 7](#gates-and-rules).
+- `brigada plan approve [--and-stop-asking] <id>`, `brigada plan reject <id>`: your answer on a plan held at the plan gate; `--and-stop-asking` also changes the rule that held it. See [section 7](#gates-and-rules).
 - `brigada budget [--repo URL] [--wakes N]`: show the project's foreman wake budget, with today's use and the UTC reset time; `--wakes N` (1 to 1000) sets it. See [section 4](#the-wake-budget).
 - `brigada agent reset <harness>/<model>`: clear a broken or cooling agent. See [section 8](#broken-agents).
 - `brigada cancel <job-id>`: stop one live job. See [section 4](#cancelling-and-retiring).

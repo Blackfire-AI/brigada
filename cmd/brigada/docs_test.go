@@ -827,10 +827,19 @@ func addPair(fs *flag.FlagSet) *pair {
 		t.Errorf("a helper's flags did not reach the set passed to it: %v", hp)
 	}
 	real := newCommandChecker(t)
-	for _, path := range []string{"plan approve", "land approve", "push approve"} {
-		for _, want := range []string{"request", "signature"} {
+	for path, wants := range map[string][]string{
+		"plan approve": {"no-start", "and-stop-asking"},
+		"land approve": {"no-start", "and-stop-asking"},
+		"push approve": {"no-start", "repo"},
+	} {
+		for _, want := range wants {
 			if !real.flagsOf(path)[want] {
 				t.Errorf("%s lacks --%s in the command sources", path, want)
+			}
+		}
+		for _, gone := range []string{"request", "signature"} {
+			if real.flagsOf(path)[gone] {
+				t.Errorf("%s still has --%s in the command sources", path, gone)
 			}
 		}
 	}
