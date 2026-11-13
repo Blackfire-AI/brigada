@@ -29,6 +29,6 @@ tasks:
     base: ""
     effort: medium
     skills: ["docs-change"]
-    state: ready
+    state: running
     branch: ""
     rounds: 0
