@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Blackfire-AI/brigada/internal/adapter"
 )
@@ -349,16 +350,29 @@ func TestParseIgnoresNoise(t *testing.T) {
 	}
 }
 
-// balanceResult is the out-of-credits result line of a real transcript.
-const balanceResult = `{"type":"result","subtype":"error_during_execution","is_error":true,"num_turns":1,"errors":["inference.chatCompletions.stream: HTTP 402: {\"error\":{\"type\":\"billing_error\",\"code\":\"insufficient_quota\",\"message\":\"insufficient credits: top up and retry\",\"retryable\":false,\"quota\":{\"member_type\":\"plus\",\"reset_at\":1795080981}}}"],"error_code":"insufficient_quota"}`
+// weeklyLimitResult is the 402 result line of a real transcript: the
+// subscription's weekly limit, with its reset time in quota.reset_at.
+const weeklyLimitResult = `{"type":"result","subtype":"error_during_execution","is_error":true,"num_turns":1,"errors":["inference.chatCompletions.stream: HTTP 402: {\"error\":{\"type\":\"billing_error\",\"code\":\"insufficient_quota\",\"message\":\"insufficient credits: top up and retry\",\"retryable\":false,\"quota\":{\"member_type\":\"plus\",\"reset_at\":1795080981}}}"],"error_code":"insufficient_quota"}`
 
-// TestBalanceFixtureStdout runs the out-of-credits stdout through ParseEvent:
-// the last error event is a spent balance with the reset time of the 402.
-func TestBalanceFixtureStdout(t *testing.T) {
+// balanceResult is the same 402 line without quota.reset_at: a spent balance.
+const balanceResult = `{"type":"result","subtype":"error_during_execution","is_error":true,"num_turns":1,"errors":["inference.chatCompletions.stream: HTTP 402: {\"error\":{\"type\":\"billing_error\",\"code\":\"insufficient_quota\",\"message\":\"insufficient credits: top up and retry\",\"retryable\":false,\"quota\":{\"member_type\":\"plus\"}}}"],"error_code":"insufficient_quota"}`
+
+// pinNow pins the package clock to a time before the fixture's reset.
+func pinNow(t *testing.T) {
+	t.Helper()
+	old := now
+	now = func() time.Time { return time.Date(2026, 11, 13, 0, 0, 0, 0, time.UTC) }
+	t.Cleanup(func() { now = old })
+}
+
+// TestWeeklyLimitFixtureStdout runs the weekly-limit stdout through
+// ParseEvent: the last error event is a limit until the 402's reset time.
+func TestWeeklyLimitFixtureStdout(t *testing.T) {
+	pinNow(t)
 	a := &Adapter{}
 	var last adapter.Event
 	var found bool
-	for _, l := range readLines(t, "failure-balance.jsonl") {
+	for _, l := range readLines(t, "failure-weekly-limit.jsonl") {
 		if ev, ok := a.ParseEvent([]byte(l)); ok && ev.Kind == adapter.EvError {
 			last, found = ev, true
 		}
@@ -366,8 +380,8 @@ func TestBalanceFixtureStdout(t *testing.T) {
 	if !found {
 		t.Fatal("no error event")
 	}
-	if last.ErrorKind != adapter.ErrBalance {
-		t.Errorf("kind = %q, want %q", last.ErrorKind, adapter.ErrBalance)
+	if last.ErrorKind != adapter.ErrLimit {
+		t.Errorf("kind = %q, want %q", last.ErrorKind, adapter.ErrLimit)
 	}
 	if want := "2026-11-19T09:36:21Z"; last.LimitUntil != want {
 		t.Errorf("LimitUntil = %q, want %q", last.LimitUntil, want)
@@ -378,11 +392,14 @@ func TestBalanceFixtureStdout(t *testing.T) {
 }
 
 func TestBalanceResetAtMalformed(t *testing.T) {
+	pinNow(t)
 	a := &Adapter{}
 	for _, l := range []string{
 		`{"type":"result","is_error":true,"errors":["HTTP 402: {\"error\":{\"type\":\"billing_error\",\"quota\":{\"reset_at\":\"soon\"}}}"]}`,
 		`{"type":"result","is_error":true,"errors":["HTTP 402: {not json"]}`,
 		`{"type":"result","is_error":true,"errors":["HTTP 402: billing_error"]}`,
+		// 1700000000 is 2023-11-14, before the pinned clock.
+		`{"type":"result","is_error":true,"errors":["HTTP 402: {\"error\":{\"type\":\"billing_error\",\"quota\":{\"reset_at\":1700000000}}}"]}`,
 	} {
 		ev, ok := a.ParseEvent([]byte(l))
 		if !ok || ev.ErrorKind != adapter.ErrBalance || ev.LimitUntil != "" {
@@ -392,22 +409,25 @@ func TestBalanceResetAtMalformed(t *testing.T) {
 }
 
 func TestErrorResult(t *testing.T) {
+	pinNow(t)
 	a := &Adapter{}
 	cases := []struct {
-		line string
-		want adapter.ErrorKind
+		line  string
+		want  adapter.ErrorKind
+		until string
 	}{
-		{`{"type":"result","subtype":"error_during_execution","is_error":true,"result":"Usage limit reached"}`, adapter.ErrLimit},
-		{`{"type":"result","is_error":true,"result":"something odd happened"}`, adapter.ErrOther},
-		{`{"type":"result","subtype":"error_max_turns","is_error":true}`, adapter.ErrOther},
-		{balanceResult, adapter.ErrBalance},
-		{`{"type":"result","subtype":"error_during_execution","is_error":true,"error_code":"insufficient_quota"}`, adapter.ErrLimit},
+		{`{"type":"result","subtype":"error_during_execution","is_error":true,"result":"Usage limit reached"}`, adapter.ErrLimit, ""},
+		{`{"type":"result","is_error":true,"result":"something odd happened"}`, adapter.ErrOther, ""},
+		{`{"type":"result","subtype":"error_max_turns","is_error":true}`, adapter.ErrOther, ""},
+		{weeklyLimitResult, adapter.ErrLimit, "2026-11-19T09:36:21Z"},
+		{balanceResult, adapter.ErrBalance, ""},
+		{`{"type":"result","subtype":"error_during_execution","is_error":true,"error_code":"insufficient_quota"}`, adapter.ErrLimit, ""},
 	}
 	for _, tc := range cases {
 		for name, parse := range map[string]func([]byte) (adapter.Event, bool){"stdout": a.ParseEvent, "stderr": a.ParseErrEvent} {
 			ev, ok := parse([]byte(tc.line))
-			if !ok || ev.Kind != adapter.EvError || ev.ErrorKind != tc.want {
-				t.Errorf("%s %s = %+v, %v; want %q", name, tc.line, ev, ok, tc.want)
+			if !ok || ev.Kind != adapter.EvError || ev.ErrorKind != tc.want || ev.LimitUntil != tc.until {
+				t.Errorf("%s %s = %+v, %v; want %q until %q", name, tc.line, ev, ok, tc.want, tc.until)
 			}
 		}
 	}
