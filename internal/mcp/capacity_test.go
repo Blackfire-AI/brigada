@@ -212,6 +212,14 @@ func TestServeCallCapacityPins(t *testing.T) {
 	if isError {
 		t.Fatalf("capacity errored: %s", text)
 	}
+	// The status tool words the same hold with its instance (§8.1).
+	stText, stErr := toolText(t, s.call(2, "tools/call", map[string]any{"name": "status", "arguments": map[string]any{}}))
+	if stErr {
+		t.Fatalf("status errored: %s", stText)
+	}
+	if want := "waiting for a free model slot on sonnet"; !strings.Contains(stText, want) {
+		t.Errorf("status text = %q, want the held line %q", stText, want)
+	}
 	lines := strings.Split(text, "\n")
 	if len(lines) < 2 {
 		t.Fatalf("capacity text = %q, want pin lines", text)

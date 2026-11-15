@@ -162,7 +162,12 @@ func TestHeldWait(t *testing.T) {
 		want string
 	}{
 		{"a runner slot", engine.HeldJob{ID: 3, Kind: "work", Layer: "runner"}, "waiting for a runner slot"},
-		{"a free slot on a named layer", engine.HeldJob{ID: 4, Kind: "work", Layer: "account"}, "waiting for a free account slot"},
+		{"a free slot on a global layer", engine.HeldJob{ID: 4, Kind: "work", Layer: "global"}, "waiting for a free global slot"},
+		{"an account without a key", engine.HeldJob{ID: 4, Kind: "work", Layer: "account"}, "waiting for a free account slot"},
+		{"a free slot on an account", engine.HeldJob{ID: 4, Kind: "work", Layer: "account", Key: "opencode"}, "waiting for a free account slot on opencode"},
+		{"a free slot on a model", engine.HeldJob{ID: 4, Kind: "work", Layer: "model", Key: "glm-5.3"}, "waiting for a free model slot on glm-5.3"},
+		{"a free slot on a plan", engine.HeldJob{ID: 4, Kind: "work", Layer: "plan", Key: "205"}, "waiting for a free plan slot on plan #205"},
+		{"a runner slot with a key", engine.HeldJob{ID: 4, Kind: "work", Layer: "runner", Key: "7"}, "waiting for a runner slot"},
 		{"an agent cooling", engine.HeldJob{ID: 5, Kind: "work", Layer: "cooling", Agent: "claude/opus", Until: "2026-10-14T12:30:00.000000000Z"}, "waiting: claude/opus cooling until 2026-10-14T12:30:00.000000000Z"},
 		{"an unnamed agent cooling", engine.HeldJob{ID: 6, Kind: "work", Layer: "cooling"}, "waiting: agent cooling"},
 		{"a foreman turn no runner offers", engine.HeldJob{ID: 9, Kind: "foreman", Layer: "no_pair", Agent: "claude/opus"}, "foreman turn waiting: no runner offers claude/opus"},

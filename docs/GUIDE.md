@@ -1170,7 +1170,7 @@ the age is `45s`, `9m04s` or `1h02m03s`; the last event is the tool's name alone
 The title is the part cut when the line is tight, down to 8 columns; a last event still too long is cut at the line's end.
 A job with no task has an empty id and `job #N` as its title.
 Then comes a line per task still live work —
-queued or waiting on its dependencies (not under a plan that is not active), held (a yellow `?`, as `? #333  agent order  held: waiting for a free account slot`), waiting on an infra retry (`↺`), parked for you (`!` with the needs-you reason) or reviewing;
+queued or waiting on its dependencies (not under a plan that is not active), held (a yellow `?`, as `? #333  agent order  held: waiting for a free account slot on opencode`), waiting on an infra retry (`↺`), parked for you (`!` with the needs-you reason) or reviewing;
 the wait text of a row with no running job sits in the kind column and runs to the end of the line;
 a done task that has not landed and that no job speaks for gets a teal `⇡ #330  events wording  landing: waiting (retry at 11:10, last exit 1)` line,
 with `queued` for a queued land job and `not landed` when the task carries no word;

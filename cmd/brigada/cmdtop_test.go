@@ -1319,7 +1319,7 @@ func TestTopPlanJobLinesNameTheirTask(t *testing.T) {
 			{ID: 333, Title: "agent order", State: "ready"},
 			{ID: 334, State: "running"}}}},
 		Running: []engine.StatusJob{job},
-		Held:    []engine.HeldJob{{ID: 41, TaskID: 333, Kind: "work", Layer: "account"}},
+		Held:    []engine.HeldJob{{ID: 41, TaskID: 333, Kind: "work", Layer: "account", Key: "opencode"}},
 	}
 	tests := []struct {
 		width int
@@ -1327,7 +1327,7 @@ func TestTopPlanJobLinesNameTheirTask(t *testing.T) {
 	}{
 		{100, []string{
 			"  ▸ #331  clip frame to height  work  claude/sonnet@high  3m12s  Edit",
-			"  ? #333  agent order           held: waiting for a free account slot",
+			"  ? #333  agent order           held: waiting for a free account slot on opencode",
 		}},
 		// Under 76 columns the last event is left out and the title gives way:
 		// the kind, agent and age stay whole; the wait text is cut at the end.

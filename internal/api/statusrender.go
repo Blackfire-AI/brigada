@@ -249,6 +249,10 @@ func StatusSections(st Status) string {
 func HeldWait(h engine.HeldJob) string {
 	wait := "waiting for a free " + h.Layer + " slot"
 	switch {
+	case h.Key != "" && (h.Layer == "account" || h.Layer == "model"):
+		wait += " on " + h.Key
+	case h.Key != "" && h.Layer == "plan":
+		wait += " on plan #" + h.Key
 	case h.Layer == "no_pair":
 		wait = "foreman turn waiting: no runner offers " + h.Agent
 	case h.Layer == "runner":
