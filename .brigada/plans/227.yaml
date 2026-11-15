@@ -5,9 +5,9 @@
 plan: 227
 title: "Name the held instance on the cap-hold surfaces"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: done
 created: 2026-11-15T15:29:34.883919Z
-updated: 2026-11-15T15:29:57.07248Z
+updated: 2026-11-15T16:23:14.967934Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
