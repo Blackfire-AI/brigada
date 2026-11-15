@@ -228,6 +228,10 @@ func (e *Engine) holdBusyRunnersTx(tx *sql.Tx, now time.Time, polling int64) err
 // for its agent's quota to reset: Agent ("harness/model") is the one
 // whose cooling ends first and Until when; "no_pair" is a foreman turn
 // waiting for a runner agent that offers its harness/model, named by Agent.
+// Key is the held instance the cap hold stamped (cap_held_key, §8.1, §12.2)
+// for every layer: the account label, model name, plan id or runner id,
+// empty for a global hold; the status names it on the account, model and
+// plan layers.
 // A queued job of a paused scope is never a HeldJob: the pause holds it
 // (§8.3), and StatusInfo.Pauses counts it.
 type HeldJob struct {
@@ -238,6 +242,7 @@ type HeldJob struct {
 	Since  string `json:"since,omitempty"`
 	Agent  string `json:"agent,omitempty"`
 	Until  string `json:"until,omitempty"`
+	Key    string `json:"key,omitempty"`
 }
 
 // statusHeldTx lists the queued jobs held by a full cap layer, oldest
@@ -247,7 +252,7 @@ type HeldJob struct {
 func statusHeldTx(tx *sql.Tx, project int64) ([]HeldJob, error) {
 	query := `SELECT j.id, COALESCE(j.task_id, 0), j.kind, j.cap_held_layer, COALESCE(j.cap_held_at, ''),
 		CASE WHEN j.cap_held_layer = '` + layerNoPair + `' THEN COALESCE(j.cap_held_key, '') ELSE COALESCE(a.harness || '/' || a.model, '') END,
-		COALESCE(a.cooling_until, '')
+		COALESCE(a.cooling_until, ''), COALESCE(j.cap_held_key, '')
 		FROM jobs j LEFT JOIN agents a ON j.cap_held_layer = '` + layerCooling + `' AND CAST(a.id AS TEXT) = j.cap_held_key
 		WHERE j.project_id IN (SELECT id FROM projects WHERE archived_at IS NULL) AND j.status = 'queued' AND j.cap_held_layer IS NOT NULL
 		AND NOT ` + heldByPauseSQL("j")
@@ -264,7 +269,7 @@ func statusHeldTx(tx *sql.Tx, project int64) ([]HeldJob, error) {
 	out := []HeldJob{}
 	for rows.Next() {
 		var h HeldJob
-		if err := rows.Scan(&h.ID, &h.TaskID, &h.Kind, &h.Layer, &h.Since, &h.Agent, &h.Until); err != nil {
+		if err := rows.Scan(&h.ID, &h.TaskID, &h.Kind, &h.Layer, &h.Since, &h.Agent, &h.Until, &h.Key); err != nil {
 			return nil, fmt.Errorf("list the held jobs: %w", err)
 		}
 		out = append(out, h)

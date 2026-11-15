@@ -3,6 +3,7 @@ package engine
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
@@ -280,5 +281,33 @@ func TestJobCapHeldEventNotPerPoll(t *testing.T) {
 	}
 	if layers := e.capHeldLayers(held.JobID); len(layers) != 2 {
 		t.Fatalf("job_cap_held events after a repeat poll = %v, want no new one", layers)
+	}
+}
+
+// TestStatusHeldCarriesTheHeldInstance: the status's held entry carries
+// the cap_held_key stamp as Key for the account, model and plan layers
+// and an empty Key for a global hold (§8.1, §12.2).
+func TestStatusHeldCarriesTheHeldInstance(t *testing.T) {
+	e := newEnv(t)
+	stamps := []struct{ layer, key string }{
+		{"account", "opencode"}, {"model", "glm-5.3"}, {"plan", "205"}, {"global", ""},
+	}
+	ids := make([]int64, len(stamps))
+	for i, s := range stamps {
+		task := e.addTask("{}")
+		ids[i] = e.submit(SubmitParams{Key: fmt.Sprintf("task:%d", task), ProjectID: e.project, TaskID: task,
+			Kind: KindWork, Mode: ModeFresh, Prompt: "held work"}).JobID
+		e.exec("UPDATE jobs SET cap_held_layer = ?, cap_held_key = ?, cap_held_at = ? WHERE id = ?",
+			s.layer, s.key, fmtTime(e.clock.Now()), ids[i])
+	}
+	got := map[int64]HeldJob{}
+	for _, h := range e.heldNow() {
+		got[h.ID] = h
+	}
+	for i, s := range stamps {
+		h, ok := got[ids[i]]
+		if !ok || h.Layer != s.layer || h.Key != s.key {
+			t.Errorf("held job %d = %+v (listed %v), want layer %q key %q", ids[i], h, ok, s.layer, s.key)
+		}
 	}
 }
