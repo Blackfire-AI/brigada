@@ -29,7 +29,7 @@ tasks:
     base: ""
     effort: medium
     skills: ["surface-parity"]
-    state: ready
+    state: running
     branch: ""
     rounds: 0
   - id: 918
@@ -41,6 +41,6 @@ tasks:
     tier: light
     effort: low
     skills: ["bugfix"]
-    state: ready
+    state: running
     branch: ""
     rounds: 0
