@@ -5,9 +5,9 @@
 plan: 231
 title: "capacity headroom in the CLI, k3 moonshot prefix"
 repo: "github.com/Blackfire-AI/brigada"
-state: reviewing
+state: active
 created: 2026-11-16T12:22:22.99176Z
-updated: 2026-11-16T12:22:22.99176Z
+updated: 2026-11-16T12:25:53.782176Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -29,7 +29,7 @@ tasks:
     base: ""
     effort: medium
     skills: ["surface-parity"]
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 918
@@ -41,6 +41,6 @@ tasks:
     tier: light
     effort: low
     skills: ["bugfix"]
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
