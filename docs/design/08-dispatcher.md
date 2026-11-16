@@ -36,7 +36,7 @@ Stats sum known counters per agent and class from every job, including work, fix
 
 ## Tiers and escalation
 
-**Tiers.** Each agent serves one tier, from brigada's tier table by model name, a segment-prefix and whole-segment table beside the family table (§7's detection): `opus` and `fable` segment prefixes and whole `pro`, `max`, `ultra` and `astra` segments are heavy; the `haiku` segment prefix and whole `mini`, `nano`, `flash`, `lite`, `highspeed`, `free` and `luna` segments are light; any other model is standard.
+**Tiers.** Each agent serves one tier, from brigada's tier table: rows of model-line words per family, beside the family table (§7's detection), each row applying only to models of its family, the family the harness serves when the name alone does not tell it. Anthropic's `fable` and `opus` segment prefixes, and OpenAI's and Moonshot's whole `pro` segment and OpenAI's `astra`, are heavy; Anthropic's `haiku` segment prefix and OpenAI's `luna` are light, as are the whole `mini`, `nano`, `flash`, `lite` and `free` segments of any family; any other model is standard, a CLI default and a model of unknown family included. Heavy rows win. A word outside its family's row carries no tier: `pro` of another vendor, `max`, `ultra` and a `highspeed` serving leave the model at the tier of its line.
 
 The config override `tier.<harness>/<model>` (same shape as `cost.`, §8.1) corrects the table for every agent of that harness/model, as `cost.` does. Because the tier is an attribute of the agent, like effort, the outcome record keeps its key (repo, class, agent); records earned under one tier stay attached to the agent when an override changes its label. `stats` and `capacity` (§12.2) show the tier beside each agent.
 

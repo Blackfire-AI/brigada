@@ -15,7 +15,7 @@ import "github.com/Blackfire-AI/brigada/internal/adapter"
 // Cost is not a limit but is configured beside them: the relative cost
 // weight of one (harness, model) pair, which the foreman reads through
 // `capacity` (§12.2). A missing entry there is the default weight of 1.
-// Tier overrides the model-name table for every agent of a (harness, model)
+// Tier overrides the model table for every agent of a (harness, model)
 // pair. Outcome record keys stay (repo, class, agent), so records earned
 // under one label stay with the agent when an override changes its tier.
 type Limits struct {

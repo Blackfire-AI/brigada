@@ -61,7 +61,7 @@ func TestRunnerHarnessRegisters(t *testing.T) {
 		{"opencode nemotron", "opencode", "opencode/nemotron-3-super-free", "nvidia", "light", true},
 		{"dsh flash", "dsh", "deepseek-flash", "deepseek", "light", false},
 		{"dsh flash agent flag", "dsh", "deepseek-flash", "deepseek", "light", true},
-		{"dsh pro agent flag", "dsh", "deepseek-v4-pro", "deepseek", "heavy", true},
+		{"dsh pro agent flag", "dsh", "deepseek-v4-pro", "deepseek", "standard", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			testRunnerHarnessRegisters(t, tc.harness, tc.model, tc.family, tc.tier, tc.agentForm)
@@ -103,6 +103,9 @@ func TestResolveRunnerAgentModels(t *testing.T) {
 }
 
 func testRunnerHarnessRegisters(t *testing.T, harness, wantModel, wantFamily, wantTier string, agentForm bool) {
+	// The startup line prints the configured tier; keep the developer's
+	// config file out of it.
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	state := testsupport.ShortStateDir(t)
 	agentFile := filepath.Join(t.TempDir(), "worker.md")
 	if err := os.WriteFile(agentFile, []byte("# the agent\n"), 0o644); err != nil {
