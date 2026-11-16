@@ -41,6 +41,6 @@ tasks:
     tier: light
     effort: low
     skills: ["bugfix"]
-    state: reviewing
+    state: done
     branch: "brigada/task-918"
     rounds: 0
