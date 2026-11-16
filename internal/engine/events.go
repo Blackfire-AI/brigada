@@ -124,6 +124,7 @@ type eventPayload struct {
 	Attempt int64  `json:"attempt,omitempty"`
 	Epoch   int64  `json:"epoch,omitempty"`
 	Layer   string `json:"layer,omitempty"` // the cap layer that held the job (§8.1)
+	Key     string `json:"key,omitempty"`   // the held instance within the layer: account label, model name, plan id, runner id (§8.1, §12.2)
 	// The failed check a task_check_failed or task_out_of_rounds names:
 	// its command, exit code, whether the timeout cut it short, and the
 	// tail of its output — each bounded.

@@ -71,7 +71,7 @@ The config override `tier.<harness>/<model>` (same shape as `cost.`, §8.1) corr
 - **Plan:** max parallel tasks per plan, because tasks touching the same files end in merge conflicts. A task counts while it has a live job (`running` or `reviewing`, §6.1).
 - **Global:** an overall ceiling for the engine.
 
-A task job (a task's first run, a fix round or a review) that cannot start because some layer is full waits in the queue, oldest first, and starts when a slot frees; it does not park (§3) and does not notify the user.
+A task job (a task's first run, a fix round or a review) that cannot start because some layer is full waits in the queue, oldest first, and starts when a slot frees; it does not park (§3) and does not notify the user. Its `held:` line in the status names the layer and the instance that had no room — the account label, the model name or the plan id — while a global hold names none.
 
 **A cap of 0 is not a full cap.** A model or account capped at exactly 0 never has room, so waiting on it would wait forever: an agent on such a path is never a placement candidate — not for a ranked pick, an automatic retry's pin (§3), a review's family step under `review.family=prefer` (§7) or the cooling hold — and no cap hold is stamped for it. The exemptions are the cap gate's own: a foreman turn ignores the model cap, so a model capped at 0 still takes foreman turns, while an account capped at 0 takes none.
 

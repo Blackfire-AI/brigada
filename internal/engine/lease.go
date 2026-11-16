@@ -1479,7 +1479,7 @@ func holdAtCapTx(tx *sql.Tx, j *jobRow, job caps.Job, layer string, now time.Tim
 		return nil
 	}
 	if _, err := appendEventTx(tx, evJobCapHeld, j.ProjectID, j.TaskID, j.ID,
-		eventPayload{Layer: layer}, now); err != nil {
+		eventPayload{Layer: layer, Key: holdKey(layer, job)}, now); err != nil {
 		return err
 	}
 	return nil
