@@ -14,13 +14,15 @@ import (
 // topAgents is the AGENTS section as bare text, without its borders: the
 // rows of topAgentLines.
 func topAgents(model topModel, now time.Time, style term.Style, width int) []string {
-	frame := &topFrame{lines: topAgentLines(model, now, style, width), style: style}
+	frame := &topFrame{lines: topAgentLines(model, now, style, width, nil), style: style}
 	return frame.texts()
 }
 
 // topAgentCellsMax is the largest effective cap drawn as cells.
 const topAgentCellsMax = 8
 
+// sticky is the loop's layout memory, nil for the tick's own widths.
+//
 // topAgentLines is the AGENTS box: the agents filled row by row into two
 // columns when twice the width a cell needs whole (plus the gap) fits the
 // box, else one. A cell is a mark — OK `●`, Warn `↺`
@@ -41,7 +43,7 @@ const topAgentCellsMax = 8
 // whatever their quota) never list. The rest go in the order of the full harness/model string,
 // byte by byte, so a row moves only when an agent is added or removed; state
 // shows through the mark and the colours alone.
-func topAgentLines(model topModel, now time.Time, style term.Style, width int) []topLine {
+func topAgentLines(model topModel, now time.Time, style term.Style, width int, sticky *topSticky) []topLine {
 	line := func(text string, class topYield) topLine {
 		return topLine{text: text, class: class, section: topSecAgents}
 	}
@@ -101,7 +103,11 @@ func topAgentLines(model topModel, now time.Time, style term.Style, width int) [
 		}
 	}
 	// A cell needs its widest name whole; a broken agent's longer reason does
-	// not count and may be cut at the end of its cell.
+	// not count and may be cut at the end of its cell. The sticky widths hold
+	// each column at the widest the box has needed, so an agent going off or
+	// a quota text appearing does not resize the rest.
+	aw := sticky.growAgents(topAgentWidths{name: nameW, tag: tagW, cells: cellW, quota: quotaW})
+	nameW, tagW, cellW, quotaW = aw.name, aw.tag, aw.cells, aw.quota
 	need := topAgentMarkW(style) + 1 + nameW + len(topJobGap) + tagW + len(topJobGap) + cellW
 	if quotaW > 0 {
 		need += len(topJobGap) + quotaW

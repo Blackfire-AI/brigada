@@ -1104,7 +1104,7 @@ func TestTopPlansTree(t *testing.T) {
 			if want := strings.Join(tt.want, "\n"); got != want {
 				t.Errorf("tree =\n%s\nwant\n%s", got, want)
 			}
-			if foreman, jobs := topPlanless(tt.st, topNow, term.New(logo.Caps{UTF8: true}), 80, "▸"); len(foreman)+len(jobs) != 0 {
+			if foreman, jobs := topPlanless(tt.st, topNow, term.New(logo.Caps{UTF8: true}), 80, "▸", nil); len(foreman)+len(jobs) != 0 {
 				t.Errorf("a plan's job is plan-less: %v %v", foreman, jobs)
 			}
 		})
@@ -3350,7 +3350,7 @@ func TestTopAgentsWidths(t *testing.T) {
 // non-ASCII.
 func TestTopAgentsASCII(t *testing.T) {
 	ascii := term.New(logo.Caps{})
-	lines := topAgentLines(agentsModel(), topNow, ascii, 90)
+	lines := topAgentLines(agentsModel(), topNow, ascii, 90, nil)
 	var all []string
 	for _, l := range lines {
 		switch {
@@ -3691,7 +3691,7 @@ func TestTopForemanAndJobsNotes(t *testing.T) {
 			{ProjectID: 2, State: engine.SlotTurn, HolderID: 30, Label: "foreman turn", Since: stamp},
 			{ProjectID: 3, State: engine.SlotTurn, HolderID: 31, Label: "foreman turn", Since: stamp},
 		},
-	}, topNow, plain, 80, "▸")
+	}, topNow, plain, 80, "▸", nil)
 	want := []string{
 		"FOREMAN",
 		"  ▸ job #30  foreman",
@@ -3713,33 +3713,33 @@ func TestTopForemanAndJobsNotes(t *testing.T) {
 	// The headless turn whose job runs is skipped; one message reads singular,
 	// and a block shows with only a note.
 	foreman, _ = topPlanless(api.Status{ForemanMessages: 1,
-		Slots: []engine.Slot{{State: engine.SlotTurn, HolderID: 30, Label: "foreman turn", Since: stamp}}}, topNow, plain, 80, "▸")
+		Slots: []engine.Slot{{State: engine.SlotTurn, HolderID: 30, Label: "foreman turn", Since: stamp}}}, topNow, plain, 80, "▸", nil)
 	if got := texts(foreman); len(got) != 3 || got[1] != "  1 message for the foreman" {
 		t.Errorf("FOREMAN block = %q", got)
 	}
 	foreman, _ = topPlanless(api.Status{Running: []engine.StatusJob{{ID: 30, Kind: "foreman"}},
-		Slots: []engine.Slot{{State: engine.SlotTurn, HolderID: 30, Label: "foreman turn", Since: stamp}}}, topNow, plain, 80, "▸")
+		Slots: []engine.Slot{{State: engine.SlotTurn, HolderID: 30, Label: "foreman turn", Since: stamp}}}, topNow, plain, 80, "▸", nil)
 	if got := texts(foreman); len(got) != 2 {
 		t.Errorf("the running turn's slot repeats its job line: %q", got)
 	}
 	// A pending runner restart sits in the JOBS block, only while something runs.
 	_, jobs = topPlanless(api.Status{RunnerDraining: true,
-		Running: []engine.StatusJob{{ID: 63, Kind: "plan_review"}}}, topNow, plain, 80, "▸")
+		Running: []engine.StatusJob{{ID: 63, Kind: "plan_review"}}}, topNow, plain, 80, "▸", nil)
 	if got := texts(jobs); len(got) != 3 || got[2] != "  runner restarting after 1 running job" || jobs[2].class != yieldHeld || jobs[2].section != topSecJobs {
 		t.Errorf("JOBS block = %q", got)
 	}
 	_, jobs = topPlanless(api.Status{RunnerDraining: true,
-		Running: []engine.StatusJob{{ID: 63, Kind: "plan_review"}, {ID: 64, Kind: "plan_review"}}}, topNow, plain, 80, "▸")
+		Running: []engine.StatusJob{{ID: 63, Kind: "plan_review"}, {ID: 64, Kind: "plan_review"}}}, topNow, plain, 80, "▸", nil)
 	if got := texts(jobs); got[len(got)-1] != "  runner restarting after 2 running jobs" {
 		t.Errorf("JOBS block = %q", got)
 	}
-	foreman, jobs = topPlanless(api.Status{RunnerDraining: true}, topNow, plain, 80, "▸")
+	foreman, jobs = topPlanless(api.Status{RunnerDraining: true}, topNow, plain, 80, "▸", nil)
 	if len(foreman)+len(jobs) != 0 {
 		t.Errorf("a drain with nothing running shows blocks: %v %v", texts(foreman), texts(jobs))
 	}
 	// Dim, and no escape in the plain style.
 	colour := term.New(logo.Caps{Color: logo.Color16, UTF8: true})
-	foreman, _ = topPlanless(api.Status{ForemanMessages: 1}, topNow, colour, 80, "▸")
+	foreman, _ = topPlanless(api.Status{ForemanMessages: 1}, topNow, colour, 80, "▸", nil)
 	if foreman[1].text != "  "+colour.Dim("1 message for the foreman") {
 		t.Errorf("note = %q, want Dim", foreman[1].text)
 	}
@@ -3817,7 +3817,7 @@ func TestTopAgentsOrderAndOff(t *testing.T) {
 	if want := "x/broke x/cool x/idle1 x/idle2 x/offbusy x/run"; strings.Join(names, " ") != want {
 		t.Errorf("order = %q, want %q", strings.Join(names, " "), want)
 	}
-	if note := agentNoteText(topAgentLines(model, topNow, term.New(logo.Caps{UTF8: true}), 60)[0].box.note); note != "1 broken · 1 cooling · all ≤ global 8 · 1 off" {
+	if note := agentNoteText(topAgentLines(model, topNow, term.New(logo.Caps{UTF8: true}), 60, nil)[0].box.note); note != "1 broken · 1 cooling · all ≤ global 8 · 1 off" {
 		t.Errorf("note = %q, want the counts in front of the off count", note)
 	}
 	// The global cap makes every ready, idle agent off.
@@ -3883,7 +3883,7 @@ func TestTopAgentNote(t *testing.T) {
 	}
 	plain := term.New(logo.Caps{UTF8: true})
 	for _, tt := range tests {
-		if got := agentNoteText(topAgentLines(tt.model, topNow, plain, 90)[0].box.note); got != tt.want {
+		if got := agentNoteText(topAgentLines(tt.model, topNow, plain, 90, nil)[0].box.note); got != tt.want {
 			t.Errorf("%s: note = %q, want %q", tt.name, got, tt.want)
 		}
 	}
@@ -3891,7 +3891,7 @@ func TestTopAgentNote(t *testing.T) {
 	// is cut or left out when it does not fit.
 	model := agentNoteModel([]engine.CapacityAgent{ready, off, broken, cooling}, global(&two))
 	colour := term.New(logo.Caps{Color: logo.Color16, UTF8: true})
-	box := *topAgentLines(model, topNow, colour, 86)[0].box
+	box := *topAgentLines(model, topNow, colour, 86, nil)[0].box
 	top := topBoxTop(box, colour, 90)
 	if !strings.Contains(top, colour.Bad("1 broken")) || !strings.Contains(top, colour.Warn("1 cooling")) ||
 		!strings.Contains(top, colour.Dim("all ≤ global 2")) || !strings.Contains(top, colour.Dim("1 off")) ||
@@ -4018,7 +4018,7 @@ func TestTopIdlePlans(t *testing.T) {
 		}
 	}
 	colour := term.New(logo.Caps{Color: logo.Color16, UTF8: true})
-	lines := topPlansBox(m.status, false, true, m.events, topNow, colour, 76, "▸")
+	lines := topPlansBox(m.status, false, true, m.events, topNow, colour, 76, "▸", nil)
 	if last := lines[len(lines)-2]; last.text != colour.Dim("idle: last work landed 15:02") || last.class != yieldFinished {
 		t.Errorf("idle row = %+v, want Dim in the finished class", last)
 	}
