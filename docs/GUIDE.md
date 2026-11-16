@@ -1117,7 +1117,7 @@ Caps bound how many jobs run at once, in layers: this runner, the account, the m
 
 A foreman turn is never held back by the plan or model caps, and goes ahead of queued task jobs. While it runs it still counts as use of its account, runner, global and model caps, so it can leave a worker on the same model waiting.
 
-`brigada capacity` prints the same snapshot as two tables. AGENTS lists each agent with its tier, effort, cost weight, running jobs against its effective cap — its own runner, account and model caps with the global cap folded in — and the layer that binds it, then its quota: `ready`, `cooling until` a local time, or `broken`. LAYERS lists each cap layer with its key, cap, use and queue. When queued jobs are pinned to an agent, a third table, PINS, lists each with its job, task, kind, agent, whether the pin can place (`ready`, `cooling until` a time, `broken` or `capped_at_0`) and the cap hold, if any; with no pins the table is absent. It shows the project of the repository you are in; `--project URL` names another, and outside a repository it shows every project's.
+`brigada capacity` prints the same snapshot as two tables. AGENTS lists each agent with its tier, effort, cost weight, running jobs against its effective cap — its own runner, account and model caps with the global cap folded in — and the layer that binds it, then its quota: `ready`, `cooling until` a local time, or `broken`. LAYERS lists each cap layer with its key, cap, use and queue. When queued jobs are pinned to an agent, a third table, PINS, lists each with its job, task, kind, agent, whether the pin can place (`ready`, `cooling until` a time, `broken` or `capped_at_0`) and the cap hold, if any; with no pins the table is absent. When a project's foreman reserves headroom on its account, a fourth table, HEADROOM, lists the project, the account and the cap task workers see there; with no reservation it is absent. It shows the project of the repository you are in; `--project URL` names another, and outside a repository it shows every project's.
 
 `brigada top` is a live view of the engine: every `--interval` (default 2s), the fetch rate, it redraws a two-row header —
 the brand mark `▙ brigada` (the word alone without UTF-8; only the `▙` is coloured), the scope and the engine's uptime, then the clock and `q quit  p pause` at the right end —
@@ -1507,7 +1507,7 @@ A command's flags go after its name and before its positional arguments (`diff`,
 - `brigada logs <job-id> [--check] [--tail N] [--follow]`, or `brigada logs --task N`: a job's transcript as readable lines, or its check log. See [section 4](#history-diffs-and-logs).
 - `brigada stats`: tier, attempts, successes, rate and confidence per agent, class and repo. See [section 9](#9-the-record-and-stats).
 - `brigada top [--interval D] [--project URL] [--no-start]`: the engine full-screen as one column of boxes, with the same unregistered-models hint as `status`; one plain snapshot when piped. See [section 8](#capacity).
-- `brigada capacity [--project URL]`: each agent's tier, effort, cost, running jobs against its cap, and quota; each cap layer's cap, use and queue. See [section 8](#capacity).
+- `brigada capacity [--project URL]`: each agent's tier, effort, cost, running jobs against its cap, and quota; each cap layer's cap, use and queue; when a project's foreman reserves headroom on its account, a HEADROOM table of the project, the account and the cap task workers see there, absent with no reservation. See [section 8](#capacity).
 
 ### Finishing
 

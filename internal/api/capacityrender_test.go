@@ -104,6 +104,40 @@ func TestCapacityTablesGolden(t *testing.T) {
 	}
 }
 
+// TestCapacityTablesHeadroom: the HEADROOM table lists each reserved
+// account — project, account and the cap task workers see — after the
+// pins, in plain and coloured renderings alike.
+func TestCapacityTablesHeadroom(t *testing.T) {
+	one := 1
+	two := 2
+	snap, now := capacityFixture(t)
+	snap.Headroom = []engine.CapacityHeadroom{
+		{ProjectID: 7, Account: "claude", Cap: &one},
+		{ProjectID: 9, Account: "codex", Cap: &two},
+	}
+	want := capacityGolden + "\n\nHEADROOM\nPROJECT  ACCOUNT  CAP\n" +
+		"7        claude   1\n" +
+		"9        codex    2"
+	got := CapacityTables(snap, now, term.New(logo.Caps{}), 80)
+	if got != want {
+		t.Errorf("the rendering:\n%s\nwant the golden with headroom:\n%s", got, want)
+	}
+	coloured := CapacityTables(snap, now, term.New(logo.Caps{Color: logo.Color256, TTY: true, Width: 80}), 80)
+	escape := regexp.MustCompile(`\x1b\[[0-9;]*m`)
+	if plain := escape.ReplaceAllString(coloured, ""); plain != want {
+		t.Errorf("the coloured rendering without escapes:\n%s\nwant the golden with headroom:\n%s", plain, want)
+	}
+}
+
+// TestCapacityTablesNoHeadroom: no reserved account leaves no HEADROOM
+// heading anywhere.
+func TestCapacityTablesNoHeadroom(t *testing.T) {
+	snap, now := capacityFixture(t)
+	if got := CapacityTables(snap, now, term.New(logo.Caps{}), 80); strings.Contains(got, "HEADROOM") {
+		t.Errorf("no reserved account should render no HEADROOM table:\n%s", got)
+	}
+}
+
 func TestCapacityTablesWidthCutsLastColumn(t *testing.T) {
 	snap, now := capacityFixture(t)
 	got := CapacityTables(snap, now, term.New(logo.Caps{}), 60)
