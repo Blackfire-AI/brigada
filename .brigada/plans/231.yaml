@@ -29,7 +29,7 @@ tasks:
     base: ""
     effort: medium
     skills: ["surface-parity"]
-    state: reviewing
+    state: done
     branch: "brigada/task-917"
     rounds: 0
   - id: 918
