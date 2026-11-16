@@ -18,7 +18,10 @@ import (
 // ready, cooling until a local time, or broken. LAYERS: each cap layer's
 // name and key, its cap, use and queue depth. A third table, PINS, lists the
 // queued jobs pinned to an agent — job, task, kind, agent, whether the pin
-// can place and the cap hold if any — and is left out when none is. style supplies the colour;
+// can place and the cap hold if any — and is left out when none is. A
+// fourth table, HEADROOM, lists each account a project's foreman reserves
+// headroom on (§8.2) — project, account and the cap task workers see
+// there — and is left out when none is. style supplies the colour;
 // with a plain style the text is the same and has no escapes. The last
 // column of each table is cut to fit width.
 func CapacityTables(snap engine.CapacitySnapshot, now time.Time, style term.Style, width int) string {
@@ -57,6 +60,18 @@ func CapacityTables(snap engine.CapacitySnapshot, now time.Time, style term.Styl
 				plainCell(strconv.FormatInt(p.AgentID, 10) + " " + p.Harness + "/" + p.Model),
 				pinStateCell(p, now, style),
 				plainCell(held),
+			})
+		}
+		lines = append(lines, alignCapacity(rows, width)...)
+	}
+	if len(snap.Headroom) > 0 {
+		lines = append(lines, "", style.Bold("HEADROOM"))
+		rows := [][]capCell{capHeader(style, "PROJECT", "ACCOUNT", "CAP")}
+		for _, h := range snap.Headroom {
+			rows = append(rows, []capCell{
+				plainCell(strconv.FormatInt(h.ProjectID, 10)),
+				plainCell(h.Account),
+				plainCell(capLimit(h.Cap)),
 			})
 		}
 		lines = append(lines, alignCapacity(rows, width)...)
