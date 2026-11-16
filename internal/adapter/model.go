@@ -2,6 +2,9 @@ package adapter
 
 import (
 	"fmt"
+	"regexp"
+	"slices"
+	"strconv"
 	"strings"
 	"unicode"
 )
@@ -54,45 +57,64 @@ var modelFamilyPrefixes = []struct {
 	{"nvidia", []string{"nemotron"}},
 }
 
-var modelTierPatterns = []struct {
+// modelTierTable names each family's model lines by tier. A family's rows
+// apply only to its own models, so a word such as "pro" means heavy only
+// where the vendor uses it for its top model; a row with no family applies
+// to every model. Heavy rows come first and win.
+var modelTierTable = []struct {
+	family   string
 	tier     string
-	prefixes []string
-	segments []string
+	prefixes []string // segment prefixes
+	segments []string // whole segments
 }{
-	// Heavy: Opus and Fable variants and explicit high-capability model segments.
-	{TierHeavy, []string{"opus", "fable"}, []string{"pro", "max", "ultra", "astra"}},
-	// Light: Haiku variants and explicit smaller, faster or free segments.
-	{TierLight, []string{"haiku"}, []string{"mini", "nano", "flash", "lite", "highspeed", "free", "luna"}},
+	{"anthropic", TierHeavy, []string{"fable", "opus"}, nil},
+	{"openai", TierHeavy, nil, []string{"astra", "pro"}},
+	{"moonshot", TierHeavy, nil, []string{"pro"}},
+	{"anthropic", TierLight, []string{"haiku"}, nil},
+	{"openai", TierLight, nil, []string{"luna"}},
+	// Smaller or free-tier models across vendors.
+	{"", TierLight, nil, []string{"mini", "nano", "flash", "lite", "free"}},
 }
 
-// ModelTier labels a model by its name. Heavy matches take precedence;
-// names without a matching segment serve the standard tier.
+// ModelTier labels a model by its name and the family the name identifies.
+// Names without a matching row serve the standard tier.
 func ModelTier(model string) string {
-	segments := strings.Split(normalizedModelName(model), "-")
-	for _, group := range modelTierPatterns {
-		for _, segment := range segments {
-			for _, prefix := range group.prefixes {
-				if strings.HasPrefix(segment, prefix) {
-					return group.tier
-				}
-			}
-			for _, word := range group.segments {
-				if segment == word {
-					return group.tier
-				}
-			}
-		}
-	}
-	return TierStandard
+	family, _ := ModelFamily(model)
+	return familyModelTier(family, model)
 }
 
-// AgentTier uses the model's table tier. CLI defaults (codex, kimi and
+// AgentTier uses the model's table tier, with the family the harness
+// serves when the name alone does not tell it. CLI defaults (codex, kimi and
 // opencode) are standard because their model name is not known to brigada.
 func AgentTier(harness, model string) string {
 	if model == "default" {
 		return TierStandard
 	}
-	return ModelTier(model)
+	family, err := AgentFamily(harness, model)
+	if err != nil {
+		family = ""
+	}
+	return familyModelTier(family, model)
+}
+
+func familyModelTier(family, model string) string {
+	segments := strings.Split(normalizedModelName(model), "-")
+	for _, row := range modelTierTable {
+		if row.family != "" && row.family != family {
+			continue
+		}
+		for _, segment := range segments {
+			for _, prefix := range row.prefixes {
+				if strings.HasPrefix(segment, prefix) {
+					return row.tier
+				}
+			}
+			if slices.Contains(row.segments, segment) {
+				return row.tier
+			}
+		}
+	}
+	return TierStandard
 }
 
 func validModelIdentifier(model string) bool {
@@ -132,4 +154,97 @@ func normalizedModelName(model string) string {
 		}
 	}
 	return name
+}
+
+var (
+	// versionSegment is a segment that is only a version: 5, 6.1, v4.1.
+	versionSegment = regexp.MustCompile(`^v?(\d+(?:\.\d+)*)$`)
+	// gluedVersion is a name glued to its version: qwen3.8, o4, k3.
+	gluedVersion = regexp.MustCompile(`^([a-z]+)(\d+(?:\.\d+)*)$`)
+	// dateSegment is a release date such as 20250514: a snapshot of a
+	// version, not a version of its own.
+	dateSegment = regexp.MustCompile(`^\d{6,}$`)
+)
+
+// modelLine splits a model name into its line — the name with its version
+// numbers taken out, the provider prefix and context suffix kept — and its
+// version. ok is false for a name with no version, such as an alias.
+func modelLine(model string) (line string, version []int, ok bool) {
+	name := strings.ToLower(model)
+	prefix := ""
+	if i := strings.LastIndex(name, "/"); i >= 0 {
+		prefix, name = name[:i+1], name[i+1:]
+	}
+	suffix := ""
+	if strings.HasSuffix(name, "]") {
+		if i := strings.LastIndex(name, "["); i > 0 {
+			name, suffix = name[:i], name[i:]
+		}
+	}
+	numbers := func(s string) {
+		for part := range strings.SplitSeq(s, ".") {
+			n, _ := strconv.Atoi(part)
+			version = append(version, n)
+		}
+	}
+	var parts []string
+	for _, segment := range strings.Split(name, "-") {
+		switch m := gluedVersion.FindStringSubmatch(segment); {
+		case dateSegment.MatchString(segment):
+			continue
+		case versionSegment.MatchString(segment):
+			numbers(versionSegment.FindStringSubmatch(segment)[1])
+			if len(parts) == 0 || parts[len(parts)-1] != "#" {
+				parts = append(parts, "#")
+			}
+		case m != nil:
+			numbers(m[2])
+			parts = append(parts, m[1]+"#")
+		default:
+			parts = append(parts, segment)
+		}
+	}
+	if len(version) == 0 {
+		return "", nil, false
+	}
+	return prefix + strings.Join(parts, "-") + suffix, version, true
+}
+
+// Superseded maps each of models that a newer version of the same line,
+// also in models, replaces to the newest model of that line. models is one
+// CLI's listing. A name with no version is never superseded, and two
+// snapshots of one version replace neither.
+func Superseded(models []string) map[string]string {
+	type entry struct {
+		model   string
+		version []int
+	}
+	lines := map[string][]entry{}
+	var order []string
+	for _, model := range models {
+		line, version, ok := modelLine(model)
+		if !ok {
+			continue
+		}
+		if _, seen := lines[line]; !seen {
+			order = append(order, line)
+		}
+		lines[line] = append(lines[line], entry{model, version})
+	}
+	out := map[string]string{}
+	for _, line := range order {
+		entries := lines[line]
+		newest := entries[0]
+		for _, e := range entries[1:] {
+			if slices.Compare(e.version, newest.version) > 0 {
+				newest = e
+			}
+		}
+		for _, e := range entries {
+			if slices.Compare(e.version, newest.version) < 0 {
+				out[e.model] = newest.model
+			}
+		}
+	}
+	return out
 }

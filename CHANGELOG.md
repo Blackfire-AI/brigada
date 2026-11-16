@@ -5,6 +5,12 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- An agent's default tier comes from a per-family model table instead of words shared by every vendor (issue #233). Anthropic's `fable` and `opus`, OpenAI's `astra` and `pro`, and Moonshot's `pro` are heavy; Anthropic's `haiku`, OpenAI's `luna` and any family's `mini`, `nano`, `flash`, `lite` and `free` are light; everything else is standard. Without a `tier.<harness>/<model>` override, these models change tier: `gemini-*-pro`, `deepseek-*-pro`, `*-max` (such as `qwen3.8-max`) and `*-ultra` go from heavy to standard, and `*-highspeed` from light to its model's tier. Outcome records stay keyed by agent, so a re-tiered agent keeps its record.
+- Every place that shows an agent's tier shows the configured one: `brigada agents`, `brigada agents add` and the runner's startup line now apply `tier.<harness>/<model>` as init, stats, capacity and top already did (issue #233).
+- `brigada init` no longer offers a model that a newer version of the same line in the CLI's list replaces, such as `gpt-5.6-sol` beside `gpt-6.1-sol`, unless the model is already saved; `brigada agents` leaves such models out of the unregistered list and reports registered agents whose model is superseded, naming the newer one. Nothing is removed from the agents file (issue #233).
+
 ## [1.3.0] - 2026-11-13
 
 Adds Qwen Code as an experimental worker, reviewer and foreman harness; hands each agent's permissions to its own CLI instead of a scope of brigada's, so a claude worker now defaults to `bypassPermissions` and a review is no longer read-only by brigada's doing; lets a cancel say why; and bounds a review's requeue during a provider outage. Five store migrations (0073 to 0077) and new settings `plan_file_branch`, `retention_days`, `permission.<harness>/<model>` and `read_scope.<harness>/<model>`: once a 1.3.0 engine has opened the store, an older binary refuses it. Read the Changed section before you upgrade: the permission defaults are wider. Restart the engine and runner after you upgrade.
