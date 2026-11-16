@@ -29,8 +29,8 @@ tasks:
     base: ""
     effort: medium
     skills: ["surface-parity"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-917"
     rounds: 0
   - id: 918
     name: "k3-moonshot-prefix"
