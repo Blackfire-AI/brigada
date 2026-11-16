@@ -40,7 +40,7 @@ var modelFamilyPrefixes = []struct {
 }{
 	{"anthropic", []string{"claude", "sonnet", "opus", "haiku", "fable"}},
 	{"openai", []string{"gpt", "chatgpt", "codex", "o1", "o3", "o4"}},
-	{"moonshot", []string{"kimi", "k2", "moonshot"}},
+	{"moonshot", []string{"kimi", "k2", "k3", "moonshot"}},
 	{"google", []string{"gemini"}},
 	{"deepseek", []string{"deepseek"}},
 	// qwen3 also stands alone: qwen's own names glue the version to the

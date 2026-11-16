@@ -11,6 +11,7 @@ func TestModelFamily(t *testing.T) {
 		{"sonnet", "anthropic"}, {"anthropic/claude-opus-4", "anthropic"},
 		{"openrouter/anthropic/claude-sonnet-4", "anthropic"}, {"gpt-5-codex", "openai"},
 		{"openai/gpt-5", "openai"}, {"o3", "openai"}, {"kimi-k2", "moonshot"}, {"k2.5", "moonshot"},
+		{"k3", "moonshot"}, {"k3.1-pro", "moonshot"},
 		{"google/gemini-2.5-pro", "google"},
 		{"deepseek-chat", "deepseek"}, {"qwen-3", "alibaba"}, {"qwen3.8-max", "alibaba"},
 		{"qwen-subscription/qwen3.8-max", "alibaba"}, {"qwen-subscription/qwen3.8-flash", "alibaba"},
@@ -92,9 +93,9 @@ var modelTierExamples = []struct {
 	tier   string
 	models []string
 }{
-	{TierHeavy, []string{"fable", "claude-fable-5-1[1m]", "fablenext", "provider/CLAUDE-FABLE-5-1[1M]", "gpt-6-astra", "gpt-6-astra-mini", "opus", "claude-opus-4", "anthropic/claude-opus-4[1m]", "gemini-2.5-pro", "deepseek-v4-pro", "o3-pro", "grok-4-max", "gpt-5-ultra", "provider/CLAUDE-OPUS-4[1M]", "opusnext", "mini-opus", "qwen-subscription/qwen3.8-max"}},
+	{TierHeavy, []string{"fable", "claude-fable-5-1[1m]", "fablenext", "provider/CLAUDE-FABLE-5-1[1M]", "gpt-6-astra", "gpt-6-astra-mini", "opus", "claude-opus-4", "anthropic/claude-opus-4[1m]", "gemini-2.5-pro", "deepseek-v4-pro", "o3-pro", "grok-4-max", "gpt-5-ultra", "provider/CLAUDE-OPUS-4[1M]", "opusnext", "mini-opus", "qwen-subscription/qwen3.8-max", "k3.1-pro"}},
 	{TierLight, []string{"gpt-6-luna", "gpt-5.6-luna", "provider/GPT-6-LUNA[1M]", "haiku", "claude-haiku-4", "gpt-5.4-mini", "o4-mini", "gemini-2.5-flash", "deepseek-flash", "glm-5.3-highspeed", "zai-coding-plan/glm-5.3-highspeed", "kimi-code/kimi-for-coding-highspeed", "opencode/space-bunny-free", "qwen-3-lite", "qwen-subscription/qwen3.8-flash", "gpt-5-nano", "haikunext", "provider/HAIKU[1m]"}},
-	{TierStandard, []string{"gpt-6-sol", "gpt-5.6-terra", "gpt-6-astral", "gpt-6-lunar", "astra/provider/gpt-6-sol", "luna/provider/gpt-6-sol", "sonnet", "claude-sonnet-4[1m]", "gpt-6.1-sol", "gpt-5", "kimi-code/k3", "kimi-code/k3-256k", "zai-coding-plan/glm-5.3", "deepseek-v3", "default", "maximal-coder", "freedom-7", "pro/provider/gpt-5", "flash/provider/sonnet", "professional", "minify", ""}},
+	{TierStandard, []string{"gpt-6-sol", "gpt-5.6-terra", "gpt-6-astral", "gpt-6-lunar", "astra/provider/gpt-6-sol", "luna/provider/gpt-6-sol", "sonnet", "claude-sonnet-4[1m]", "gpt-6.1-sol", "gpt-5", "kimi-code/k3", "kimi-code/k3-256k", "k3", "zai-coding-plan/glm-5.3", "deepseek-v3", "default", "maximal-coder", "freedom-7", "pro/provider/gpt-5", "flash/provider/sonnet", "professional", "minify", ""}},
 }
 
 func TestModelTier(t *testing.T) {
