@@ -29,9 +29,9 @@ tasks:
     base: ""
     effort: medium
     skills: ["cli-flag"]
-    state: reviewing
+    state: running
     branch: "brigada/task-943"
-    rounds: 0
+    rounds: 1
   - id: 944
     name: "agents-update-hint"
     title: "status/top hint counts superseded pairs"
