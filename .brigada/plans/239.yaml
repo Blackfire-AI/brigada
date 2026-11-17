@@ -29,7 +29,7 @@ tasks:
     base: ""
     effort: medium
     skills: ["cli-flag"]
-    state: reviewing
+    state: done
     branch: "brigada/task-943-r1"
     rounds: 0
   - id: 944
@@ -42,7 +42,7 @@ tasks:
     tier: light
     effort: low
     skills: ["surface-parity"]
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 945
