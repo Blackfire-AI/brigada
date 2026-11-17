@@ -42,6 +42,6 @@ tasks:
     tier: light
     effort: low
     skills: ["surface-parity"]
-    state: reviewing
+    state: done
     branch: "brigada/task-947"
     rounds: 0
