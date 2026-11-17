@@ -403,3 +403,176 @@ func TestDiffAgentsReportsSupersededRegistered(t *testing.T) {
 		t.Errorf("unregistered = %q, want %q", got.unregistered, want)
 	}
 }
+
+// stubAgentsStdin feeds the update prompts the given answers.
+func stubAgentsStdin(t *testing.T, input string) {
+	t.Helper()
+	old := agentsStdin
+	agentsStdin = strings.NewReader(input)
+	t.Cleanup(func() { agentsStdin = old })
+}
+
+func TestAgentsUpdateAppliesWithYes(t *testing.T) {
+	fakeOpenCodeModels(t, "fixture/gpt-6-sol", "fixture/gpt-6.1-sol")
+	state := testsupport.ShortStateDir(t)
+	saved := []string{"# mine", "harness=opencode,model=fixture/gpt-6-sol,classes=review,account=work,effort=high", "harness=opencode,model=fixture/glm-5.3", "not an agent line"}
+	saveAgentLines(t, state, saved...)
+
+	code, out, errOut := agentsDo(t, "agents", "update", "--state-dir", state, "--yes")
+	if code != 0 || errOut != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+	// Only the superseded line changes: classes, account, effort, the
+	// comment, the unparsable line and the order stay.
+	want := []string{"# mine", "harness=opencode,model=fixture/gpt-6.1-sol,classes=review,account=work,effort=high", "harness=opencode,model=fixture/glm-5.3", "not an agent line"}
+	if got := loadAgentLines(t, state); !reflect.DeepEqual(got, want) {
+		t.Fatalf("lines = %q, want %q", got, want)
+	}
+	for _, text := range []string{
+		"opencode/fixture/gpt-6-sol → opencode/fixture/gpt-6.1-sol\n  harness=opencode,model=fixture/gpt-6.1-sol,classes=review,account=work,effort=high\n",
+		"updated opencode/fixture/gpt-6-sol → opencode/fixture/gpt-6.1-sol\n",
+		"rewritten in ",
+		"No runner running; brigada start serves it.",
+	} {
+		if !strings.Contains(out, text) {
+			t.Errorf("output lacks %q:\n%s", text, out)
+		}
+	}
+}
+
+func TestAgentsUpdateDeclines(t *testing.T) {
+	for name, input := range map[string]string{"n": "n\n", "enter": "\n", "eof": ""} {
+		t.Run(name, func(t *testing.T) {
+			fakeOpenCodeModels(t, "fixture/gpt-6-sol", "fixture/gpt-6.1-sol")
+			state := testsupport.ShortStateDir(t)
+			saved := []string{"harness=opencode,model=fixture/gpt-6-sol"}
+			saveAgentLines(t, state, saved...)
+			stubAgentsStdin(t, input)
+			code, out, errOut := agentsDo(t, "agents", "update", "--state-dir", state)
+			if code != 0 || errOut != "" || !strings.Contains(out, "Nothing updated.") {
+				t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errOut)
+			}
+			if got := loadAgentLines(t, state); !reflect.DeepEqual(got, saved) {
+				t.Fatalf("agents file changed: %q", got)
+			}
+		})
+	}
+}
+
+func TestAgentsUpdateAcceptAllAndPerAnswer(t *testing.T) {
+	offered := []string{"fixture/gpt-6-sol", "fixture/gpt-6.1-sol", "fixture/glm-5.3", "fixture/glm-5.4"}
+	// Sorted order asks for glm first; the answer to it governs the rest.
+	for name, tc := range map[string]struct {
+		input string
+		want  []string
+	}{
+		"all":        {"a\n", []string{"harness=opencode,model=fixture/gpt-6.1-sol,classes=implement+review+answer", "harness=opencode,model=fixture/glm-5.4,classes=implement+review+answer"}},
+		"first only": {"y\nn\n", []string{"harness=opencode,model=fixture/gpt-6-sol", "harness=opencode,model=fixture/glm-5.4,classes=implement+review+answer"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			fakeOpenCodeModels(t, offered...)
+			state := testsupport.ShortStateDir(t)
+			saveAgentLines(t, state, "harness=opencode,model=fixture/gpt-6-sol", "harness=opencode,model=fixture/glm-5.3")
+			stubAgentsStdin(t, tc.input)
+			code, out, errOut := agentsDo(t, "agents", "update", "--state-dir", state)
+			if code != 0 || errOut != "" {
+				t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errOut)
+			}
+			if got := loadAgentLines(t, state); !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("lines = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAgentsUpdateDryRun(t *testing.T) {
+	fakeOpenCodeModels(t, "fixture/gpt-6-sol", "fixture/gpt-6.1-sol")
+	state := testsupport.ShortStateDir(t)
+	saved := []string{"harness=opencode,model=fixture/gpt-6-sol"}
+	saveAgentLines(t, state, saved...)
+	stubAgentsStdin(t, "") // a dry run reads no answers
+	code, out, errOut := agentsDo(t, "agents", "update", "--state-dir", state, "--dry-run")
+	if code != 0 || errOut != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+	for _, text := range []string{
+		"opencode/fixture/gpt-6-sol → opencode/fixture/gpt-6.1-sol",
+		"harness=opencode,model=fixture/gpt-6.1-sol,classes=implement+review+answer",
+		"Dry run",
+	} {
+		if !strings.Contains(out, text) {
+			t.Errorf("output lacks %q:\n%s", text, out)
+		}
+	}
+	if strings.Contains(out, "updated ") || strings.Contains(out, "Nothing updated.") {
+		t.Errorf("a dry run reported a change:\n%s", out)
+	}
+	if got := loadAgentLines(t, state); !reflect.DeepEqual(got, saved) {
+		t.Fatalf("agents file changed: %q", got)
+	}
+}
+
+func TestAgentsUpdateNothingSuperseded(t *testing.T) {
+	fakeOpenCodeModels(t, "fixture/gpt-5")
+	state := testsupport.ShortStateDir(t)
+	saved := []string{"harness=opencode,model=fixture/gpt-5"}
+	saveAgentLines(t, state, saved...)
+	code, out, errOut := agentsDo(t, "agents", "update", "--state-dir", state)
+	if code != 0 || errOut != "" || out != "No agent runs a model a newer version replaces.\n" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+	if got := loadAgentLines(t, state); !reflect.DeepEqual(got, saved) {
+		t.Fatalf("agents file changed: %q", got)
+	}
+}
+
+func TestAgentsUpdateRefusesAnAlreadyRegisteredNewPair(t *testing.T) {
+	fakeOpenCodeModels(t, "fixture/gpt-6-sol", "fixture/gpt-6.1-sol")
+	state := testsupport.ShortStateDir(t)
+	saved := []string{"harness=opencode,model=fixture/gpt-6-sol", "harness=opencode,model=fixture/gpt-6.1-sol"}
+	saveAgentLines(t, state, saved...)
+	code, out, errOut := agentsDo(t, "agents", "update", "--state-dir", state, "--yes")
+	if code != 1 || out != "" || !strings.Contains(errOut, "agent opencode/fixture/gpt-6.1-sol is already registered") {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+	if got := loadAgentLines(t, state); !reflect.DeepEqual(got, saved) {
+		t.Fatalf("agents file changed: %q", got)
+	}
+}
+
+func TestAgentsUpdateEffortFallsBackToTheCLIDefault(t *testing.T) {
+	fakeOpenCodeModels(t, "fixture/gpt-6-sol", "fixture/gpt-6.1-sol")
+	state := testsupport.ShortStateDir(t)
+	// HIGH is not a variant opencode accepts; the rewrite drops it.
+	saveAgentLines(t, state, "harness=opencode,model=fixture/gpt-6-sol,effort=HIGH")
+	code, out, errOut := agentsDo(t, "agents", "update", "--state-dir", state, "--yes")
+	if code != 0 || errOut != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+	want := []string{"harness=opencode,model=fixture/gpt-6.1-sol,classes=implement+review+answer"}
+	if got := loadAgentLines(t, state); !reflect.DeepEqual(got, want) {
+		t.Fatalf("lines = %q, want %q", got, want)
+	}
+	if !strings.Contains(out, "effort=HIGH is not accepted for opencode/fixture/gpt-6.1-sol") {
+		t.Errorf("output lacks the effort fallback note:\n%s", out)
+	}
+}
+
+func TestAgentsUpdateNeedsSavedAgents(t *testing.T) {
+	fakeInitPATH(t, "opencode")
+	state := testsupport.ShortStateDir(t)
+	if code, _, errOut := agentsDo(t, "agents", "update", "--state-dir", state); code != 1 || !strings.Contains(errOut, "no saved agents") {
+		t.Errorf("code=%d stderr=%q", code, errOut)
+	}
+}
+
+func TestAgentsUpdateRejectsArguments(t *testing.T) {
+	fakeInitPATH(t, "opencode")
+	state := testsupport.ShortStateDir(t)
+	saveAgentLines(t, state, "harness=claude")
+	for _, args := range [][]string{{"extra"}, {"--bogus"}} {
+		if code, _, errOut := agentsDo(t, append([]string{"agents", "update", "--state-dir", state}, args...)...); code != 2 || errOut == "" {
+			t.Errorf("%q: code=%d stderr=%q", args, code, errOut)
+		}
+	}
+}

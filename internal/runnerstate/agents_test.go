@@ -87,3 +87,27 @@ func TestAppendAgentKeepsEveryLine(t *testing.T) {
 		t.Fatalf("lines = %q, %v; want %q", got, err, want)
 	}
 }
+
+func TestReplaceAgentKeepsEveryLine(t *testing.T) {
+	dir := t.TempDir()
+	saved := []string{"# mine", "harness=claude,model=sonnet", "", "not an agent line", "harness=claude,model=sonnet"}
+	if err := runnerstate.SaveAgents(dir, saved); err != nil {
+		t.Fatal(err)
+	}
+	if err := runnerstate.ReplaceAgent(dir, "harness=claude,model=sonnet", "harness=claude,model=opus"); err != nil {
+		t.Fatal(err)
+	}
+	// Only the first matching line changes.
+	want := []string{"# mine", "harness=claude,model=opus", "", "not an agent line", "harness=claude,model=sonnet"}
+	got, err := runnerstate.LoadAgents(dir)
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("lines = %q, %v; want %q", got, err, want)
+	}
+	// A line that is not there is an error and the file stays as it was.
+	if err := runnerstate.ReplaceAgent(dir, "harness=codex,model=gpt-5", "harness=codex,model=gpt-6"); err == nil {
+		t.Fatal("a missing line was replaced")
+	}
+	if got, err := runnerstate.LoadAgents(dir); err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("after the failed replace: lines = %q, %v; want %q", got, err, want)
+	}
+}
