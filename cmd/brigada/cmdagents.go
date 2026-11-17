@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -16,6 +18,9 @@ import (
 	"github.com/Blackfire-AI/brigada/internal/adapter"
 	"github.com/Blackfire-AI/brigada/internal/runnerstate"
 )
+
+// agentsStdin is where agents update reads its answers; tests inject them.
+var agentsStdin io.Reader = os.Stdin
 
 // agentsListed are the harnesses whose CLI lists its models cheaply, with
 // the sources init uses. Kimi reads a config file and dsh has a static list:
@@ -238,11 +243,11 @@ func supersededPairs(offered []string, registered []agentSpec) map[string]string
 	return out
 }
 
-// agentsHint is the one line status and top show when the CLIs offer models
-// no agent registers, or "" when there is none to say. It never runs a CLI on
-// its own: with refresh it lists again when the cache is missing or older than
-// the TTL, and top, which redraws every tick, passes false and refreshes from
-// the side.
+// agentsHint is the one to two lines status and top show when the CLIs offer
+// models no agent registers or when a newer model version replaces registered
+// ones, or "" when there is none to say. It never runs a CLI on its own: with
+// refresh it lists again when the cache is missing or older than the TTL, and
+// top, which redraws every tick, passes false and refreshes from the side.
 func agentsHint(ctx context.Context, rt *runtime, refresh bool) string {
 	lines, err := runnerstate.LoadAgents(runnerStateDir(rt))
 	if err != nil || len(lines) == 0 {
@@ -255,15 +260,23 @@ func agentsHint(ctx context.Context, rt *runtime, refresh bool) string {
 	if !ok {
 		return ""
 	}
-	n := len(diffAgents(cache.offer(), registeredAgents(lines)).unregistered)
-	if n == 0 {
-		return ""
+	d := diffAgents(cache.offer(), registeredAgents(lines))
+	var hint []string
+	if n := len(d.unregistered); n > 0 {
+		noun := "models"
+		if n == 1 {
+			noun = "model"
+		}
+		hint = append(hint, fmt.Sprintf("%d %s your CLIs offer but no agent registers: brigada agents", n, noun))
 	}
-	noun := "models"
-	if n == 1 {
-		noun = "model"
+	if n := len(d.superseded); n > 0 {
+		runs := fmt.Sprintf("%d agents run", n)
+		if n == 1 {
+			runs = "1 agent runs"
+		}
+		hint = append(hint, runs+" a model a newer version replaces: brigada agents update")
 	}
-	return fmt.Sprintf("%d %s your CLIs offer but no agent registers: brigada agents", n, noun)
+	return strings.Join(hint, "\n")
 }
 
 // refreshAgentsCacheIfStale lists the CLIs again when agents are saved and
@@ -280,10 +293,16 @@ func refreshAgentsCacheIfStale(ctx context.Context, rt *runtime) {
 	writeAgentsCache(rt, listOfferedAgents(ctx).cache(time.Now()))
 }
 
-// runAgents is `brigada agents` and `brigada agents add`.
+// runAgents is `brigada agents`, `brigada agents add` and
+// `brigada agents update`.
 func runAgents(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	if len(args) > 0 && args[0] == "add" {
-		return runAgentsAdd(ctx, args[1:], stdout, stderr)
+	if len(args) > 0 {
+		switch args[0] {
+		case "add":
+			return runAgentsAdd(ctx, args[1:], stdout, stderr)
+		case "update":
+			return runAgentsUpdate(ctx, args[1:], stdout, stderr)
+		}
 	}
 	return runAgentsList(ctx, args, stdout, stderr)
 }
@@ -354,6 +373,7 @@ func printAgentsReport(w io.Writer, path string, offer agentsOffer, registered [
 			fmt.Fprintf(w, "  %-*s  replaced by %s\n", width, pair, d.superseded[pair])
 		}
 		fmt.Fprintf(w, "To retire one, remove its line from %s and restart the runner.\n", initHomePath(path))
+		fmt.Fprintln(w, "To move one to the newer model, run brigada agents update: it rewrites each line you accept and restarts the runner.")
 	}
 	if len(d.gone) > 0 {
 		fmt.Fprintln(w)
@@ -471,10 +491,16 @@ func runAgentsAdd(ctx context.Context, args []string, stdout, stderr io.Writer) 
 	}
 	fmt.Fprintf(stdout, "registered %s (tier %s, classes %s)\n", pair, rt.file.Caps.TierOf(harness, model), classesText)
 	fmt.Fprintf(stdout, "added to %s: %s\n", initHomePath(filepath.Join(dir, "agents")), line)
-	// A running runner is handed a restart request it honours between
-	// jobs, so no running job is cut — unless --now asked for exactly
-	// that. Without one there is nothing to restart; the line serves
-	// from the next start.
+	return restartRunnerForAgents(ctx, rt, *now, stdout, stderr)
+}
+
+// restartRunnerForAgents is the shared tail of agents add and agents
+// update: a running runner is handed a restart request it honours between
+// jobs, so no running job is cut — unless now asked for exactly that.
+// Without one there is nothing to restart; the changed lines serve from
+// the next start.
+func restartRunnerForAgents(ctx context.Context, rt *runtime, now bool, stdout, stderr io.Writer) int {
+	dir := runnerStateDir(rt)
 	if _, running, err := runnerstate.Running(dir); err != nil {
 		return fail(stderr, err)
 	} else if !running {
@@ -503,10 +529,10 @@ func runAgentsAdd(ctx context.Context, args []string, stdout, stderr io.Writer) 
 		return fail(stderr, err)
 	}
 	mode := runnerstate.RestartDrain
-	if *now {
+	if now {
 		mode = runnerstate.RestartNow
 	}
-	if !*now {
+	if !now {
 		fmt.Fprintln(stdout, "runner restarting: it finishes its running jobs first; --now cuts them")
 	}
 	result, err := startDetachedRunner(ctx, rt, specs, parallel, mode)
@@ -519,4 +545,178 @@ func runAgentsAdd(ctx context.Context, args []string, stdout, stderr io.Writer) 
 		fmt.Fprintf(stdout, "runner restarted (pid %d)\n", result.Record.PID)
 	}
 	return 0
+}
+
+// agentsUpdateCandidate is one superseded pair's rewrite: the raw line it
+// replaces, the line replacing it, and the saved effort the rewrite had to
+// drop when the new model refused it.
+type agentsUpdateCandidate struct {
+	oldPair, newPair string
+	oldLine, newLine string
+	effortDropped    string
+}
+
+// runAgentsUpdate is `brigada agents update`: every registered agent whose
+// model a newer version of the same line replaces is rewritten to the newer
+// model in place, each rewrite accepted interactively or by --yes, and a
+// running runner restarts to serve the new lines.
+func runAgentsUpdate(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	fs := newFlagSet("agents update",
+		"brigada agents update [--yes] [--dry-run] [--now]",
+		"Move registered agents to the newer model of their line the CLIs list: rewrite each superseded line of the agents file in place, keeping every other line, and restart the runner to serve the new models.")
+	stderr = commandStderr(stderr, fs.Name())
+	common := addCommon(fs)
+	yes := fs.Bool("yes", false, "apply every update without prompting")
+	dryRun := fs.Bool("dry-run", false, "print the rewrites and exit: nothing is written and the runner is not restarted")
+	now := fs.Bool("now", false, "restart the runner at once, cutting its running jobs; without it the restart waits out running jobs")
+	if code, stop := common.parse(stdout, stderr, args); stop {
+		return code
+	}
+	if extra := fs.Args(); len(extra) > 0 {
+		return usagef(stderr, "agents update takes no arguments, got %q", extra)
+	}
+	rt, code := resolveRuntime(common, stderr)
+	if code != 0 {
+		return code
+	}
+	dir := runnerStateDir(rt)
+	lines, err := runnerstate.LoadAgents(dir)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	if len(lines) == 0 {
+		return fail(stderr, fmt.Errorf("no saved agents; run brigada init in a repository first"))
+	}
+	offer := listOfferedAgents(ctx)
+	writeAgentsCache(rt, offer.cache(time.Now()))
+	registered := registeredAgents(lines)
+	d := diffAgents(offer, registered)
+	if len(d.superseded) == 0 {
+		fmt.Fprintln(stdout, "No agent runs a model a newer version replaces.")
+		return 0
+	}
+	// Every candidate is built and validated before anything is printed or
+	// written: one refusal fails the command with the file untouched. stay
+	// holds the pairs the file registers once the candidates so far are
+	// applied, so a rewrite never duplicates a line that stays. claimed
+	// holds the pairs accepted candidates so far claim, each mapped to the
+	// old pair that claimed it, so a collision between two candidates is
+	// told apart from a target the file itself registers.
+	stay := map[string]bool{}
+	claimed := map[string]string{}
+	for _, spec := range registered {
+		stay[agentPair(spec)] = true
+	}
+	var candidates []agentsUpdateCandidate
+	for _, oldPair := range slices.Sorted(maps.Keys(d.superseded)) {
+		newPair := d.superseded[oldPair]
+		// A line the runner can no longer parse registers nothing here and
+		// is left alone.
+		var oldLine string
+		var spec agentSpec
+		for _, line := range lines {
+			var one agentSpecs
+			if one.Set(line) == nil && agentPair(one.specs[0]) == oldPair {
+				oldLine, spec = line, one.specs[0]
+				break
+			}
+		}
+		if oldLine == "" {
+			continue
+		}
+		if first, done := claimed[newPair]; done {
+			return fail(stderr, fmt.Errorf("%s and %s both update to %s; remove one line and run again", first, oldPair, newPair))
+		}
+		if stay[newPair] {
+			return fail(stderr, fmt.Errorf("agent %s is already registered; edit its line in %s to change it", newPair, initHomePath(filepath.Join(dir, "agents"))))
+		}
+		// The model is the pair's part after the first slash, so an
+		// opencode provider/model keeps its own slash.
+		_, model, _ := strings.Cut(newPair, "/")
+		spec.model = model
+		// The rewritten line is read back and resolved the way agents add
+		// validates its line, so what is written is what the runner serves.
+		validate := func(line string) error {
+			var parsed agentSpecs
+			if err := parsed.Set(line); err != nil {
+				return err
+			}
+			if _, adverts, err := resolveRunnerAgents(rt, parsed.specs, ""); err != nil {
+				return err
+			} else if len(adverts) != 1 {
+				return fmt.Errorf("agent %s did not resolve to one agent", newPair)
+			}
+			return nil
+		}
+		c := agentsUpdateCandidate{oldPair: oldPair, newPair: newPair, oldLine: oldLine, newLine: spec.String()}
+		if err := validate(c.newLine); err != nil {
+			if spec.effort == "" {
+				return fail(stderr, err)
+			}
+			// A saved effort the new model refuses falls back to the CLI's
+			// own default; any other refusal fails the command.
+			effort := spec.effort
+			spec.effort = ""
+			without := spec.String()
+			if err := validate(without); err != nil {
+				return fail(stderr, err)
+			}
+			c.newLine, c.effortDropped = without, effort
+		}
+		delete(stay, oldPair)
+		stay[newPair] = true
+		claimed[newPair] = oldPair
+		candidates = append(candidates, c)
+	}
+	printCandidate := func(c agentsUpdateCandidate) {
+		fmt.Fprintf(stdout, "%s → %s\n  %s\n", c.oldPair, c.newPair, c.newLine)
+		if c.effortDropped != "" {
+			fmt.Fprintf(stdout, "  note: effort=%s is not accepted for %s; the line leaves the effort to the CLI's default\n", c.effortDropped, c.newPair)
+		}
+	}
+	if *dryRun {
+		for _, c := range candidates {
+			printCandidate(c)
+		}
+		fmt.Fprintln(stdout, "Dry run: nothing written, nothing restarted.")
+		return 0
+	}
+	input := bufio.NewReader(agentsStdin)
+	acceptAll := *yes
+	var accepted []agentsUpdateCandidate
+	for _, c := range candidates {
+		printCandidate(c)
+		if !acceptAll {
+			fmt.Fprint(stdout, "Apply this update? y = yes, n = no (the default), a = yes to all: ")
+			answer, err := input.ReadString('\n')
+			if err != nil && !errors.Is(err, io.EOF) {
+				return fail(stderr, err)
+			}
+			fmt.Fprintln(stdout)
+			switch strings.ToLower(strings.TrimSpace(answer)) {
+			case "y", "yes":
+			case "a", "all":
+				acceptAll = true
+			default:
+				continue
+			}
+		}
+		accepted = append(accepted, c)
+	}
+	if len(accepted) == 0 {
+		fmt.Fprintln(stdout, "Nothing updated.")
+		return 0
+	}
+	for _, c := range accepted {
+		if err := runnerstate.ReplaceAgent(dir, c.oldLine, c.newLine); err != nil {
+			return fail(stderr, err)
+		}
+		fmt.Fprintf(stdout, "updated %s → %s", c.oldPair, c.newPair)
+		if c.effortDropped != "" {
+			fmt.Fprintf(stdout, " (effort=%s refused; the CLI's default applies)", c.effortDropped)
+		}
+		fmt.Fprintln(stdout)
+	}
+	fmt.Fprintf(stdout, "rewritten in %s\n", initHomePath(filepath.Join(dir, "agents")))
+	return restartRunnerForAgents(ctx, rt, *now, stdout, stderr)
 }

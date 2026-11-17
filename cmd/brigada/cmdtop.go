@@ -803,12 +803,17 @@ func topPauseBands(model topModel, now time.Time, style term.Style, width int) [
 	return out
 }
 
-// topHint is the unregistered-models line under the header, Dim, or nothing.
+// topHint is the agents hint under the header, one Dim row per line, each cut
+// to the width, or nothing.
 func topHint(model topModel, style term.Style, width int) []string {
 	if model.hint == "" {
 		return nil
 	}
-	return []string{style.Dim(cutLine(model.hint, width))}
+	var out []string
+	for _, line := range strings.Split(model.hint, "\n") {
+		out = append(out, style.Dim(cutLine(line, width)))
+	}
+	return out
 }
 
 // topUptime is the engine's uptime as the header shows it: whole seconds
