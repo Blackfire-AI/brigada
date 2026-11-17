@@ -598,8 +598,12 @@ func runAgentsUpdate(ctx context.Context, args []string, stdout, stderr io.Write
 	// Every candidate is built and validated before anything is printed or
 	// written: one refusal fails the command with the file untouched. stay
 	// holds the pairs the file registers once the candidates so far are
-	// applied, so a rewrite never duplicates a line that stays.
+	// applied, so a rewrite never duplicates a line that stays. claimed
+	// holds the pairs accepted candidates so far claim, each mapped to the
+	// old pair that claimed it, so a collision between two candidates is
+	// told apart from a target the file itself registers.
 	stay := map[string]bool{}
+	claimed := map[string]string{}
 	for _, spec := range registered {
 		stay[agentPair(spec)] = true
 	}
@@ -619,6 +623,9 @@ func runAgentsUpdate(ctx context.Context, args []string, stdout, stderr io.Write
 		}
 		if oldLine == "" {
 			continue
+		}
+		if first, done := claimed[newPair]; done {
+			return fail(stderr, fmt.Errorf("%s and %s both update to %s; remove one line and run again", first, oldPair, newPair))
 		}
 		if stay[newPair] {
 			return fail(stderr, fmt.Errorf("agent %s is already registered; edit its line in %s to change it", newPair, initHomePath(filepath.Join(dir, "agents"))))
@@ -658,6 +665,7 @@ func runAgentsUpdate(ctx context.Context, args []string, stdout, stderr io.Write
 		}
 		delete(stay, oldPair)
 		stay[newPair] = true
+		claimed[newPair] = oldPair
 		candidates = append(candidates, c)
 	}
 	printCandidate := func(c agentsUpdateCandidate) {

@@ -591,6 +591,20 @@ func TestAgentsUpdateRefusesAnAlreadyRegisteredNewPair(t *testing.T) {
 	}
 }
 
+func TestAgentsUpdateRefusesTwoCandidatesUpdatingToTheSameTarget(t *testing.T) {
+	fakeOpenCodeModels(t, "fixture/gpt-5.9-sol", "fixture/gpt-6-sol", "fixture/gpt-6.1-sol")
+	state := testsupport.ShortStateDir(t)
+	saved := []string{"harness=opencode,model=fixture/gpt-5.9-sol", "harness=opencode,model=fixture/gpt-6-sol"}
+	saveAgentLines(t, state, saved...)
+	code, out, errOut := agentsDo(t, "agents", "update", "--state-dir", state, "--yes")
+	if code != 1 || out != "" || !strings.Contains(errOut, "opencode/fixture/gpt-5.9-sol and opencode/fixture/gpt-6-sol both update to opencode/fixture/gpt-6.1-sol; remove one line and run again") {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+	if got := loadAgentLines(t, state); !reflect.DeepEqual(got, saved) {
+		t.Fatalf("agents file changed: %q", got)
+	}
+}
+
 func TestAgentsUpdateEffortFallsBackToTheCLIDefault(t *testing.T) {
 	fakeOpenCodeModels(t, "fixture/gpt-6-sol", "fixture/gpt-6.1-sol")
 	state := testsupport.ShortStateDir(t)
