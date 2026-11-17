@@ -42,8 +42,8 @@ tasks:
     tier: light
     effort: low
     skills: ["surface-parity"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-944"
     rounds: 0
   - id: 945
     name: "agents-update-docs"
