@@ -30,7 +30,7 @@ tasks:
     tier: light
     effort: low
     skills: ["docs-change"]
-    state: reviewing
+    state: done
     branch: "brigada/task-946"
     rounds: 0
   - id: 947
