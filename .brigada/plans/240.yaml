@@ -30,8 +30,8 @@ tasks:
     tier: light
     effort: low
     skills: ["docs-change"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-946"
     rounds: 0
   - id: 947
     name: "agents-listing-hint"
