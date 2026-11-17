@@ -373,6 +373,7 @@ func printAgentsReport(w io.Writer, path string, offer agentsOffer, registered [
 			fmt.Fprintf(w, "  %-*s  replaced by %s\n", width, pair, d.superseded[pair])
 		}
 		fmt.Fprintf(w, "To retire one, remove its line from %s and restart the runner.\n", initHomePath(path))
+		fmt.Fprintln(w, "To move one to the newer model, run brigada agents update: it rewrites each line you accept and restarts the runner.")
 	}
 	if len(d.gone) > 0 {
 		fmt.Fprintln(w)

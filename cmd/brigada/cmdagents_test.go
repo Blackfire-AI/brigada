@@ -115,6 +115,7 @@ func TestAgentsLeavesOutSupersededModels(t *testing.T) {
 		"Offered by your CLIs, not registered (1):\n  opencode/fixture/gpt-6.1-sol  tier standard",
 		"Registered, but a newer version of the model is listed or registered (1):\n  opencode/fixture/gpt-6-sol  replaced by opencode/fixture/gpt-6.1-sol\n",
 		"To retire one, remove its line from",
+		"To move one to the newer model, run brigada agents update: it rewrites each line you accept and restarts the runner.",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
