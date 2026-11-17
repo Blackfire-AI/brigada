@@ -121,14 +121,37 @@ func topJobID(taskID int64) string {
 	return fmt.Sprintf("#%d", taskID)
 }
 
+// measureTopJobs is the natural column widths of the job rows among
+// lines: the widest cell of each column over the rows of this tick.
+func measureTopJobs(lines []topLine) (w topJobWidths) {
+	count := term.CellWidth
+	for _, l := range lines {
+		r := l.job
+		if r == nil {
+			continue
+		}
+		w.mark, w.id = max(w.mark, count(r.mark)), max(w.id, count(r.id))
+		w.title = max(w.title, count(r.title))
+		w.kind, w.agent, w.age = max(w.kind, count(r.kind)), max(w.agent, count(r.agent)), max(w.age, count(r.age))
+		w.event, w.wait = max(w.event, count(r.event)), max(w.wait, count(r.wait))
+	}
+	return w
+}
+
 // topLayoutJobs gives the job rows among lines the columns of their box and
-// builds their text at the inner width. The mark, id and title columns are
-// as wide as the widest cell; the kind, agent and age columns, which only a
-// running row fills, likewise. The title gives way first, down to
+// builds their text at the inner width, each column as wide as the widest
+// cell of the rows themselves.
+func topLayoutJobs(lines []topLine, style term.Style, inner int) {
+	topLayoutJobsW(lines, style, inner, measureTopJobs(lines))
+}
+
+// topLayoutJobsW is topLayoutJobs with the column widths given: the
+// full-screen loop passes its sticky widths (topSticky.growJobs), so the
+// columns hold while rows come and go. The title gives way first, down to
 // topJobTitleMin, and the last event is left out below topJobEventMin
 // columns; an event still too long is cut at the line's end. Every running
 // row is marked for the blue tint.
-func topLayoutJobs(lines []topLine, style term.Style, inner int) {
+func topLayoutJobsW(lines []topLine, style term.Style, inner int, w topJobWidths) {
 	var rows []*topJobRow
 	for _, l := range lines {
 		if l.job != nil {
@@ -139,13 +162,9 @@ func topLayoutJobs(lines []topLine, style term.Style, inner int) {
 		return
 	}
 	count := term.CellWidth
-	var markW, idW, titleW, kindW, agentW, ageW, eventW, waitW int
-	for _, r := range rows {
-		markW, idW = max(markW, count(r.mark)), max(idW, count(r.id))
-		titleW = max(titleW, count(r.title))
-		kindW, agentW, ageW = max(kindW, count(r.kind)), max(agentW, count(r.agent)), max(ageW, count(r.age))
-		eventW, waitW = max(eventW, count(r.event)), max(waitW, count(r.wait))
-	}
+	markW, idW, titleW := w.mark, w.id, w.title
+	kindW, agentW, ageW := w.kind, w.agent, w.age
+	eventW, waitW := w.event, w.wait
 	// What the left cells take, and what the running columns reserve after
 	// the title: the kind, agent and age with their gaps, or a stretch of the
 	// wait text when that is wider.

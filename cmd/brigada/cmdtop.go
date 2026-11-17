@@ -125,7 +125,9 @@ func printTopSnapshot(ctx context.Context, client topClient, repo, hint string, 
 // topModel is one tick of top's data, all of it fetched before any
 // rendering: the status answer, the capacity snapshot and the newest
 // history page, plus the fetch's own error and the pause the keys set.
-// The rendering is a pure function of the model and the size.
+// The rendering is a pure function of the model and the size, apart from
+// the sticky layout memory the model carries, which only grows widths and
+// resets on a resize.
 type topModel struct {
 	status   api.Status
 	capacity engine.CapacitySnapshot
@@ -160,6 +162,10 @@ type topModel struct {
 	// running rows carry a spinner frame; only topLoop sets it, and a fetch
 	// keeps it.
 	animate bool
+	// layout is the loop's sticky column memory (topSticky): the sections
+	// size their columns from it, so a row coming or going does not resize
+	// them. nil in a one-shot snapshot, whose columns are the tick's own.
+	layout *topSticky
 }
 
 // topSpinEvery is the redraw period of the running rows' spinner, apart
@@ -187,6 +193,7 @@ func afterFetch(prev, fetched topModel, err error, now time.Time) topModel {
 	fetched.paused, fetched.pausedAt, fetched.dialFailed = prev.paused, prev.pausedAt, prev.dialFailed
 	fetched.fetchedAt = prev.fetchedAt
 	fetched.animate = prev.animate
+	fetched.layout = prev.layout
 	fetched.events = mergeTopEvents(prev.events, fetched.events)
 	if err != nil {
 		return fetched.keepPrevious(prev)
@@ -383,6 +390,7 @@ func dialEngine(ctx context.Context, rt *runtime, role string, noStart bool) (*a
 // a plain style the text is the same and has no escapes.
 func renderTop(model topModel, width, height int, now time.Time, style term.Style) []string {
 	inner := max(width-4, 1)
+	model.layout.forInner(inner)
 	// The sections read the pause time while paused, so job ages stop; the
 	// header and the band read the real clock.
 	secNow := now
@@ -407,12 +415,12 @@ func renderTop(model topModel, width, height int, now time.Time, style term.Styl
 	if model.animate && !model.paused && model.err == nil {
 		mark = style.Spinner(int(now.UnixMilli() / topSpinEvery.Milliseconds()))
 	}
-	foreman, jobs := topPlanless(model.status, secNow, style, inner, mark)
+	foreman, jobs := topPlanless(model.status, secNow, style, inner, mark, model.layout)
 	add(foreman)
 	add(jobs)
-	add(topPlansBox(model.status, model.tagPlans, model.statusOK, model.events, secNow, style, inner, mark))
-	add(topAgentLines(model, secNow, style, inner))
-	events := topEventLinesAt(model.events, model.status, model.statusOK && topFirstRun(model.status), secNow, style, inner)
+	add(topPlansBox(model.status, model.tagPlans, model.statusOK, model.events, secNow, style, inner, mark, model.layout))
+	add(topAgentLines(model, secNow, style, inner, model.layout))
+	events := topEventLinesAt(model.events, model.status, model.statusOK && topFirstRun(model.status), secNow, style, inner, model.layout)
 	if r := model.status.Report; r != nil {
 		first, _, _ := strings.Cut(strings.TrimSpace(r.Text), "\n")
 		events[0].box.right = strings.TrimSpace(topMarkdownPlain(first))
@@ -968,7 +976,8 @@ func topRetryLine(r engine.InfraRetry, now time.Time, style term.Style, width in
 // is running, held, retrying. A block is nil, and renderTop leaves it
 // out, when it has no job. The running lines yield in class g, the held
 // and retry lines in class f, and a block's head goes with its last line.
-func topPlanless(st api.Status, now time.Time, style term.Style, width int, mark string) (foreman, jobs []topLine) {
+// sticky is the loop's layout memory, nil for the tick's own widths.
+func topPlanless(st api.Status, now time.Time, style term.Style, width int, mark string, sticky *topSticky) (foreman, jobs []topLine) {
 	claims := newTopClaims(st)
 	var fore, other []topLine
 	add := func(kind string, line topLine) {
@@ -1032,8 +1041,8 @@ func topPlanless(st api.Status, now time.Time, style term.Style, width int, mark
 		}
 		other = append(other, note(fmt.Sprintf("runner restarting after %d running %s", len(st.Running), noun), topSecJobs))
 	}
-	topLayoutJobs(fore, style, width)
-	topLayoutJobs(other, style, width)
+	topLayoutJobsW(fore, style, width, sticky.growJobs(topSecForeman, measureTopJobs(fore)))
+	topLayoutJobsW(other, style, width, sticky.growJobs(topSecJobs, measureTopJobs(other)))
 	if len(fore) > 0 {
 		foreman = topBoxed(topSecForeman, topBox{title: "FOREMAN"}, fore)
 	}
@@ -1062,7 +1071,7 @@ func topPlansTree(st api.Status, now time.Time, style term.Style, width int) []s
 // the finished ones, listed and hidden, once the status has come back
 // (fetched). With tagged each plan's own line names its repo.
 func newTopPlans(st api.Status, tagged, fetched bool, now time.Time, style term.Style, width int) []topLine {
-	return topPlansBox(st, tagged, fetched, nil, now, style, width, style.Pointer())
+	return topPlansBox(st, tagged, fetched, nil, now, style, width, style.Pointer(), nil)
 }
 
 // topFirstRun says the status has no plans at all, listed or hidden. It means
@@ -1091,8 +1100,9 @@ func topFirstRunRows(style term.Style, line func(string, topYield) topLine) []to
 // row ends the finished lines, left out when no landing is kept. Every live
 // plan is listed before every finished one, live plans in id order and
 // finished ones newest first (highest id first), so a short terminal drops
-// the oldest finished plans first.
-func topPlansBox(st api.Status, tagged, fetched bool, events []history.Item, now time.Time, style term.Style, width int, mark string) []topLine {
+// the oldest finished plans first. sticky is the loop's layout memory, nil
+// for the tick's own widths.
+func topPlansBox(st api.Status, tagged, fetched bool, events []history.Item, now time.Time, style term.Style, width int, mark string, sticky *topSticky) []topLine {
 	line := func(text string, class topYield) topLine {
 		return topLine{text: text, class: class, section: topSecPlans}
 	}
@@ -1235,7 +1245,7 @@ func topPlansBox(st api.Status, tagged, fetched bool, events []history.Item, now
 	if len(lines) == 0 {
 		lines = append(lines, line(style.Dim("none"), yieldRest))
 	}
-	topLayoutJobs(lines, style, width)
+	topLayoutJobsW(lines, style, width, sticky.growJobs(topSecPlans, measureTopJobs(lines)))
 	return topBoxed(topSecPlans, box, lines)
 }
 
@@ -1664,15 +1674,16 @@ func topShows(it history.Item) bool {
 // borders go with the last row. The top border's right end carries the
 // foreman's report line (renderTop sets it).
 func topEventLines(items []history.Item, status api.Status, now time.Time, style term.Style, width int) []topLine {
-	return topEventLinesAt(items, status, false, now, style, width)
+	return topEventLinesAt(items, status, false, now, style, width, nil)
 }
 
 // topTitleFloor is the fewest cells the events table gives a title.
 const topTitleFloor = 8
 
 // topEventLinesAt is topEventLines that reads `no events yet` instead of `no
-// events` on a first run.
-func topEventLinesAt(items []history.Item, status api.Status, firstRun bool, now time.Time, style term.Style, width int) []topLine {
+// events` on a first run. sticky is the loop's layout memory, nil for the
+// tick's own widths.
+func topEventLinesAt(items []history.Item, status api.Status, firstRun bool, now time.Time, style term.Style, width int, sticky *topSticky) []topLine {
 	box := topBox{title: "EVENTS"}
 	landed := map[int64]bool{}
 	for _, it := range items {
@@ -1737,6 +1748,7 @@ func topEventLinesAt(items []history.Item, status api.Status, firstRun bool, now
 	}
 	// Only the title gives way: its room is what the four other columns
 	// and the gap before it leave.
+	wide = sticky.growEvents(wide)
 	if wide[4] > 0 {
 		fixed := 0
 		for _, w := range wide[:4] {
@@ -1995,6 +2007,7 @@ func topLoop(ctx context.Context, rt *runtime, repo string, interval time.Durati
 	signal.Notify(resize, unix.SIGWINCH)
 	defer signal.Stop(resize)
 	var model topModel
+	model.layout = new(topSticky)
 	detected := detectCaps(stdout)
 	model.animate = detected.Color != logo.NoColor && detected.UTF8
 	refresh := func() {

@@ -1164,6 +1164,7 @@ The PLANS top border carries a legend of the four states other than parked, `■
 When the cells would take more than a third of the width the tail is just `done/total`.
 The total leaves out cancelled and retired tasks, and the count takes a done task only once it is landed, or when its class never lands.
 A job row has fixed columns that line up across the rows of a box — the mark, the task id, the title, the kind, the agent, the age and the last event, two spaces apart — in PLANS, FOREMAN and JOBS, each box with its own widths.
+In the full-screen view the widths of every table — these boxes, the agents section and the events table — hold across redraws: a column only ever widens, so a row that comes or goes does not resize the rest, and a terminal resize starts them over; a piped snapshot sizes each column from the rows it prints.
 Beneath the line come its running jobs (`▸`, as `▸ #342  clip frame to terminal height  work  claude/sonnet@high  3m12s  Edit`; with colour and UTF-8 the full-screen view turns the `▸` into a spinner redrawn every 120 ms, with no fetch of its own, and it stays a static `▸` — `>` in ASCII — with no colour, in a piped snapshot, while paused and while the engine band shows):
 the agent is `harness/model@effort`, and a name of more than two `/` segments keeps its first and last, so `opencode/zai-coding-plan/glm-5.3` reads `opencode/glm-5.3`;
 the age is `45s`, `9m04s` or `1h02m03s`; the last event is the tool's name alone, and is left out under 80 terminal columns.
