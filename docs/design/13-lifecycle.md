@@ -88,7 +88,7 @@ A model is superseded when a newer version of its line is offered by the same CL
 
 `brigada agents add <harness>/<model>` appends one line carrying the account its harness's registered agents use, refuses a model already registered, validates the line through the same `resolveRunnerAgents` the runner runs at startup, and restarts a running runner as §5.1 describes (draining, or cutting its jobs with `--now`), so the line is served from that restart; with no runner running, the next `brigada start` serves it. Registration is never automatic, since a new model can spend a paid account.
 
-`status` and `top` show a one-line hint when the last listing found unregistered models; the listing is cached with its time in `runner/models-offered.json`, `status` lists again only when it is missing or older than twelve hours, and `top` reads the cache on every redraw and refreshes a stale one once in the background, so no CLI runs per call.
+`status` and `top` show a hint when the last listing found unregistered models, and when it found registered models a newer version of the same line replaces (`brigada agents update` moves them); one sentence per count, unregistered first, two lines when both. The listing is cached with its time in `runner/models-offered.json`, `status` lists again only when it is missing or older than twelve hours, and `top` reads the cache on every redraw and refreshes a stale one once in the background, so no CLI runs per call.
 
 ### Coordinator setup
 

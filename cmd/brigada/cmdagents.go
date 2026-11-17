@@ -243,11 +243,11 @@ func supersededPairs(offered []string, registered []agentSpec) map[string]string
 	return out
 }
 
-// agentsHint is the one line status and top show when the CLIs offer models
-// no agent registers, or "" when there is none to say. It never runs a CLI on
-// its own: with refresh it lists again when the cache is missing or older than
-// the TTL, and top, which redraws every tick, passes false and refreshes from
-// the side.
+// agentsHint is the one to two lines status and top show when the CLIs offer
+// models no agent registers or when a newer model version replaces registered
+// ones, or "" when there is none to say. It never runs a CLI on its own: with
+// refresh it lists again when the cache is missing or older than the TTL, and
+// top, which redraws every tick, passes false and refreshes from the side.
 func agentsHint(ctx context.Context, rt *runtime, refresh bool) string {
 	lines, err := runnerstate.LoadAgents(runnerStateDir(rt))
 	if err != nil || len(lines) == 0 {
@@ -260,15 +260,23 @@ func agentsHint(ctx context.Context, rt *runtime, refresh bool) string {
 	if !ok {
 		return ""
 	}
-	n := len(diffAgents(cache.offer(), registeredAgents(lines)).unregistered)
-	if n == 0 {
-		return ""
+	d := diffAgents(cache.offer(), registeredAgents(lines))
+	var hint []string
+	if n := len(d.unregistered); n > 0 {
+		noun := "models"
+		if n == 1 {
+			noun = "model"
+		}
+		hint = append(hint, fmt.Sprintf("%d %s your CLIs offer but no agent registers: brigada agents", n, noun))
 	}
-	noun := "models"
-	if n == 1 {
-		noun = "model"
+	if n := len(d.superseded); n > 0 {
+		runs := fmt.Sprintf("%d agents run", n)
+		if n == 1 {
+			runs = "1 agent runs"
+		}
+		hint = append(hint, runs+" a model a newer version replaces: brigada agents update")
 	}
-	return fmt.Sprintf("%d %s your CLIs offer but no agent registers: brigada agents", n, noun)
+	return strings.Join(hint, "\n")
 }
 
 // refreshAgentsCacheIfStale lists the CLIs again when agents are saved and
