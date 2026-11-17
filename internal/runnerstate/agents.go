@@ -1,6 +1,7 @@
 package runnerstate
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -30,6 +31,25 @@ func AppendAgent(dir, line string) error {
 		return err
 	}
 	return SaveAgents(dir, append(lines, line))
+}
+
+// ReplaceAgent swaps the first line equal to old for new, keeping every
+// other line and the order byte-for-byte (comments and lines the runner
+// does not parse included). It errors, having written nothing, when old
+// is not present.
+func ReplaceAgent(dir, old, new string) error {
+	lines, err := LoadAgents(dir)
+	if err != nil {
+		return err
+	}
+	for i, line := range lines {
+		if line == old {
+			out := append(append([]string{}, lines[:i]...), new)
+			out = append(out, lines[i+1:]...)
+			return SaveAgents(dir, out)
+		}
+	}
+	return fmt.Errorf("no agent line %q in %s", old, filepath.Join(dir, "agents"))
 }
 
 // SaveAgents atomically replaces the private, durable runner choices. The

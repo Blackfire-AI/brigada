@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -16,6 +18,10 @@ import (
 	"github.com/Blackfire-AI/brigada/internal/adapter"
 	"github.com/Blackfire-AI/brigada/internal/runnerstate"
 )
+
+// agentsStdin carries `agents update`'s interactive answers; tests replace
+// it, the way removeStdin works for remove.
+var agentsStdin io.Reader = os.Stdin
 
 // agentsListed are the harnesses whose CLI lists its models cheaply, with
 // the sources init uses. Kimi reads a config file and dsh has a static list:
@@ -280,10 +286,16 @@ func refreshAgentsCacheIfStale(ctx context.Context, rt *runtime) {
 	writeAgentsCache(rt, listOfferedAgents(ctx).cache(time.Now()))
 }
 
-// runAgents is `brigada agents` and `brigada agents add`.
+// runAgents is `brigada agents`, `brigada agents add` and `brigada agents
+// update`.
 func runAgents(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	if len(args) > 0 && args[0] == "add" {
-		return runAgentsAdd(ctx, args[1:], stdout, stderr)
+	if len(args) > 0 {
+		switch args[0] {
+		case "add":
+			return runAgentsAdd(ctx, args[1:], stdout, stderr)
+		case "update":
+			return runAgentsUpdate(ctx, args[1:], stdout, stderr)
+		}
 	}
 	return runAgentsList(ctx, args, stdout, stderr)
 }
@@ -475,6 +487,15 @@ func runAgentsAdd(ctx context.Context, args []string, stdout, stderr io.Writer) 
 	// jobs, so no running job is cut — unless --now asked for exactly
 	// that. Without one there is nothing to restart; the line serves
 	// from the next start.
+	return restartRunnerForAgents(ctx, rt, dir, *now, stdout, stderr)
+}
+
+// restartRunnerForAgents is the shared tail of `agents add` and
+// `agents update`: a running runner is handed a restart request it honours
+// between jobs, so no running job is cut — unless now asked for exactly
+// that. Without one there is nothing to restart; the lines serve from the
+// next start.
+func restartRunnerForAgents(ctx context.Context, rt *runtime, dir string, now bool, stdout, stderr io.Writer) int {
 	if _, running, err := runnerstate.Running(dir); err != nil {
 		return fail(stderr, err)
 	} else if !running {
@@ -503,10 +524,10 @@ func runAgentsAdd(ctx context.Context, args []string, stdout, stderr io.Writer) 
 		return fail(stderr, err)
 	}
 	mode := runnerstate.RestartDrain
-	if *now {
+	if now {
 		mode = runnerstate.RestartNow
 	}
-	if !*now {
+	if !now {
 		fmt.Fprintln(stdout, "runner restarting: it finishes its running jobs first; --now cuts them")
 	}
 	result, err := startDetachedRunner(ctx, rt, specs, parallel, mode)
@@ -519,4 +540,160 @@ func runAgentsAdd(ctx context.Context, args []string, stdout, stderr io.Writer) 
 		fmt.Fprintf(stdout, "runner restarted (pid %d)\n", result.Record.PID)
 	}
 	return 0
+}
+
+// runAgentsUpdate rewrites, in one command, every agents-file line whose
+// model a newer version of the same line replaces. Each rewrite changes
+// only the model; the line's classes, account, effort and the rest are
+// kept, and the file's other lines — comments and lines the runner does
+// not parse included — stay byte-for-byte. The rewritten file is handed
+// to the runner the way `agents add` does.
+func runAgentsUpdate(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	fs := newFlagSet("agents update",
+		"brigada agents update [--yes] [--dry-run] [--now]",
+		"Rewrite every agent line whose model a newer version of the same line replaces, keeping each line's other fields, and restart the runner to serve the rewritten lines.")
+	stderr = commandStderr(stderr, fs.Name())
+	common := addCommon(fs)
+	yes := fs.Bool("yes", false, "apply every rewrite without prompting")
+	dryRun := fs.Bool("dry-run", false, "print the rewrites and change nothing")
+	now := fs.Bool("now", false, "restart the runner at once, cutting its running jobs; without it the restart waits out running jobs")
+	if code, stop := common.parse(stdout, stderr, args); stop {
+		return code
+	}
+	if extra := fs.Args(); len(extra) > 0 {
+		return usagef(stderr, "agents update takes no arguments, got %q", extra)
+	}
+	rt, code := resolveRuntime(common, stderr)
+	if code != 0 {
+		return code
+	}
+	dir := runnerStateDir(rt)
+	lines, err := runnerstate.LoadAgents(dir)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	if len(lines) == 0 {
+		return fail(stderr, fmt.Errorf("no saved agents; run brigada init in a repository first"))
+	}
+	offer := listOfferedAgents(ctx)
+	writeAgentsCache(rt, offer.cache(time.Now()))
+	d := diffAgents(offer, registeredAgents(lines))
+	if len(d.superseded) == 0 {
+		fmt.Fprintln(stdout, "No agent runs a model a newer version of the same line replaces.")
+		return 0
+	}
+	// A candidate is one superseded pair's raw line and its rewrite.
+	// Every candidate is validated before anything is asked or written,
+	// so a refusal leaves the file untouched.
+	type candidate struct {
+		oldPair, newPair string
+		oldLine, newLine string
+		note             string
+	}
+	var candidates []candidate
+	for _, oldPair := range slices.Sorted(maps.Keys(d.superseded)) {
+		newPair := d.superseded[oldPair]
+		_, newModel, _ := strings.Cut(newPair, "/")
+		var oldLine string
+		var spec agentSpec
+		found := false
+		for _, line := range lines {
+			var one agentSpecs
+			if one.Set(line) != nil {
+				continue
+			}
+			if agentPair(one.specs[0]) == oldPair {
+				oldLine, spec, found = line, one.specs[0], true
+				break
+			}
+		}
+		if !found {
+			continue
+		}
+		spec.model = newModel
+		note := ""
+		if spec.effort != "" {
+			if err := adapter.ValidateEffort(spec.harness, spec.effort); err != nil {
+				spec.effort = ""
+				note = fmt.Sprintf("the saved effort is not one %s accepts for the new model; the rewritten line keeps no effort= and the CLI's own default applies", spec.harness)
+			}
+		}
+		newLine := spec.String()
+		// Read the rewritten line back the way the runner reads the file
+		// at startup, so what is validated is what will be started.
+		var parsed agentSpecs
+		if err := parsed.Set(newLine); err != nil {
+			return usagef(stderr, "%v", err)
+		}
+		if _, adverts, err := resolveRunnerAgents(rt, parsed.specs, ""); err != nil {
+			return usagef(stderr, "%v", err)
+		} else if len(adverts) != 1 {
+			return fail(stderr, fmt.Errorf("agent %s did not resolve to one agent", newPair))
+		}
+		// The rewrite must not register a pair another staying line
+		// already registers: the runner would refuse the file at startup.
+		for _, have := range registeredAgents(lines) {
+			if agentPair(have) == newPair {
+				return fail(stderr, fmt.Errorf("agent %s is already registered; edit its line in %s to change it", newPair, initHomePath(filepath.Join(dir, "agents"))))
+			}
+		}
+		candidates = append(candidates, candidate{oldPair: oldPair, newPair: newPair, oldLine: oldLine, newLine: newLine, note: note})
+	}
+	if len(candidates) == 0 {
+		fmt.Fprintln(stdout, "No agent runs a model a newer version of the same line replaces.")
+		return 0
+	}
+	printCandidate := func(c candidate) {
+		fmt.Fprintf(stdout, "  %s → %s\n", c.oldPair, c.newPair)
+		fmt.Fprintf(stdout, "    %s\n", c.newLine)
+		if c.note != "" {
+			fmt.Fprintf(stdout, "    note: %s\n", c.note)
+		}
+	}
+	if *dryRun {
+		for _, c := range candidates {
+			printCandidate(c)
+		}
+		fmt.Fprintln(stdout, "--dry-run: nothing rewritten.")
+		return 0
+	}
+	acceptAll := *yes
+	var accepted []candidate
+	input := bufio.NewReader(agentsStdin)
+	for _, c := range candidates {
+		printCandidate(c)
+		answer := "y"
+		if !acceptAll {
+			fmt.Fprint(stdout, "Update this agent? [y/N/a]: ")
+			line, err := input.ReadString('\n')
+			if err != nil && !errors.Is(err, io.EOF) {
+				return fail(stderr, err)
+			}
+			fmt.Fprintln(stdout)
+			// Enter and EOF count as n, the remove command's shape.
+			answer = strings.ToLower(strings.TrimSpace(line))
+		}
+		switch answer {
+		case "y", "yes":
+			accepted = append(accepted, c)
+		case "a":
+			acceptAll = true
+			accepted = append(accepted, c)
+		}
+	}
+	if len(accepted) == 0 {
+		fmt.Fprintln(stdout, "No agents updated.")
+		return 0
+	}
+	for _, c := range accepted {
+		if err := runnerstate.ReplaceAgent(dir, c.oldLine, c.newLine); err != nil {
+			return fail(stderr, err)
+		}
+		fmt.Fprintf(stdout, "updated %s → %s\n", c.oldPair, c.newPair)
+		if c.note != "" {
+			fmt.Fprintf(stdout, "  note: %s\n", c.note)
+		}
+	}
+	fmt.Fprintf(stdout, "rewritten in %s\n", initHomePath(filepath.Join(dir, "agents")))
+	return restartRunnerForAgents(ctx, rt, dir, *now, stdout, stderr)
 }

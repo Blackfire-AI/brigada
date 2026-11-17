@@ -141,7 +141,7 @@ func TestAgentsAllRegistered(t *testing.T) {
 func TestAgentsNeedsSavedAgents(t *testing.T) {
 	fakeInitPATH(t, "opencode")
 	state := testsupport.ShortStateDir(t)
-	for _, args := range [][]string{{"agents", "--state-dir", state}, {"agents", "add", "--state-dir", state, "claude/opus"}} {
+	for _, args := range [][]string{{"agents", "--state-dir", state}, {"agents", "add", "--state-dir", state, "claude/opus"}, {"agents", "update", "--state-dir", state}} {
 		if code, _, errOut := agentsDo(t, args...); code != 1 || !strings.Contains(errOut, "no saved agents") {
 			t.Errorf("%q: code=%d stderr=%q", args, code, errOut)
 		}
@@ -401,5 +401,166 @@ func TestDiffAgentsReportsSupersededRegistered(t *testing.T) {
 	}
 	if want := []string{"claude/claude-fable-5-2[1m]", "codex/gpt-6.1-sol"}; !reflect.DeepEqual(got.unregistered, want) {
 		t.Errorf("unregistered = %q, want %q", got.unregistered, want)
+	}
+}
+
+// fakeAgentsStdin feeds `agents update`'s interactive answers, one line per
+// prompt; an empty string stands for an immediate EOF.
+func fakeAgentsStdin(t *testing.T, answers string) {
+	t.Helper()
+	old := agentsStdin
+	agentsStdin = strings.NewReader(answers)
+	t.Cleanup(func() { agentsStdin = old })
+}
+
+func TestAgentsUpdateYes(t *testing.T) {
+	fakeOpenCodeModels(t, "fixture/gpt-6.1-sol", "fixture/gpt-6-sol", "fixture/glm-5.3")
+	state := testsupport.ShortStateDir(t)
+	saved := []string{
+		"# mine",
+		"harness=opencode,model=fixture/gpt-6-sol,classes=review+answer,account=work,effort=high",
+		"harness=claude,model=sonnet",
+	}
+	saveAgentLines(t, state, saved...)
+	code, out, errOut := agentsDo(t, "agents", "update", "--state-dir", state, "--yes")
+	if code != 0 || errOut != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+	want := []string{
+		"# mine",
+		"harness=opencode,model=fixture/gpt-6.1-sol,classes=review+answer,account=work,effort=high",
+		"harness=claude,model=sonnet",
+	}
+	if got := loadAgentLines(t, state); !reflect.DeepEqual(got, want) {
+		t.Fatalf("lines = %q, want %q", got, want)
+	}
+	for _, text := range []string{
+		"opencode/fixture/gpt-6-sol → opencode/fixture/gpt-6.1-sol",
+		"harness=opencode,model=fixture/gpt-6.1-sol,classes=review+answer,account=work,effort=high",
+		"rewritten in",
+		"No runner running; brigada start serves it.",
+	} {
+		if !strings.Contains(out, text) {
+			t.Errorf("output lacks %q:\n%s", text, out)
+		}
+	}
+}
+
+func TestAgentsUpdateNoAndEOF(t *testing.T) {
+	fakeOpenCodeModels(t, "fixture/gpt-6.1-sol", "fixture/gpt-6-sol")
+	state := testsupport.ShortStateDir(t)
+	saved := []string{"harness=opencode,model=fixture/gpt-6-sol", "harness=opencode,model=fixture/gpt-6-luna"}
+	saveAgentLines(t, state, saved...)
+	// "n" skips; an empty reader is an immediate EOF, which counts as n too.
+	fakeAgentsStdin(t, "n\n")
+	if code, out, errOut := agentsDo(t, "agents", "update", "--state-dir", state); code != 0 || errOut != "" || !strings.Contains(out, "No agents updated.") {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+	fakeAgentsStdin(t, "")
+	if code, out, errOut := agentsDo(t, "agents", "update", "--state-dir", state); code != 0 || errOut != "" || !strings.Contains(out, "No agents updated.") {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+	if got := loadAgentLines(t, state); !reflect.DeepEqual(got, saved) {
+		t.Fatalf("agents file changed: %q", got)
+	}
+}
+
+func TestAgentsUpdateAllAcceptsTheList(t *testing.T) {
+	fakeOpenCodeModels(t, "fixture/gpt-6.1-sol", "fixture/gpt-6-sol", "fixture/gpt-6.1-luna", "fixture/gpt-6-luna")
+	state := testsupport.ShortStateDir(t)
+	saveAgentLines(t, state, "harness=opencode,model=fixture/gpt-6-sol", "harness=opencode,model=fixture/gpt-6-luna")
+	fakeAgentsStdin(t, "a\n")
+	code, out, errOut := agentsDo(t, "agents", "update", "--state-dir", state)
+	if code != 0 || errOut != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+	want := []string{"harness=opencode,model=fixture/gpt-6.1-sol,classes=implement+review+answer", "harness=opencode,model=fixture/gpt-6.1-luna,classes=implement+review+answer"}
+	if got := loadAgentLines(t, state); !reflect.DeepEqual(got, want) {
+		t.Fatalf("lines = %q, want %q", got, want)
+	}
+	// "a" accepts the first candidate and every remaining one: the second
+	// candidate is never asked about.
+	if n := strings.Count(out, "Update this agent?"); n != 1 {
+		t.Errorf("%d prompts, want 1:\n%s", n, out)
+	}
+}
+
+func TestAgentsUpdateDryRun(t *testing.T) {
+	fakeOpenCodeModels(t, "fixture/gpt-6.1-sol", "fixture/gpt-6-sol")
+	state := testsupport.ShortStateDir(t)
+	saved := []string{"# mine", "harness=opencode,model=fixture/gpt-6-sol"}
+	saveAgentLines(t, state, saved...)
+	code, out, errOut := agentsDo(t, "agents", "update", "--state-dir", state, "--dry-run")
+	if code != 0 || errOut != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+	if got := loadAgentLines(t, state); !reflect.DeepEqual(got, saved) {
+		t.Fatalf("agents file changed: %q", got)
+	}
+	for _, text := range []string{"opencode/fixture/gpt-6-sol → opencode/fixture/gpt-6.1-sol", "--dry-run: nothing rewritten."} {
+		if !strings.Contains(out, text) {
+			t.Errorf("output lacks %q:\n%s", text, out)
+		}
+	}
+	if strings.Contains(out, "No runner running") || strings.Contains(out, "Update this agent?") {
+		t.Errorf("dry-run restarted or prompted:\n%s", out)
+	}
+}
+
+func TestAgentsUpdateNothingSuperseded(t *testing.T) {
+	fakeOpenCodeModels(t, "fixture/gpt-6.1-sol")
+	state := testsupport.ShortStateDir(t)
+	saved := []string{"harness=opencode,model=fixture/gpt-6.1-sol"}
+	saveAgentLines(t, state, saved...)
+	code, out, errOut := agentsDo(t, "agents", "update", "--state-dir", state)
+	if code != 0 || errOut != "" || !strings.Contains(out, "No agent runs a model a newer version of the same line replaces.") {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+	if got := loadAgentLines(t, state); !reflect.DeepEqual(got, saved) {
+		t.Fatalf("agents file changed: %q", got)
+	}
+}
+
+func TestAgentsUpdateRefusesAlreadyRegistered(t *testing.T) {
+	fakeOpenCodeModels(t, "fixture/gpt-6.1-sol", "fixture/gpt-6-sol")
+	state := testsupport.ShortStateDir(t)
+	saved := []string{"harness=opencode,model=fixture/gpt-6-sol", "harness=opencode,model=fixture/gpt-6.1-sol"}
+	saveAgentLines(t, state, saved...)
+	code, out, errOut := agentsDo(t, "agents", "update", "--state-dir", state, "--yes")
+	if code != 1 || !strings.Contains(errOut, "agent opencode/fixture/gpt-6.1-sol is already registered") {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+	if got := loadAgentLines(t, state); !reflect.DeepEqual(got, saved) {
+		t.Fatalf("agents file changed: %q", got)
+	}
+}
+
+func TestAgentsUpdateDropsRefusedEffort(t *testing.T) {
+	fakeOpenCodeModels(t, "fixture/gpt-6.1-sol", "fixture/gpt-6-sol")
+	state := testsupport.ShortStateDir(t)
+	saveAgentLines(t, state, "harness=opencode,model=fixture/gpt-6-sol,effort=BOGUS")
+	code, out, errOut := agentsDo(t, "agents", "update", "--state-dir", state, "--yes")
+	if code != 0 || errOut != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+	want := []string{"harness=opencode,model=fixture/gpt-6.1-sol,classes=implement+review+answer"}
+	if got := loadAgentLines(t, state); !reflect.DeepEqual(got, want) {
+		t.Fatalf("lines = %q, want %q", got, want)
+	}
+	if !strings.Contains(out, "note:") || !strings.Contains(out, "effort") {
+		t.Errorf("output lacks the effort fallback note:\n%s", out)
+	}
+}
+
+func TestAgentsUpdateRejectsArguments(t *testing.T) {
+	fakeOpenCodeModels(t, "fixture/gpt-6.1-sol", "fixture/gpt-6-sol")
+	state := testsupport.ShortStateDir(t)
+	saved := []string{"harness=opencode,model=fixture/gpt-6-sol"}
+	saveAgentLines(t, state, saved...)
+	if code, _, errOut := agentsDo(t, "agents", "update", "--state-dir", state, "claude/opus"); code != 2 || !strings.Contains(errOut, "agents update takes no arguments") {
+		t.Errorf("code=%d stderr=%q", code, errOut)
+	}
+	if got := loadAgentLines(t, state); !reflect.DeepEqual(got, saved) {
+		t.Fatalf("agents file changed: %q", got)
 	}
 }
