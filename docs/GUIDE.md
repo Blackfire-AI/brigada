@@ -1228,7 +1228,7 @@ The header shows the uptime as `45s` under a minute, `33m` under an hour and `11
 When the engine answers with no plans at all, listed or hidden, the plans box reads `no plans yet. Give the foreman something to do:`, the command `$ brigada ask "fix #12"` and `Plans and tasks appear here. What needs you shows above.`, and the events box reads `no events yet`; when the status has not been read it keeps `none`.
 Without UTF-8 in the locale every glyph the view draws has an ASCII fallback — `#` and `.` for the plan bars, `=` for the slots meter, `+`, `-` and `|` for the boxes, the plain word `brigada` in place of the mark, `>` for the running pointer, `->` for a retry, a cooling agent and the action tails, `x` for a failure, `ok` for a ready agent, `|` between parts, `<=` in the global cap line and `^` on the landing line — so the plain style reads the same text; task titles, reasons and report text stay as they are.
 
-The same hint line as `status`, dim, sits under the header when your CLIs offer unregistered models, in the piped snapshot too; `top` only reads the cached listing on each redraw ([section 8](#models-added-later)).
+The same hint as `status`, dim, one row per line, sits under the header when your CLIs offer unregistered models or a newer model version replaces a registered one (`brigada agents update` moves them), in the piped snapshot too; `top` only reads the cached listing on each redraw ([section 8](#models-added-later)).
 
 The foreman can look at the capacity it has when it plans (per agent: the tier, the configured effort or `default`, the cap, the running jobs, the quota state and the cost weight), but the engine enforces the caps whatever the foreman believes. `cost.<harness>/<model>` is a relative weight, default 1, that the foreman sees when it decides which tasks can wait for a cheaper agent. It also steers dispatch: agents of a tier rank by `weight / p` ([section 8](#tiers)), so a dearer agent is picked less often unless its record is clearly better.
 
@@ -1500,7 +1500,7 @@ A command's flags go after its name and before its positional arguments (`diff`,
 ### Watching
 
 - `brigada config`: show agents, runner state, foreman, project settings with provenance, and machine config-file values and defaults, with their locations and commands to change them. See [section 1](#changing-your-setup-later).
-- `brigada status [--line] [--all]`: the engine, jobs, plans and the needs-you queue, plus a hint when your CLIs offer unregistered models. See [section 4](#4-while-work-runs).
+- `brigada status [--line] [--all]`: the engine, jobs, plans and the needs-you queue, plus a hint when your CLIs offer unregistered models or a newer model version replaces a registered one. See [section 4](#4-while-work-runs).
 - `brigada agents`: the models your CLIs offer that no agent registers, with their tier and account, registered models a CLI no longer lists, and registered models a newer version replaces; read-only. See [section 8](#models-added-later).
 - `brigada agents add <harness>/<model> [--classes CLASSES] [--effort LEVEL] [--now]`: register one model by appending its line to the agents file; restart a running runner to serve it, waiting out its running jobs, or cutting them with `--now`. See [section 8](#models-added-later).
 - `brigada history [--task N] [--job N] [--limit N] [--all] [--raw]`: the timeline in plain words; bare, a table of the last 50 events, or every event with `--all`; `--raw` prints the internal form. See [section 4](#history-diffs-and-logs).
