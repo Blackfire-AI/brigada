@@ -430,7 +430,7 @@ Out of scope: a plan whose tasks span repositories (a plan belongs to one projec
 - how many messages wait for the foreman;
 - each role’s instruction state, size and digest, its generation version and edited state when known, and imported skills with descriptions, digests and task usage counts;
 - the **needs you** queue;
-- one hint line when your CLIs offer models no agent registers ([section 8](#models-added-later)).
+- a hint when your CLIs offer models no agent registers, and when a newer model version replaces a registered one (`brigada agents update` moves them; [section 8](#models-added-later)).
 
 The foreman’s `status` tool with `instructions=true` also returns each effective role text in neutralized, role-specific data delimiters. The changed-since-import comparison is unknown until a client supplies a current file digest: on the status API a scoped request can pass `digest_foreman`, `digest_plan_review`, `digest_worker` or `digest_reviewer`. A role without a known generated baseline reports its edited state as unknown.
 

@@ -339,6 +339,40 @@ func TestAgentsHintReadsTheCache(t *testing.T) {
 	}
 }
 
+// The hint also counts registered models a newer version replaces, pointing
+// at brigada agents update; the cache is written, so no CLI ever runs.
+func TestAgentsHintCountsSuperseded(t *testing.T) {
+	state := testsupport.ShortStateDir(t)
+	rt := &runtime{stateDir: state, paths: lifecycle.PathsOf(state)}
+	ctx := context.Background()
+
+	// Only superseded pairs: the new sentence, singular, on its own.
+	saveAgentLines(t, state, "harness=claude,model=claude-fable-5-1[1m]", "harness=claude,model=claude-fable-5-2[1m]")
+	writeAgentsCache(rt, agentsOffer{models: []string{"claude/claude-fable-5-2[1m]"}}.cache(time.Now()))
+	const wantSuperseded = "1 agent runs a model a newer version replaces: brigada agents update"
+	if hint := agentsHint(ctx, rt, false); hint != wantSuperseded {
+		t.Fatalf("hint = %q, want %q", hint, wantSuperseded)
+	}
+
+	// Both counts: unregistered first, then superseded.
+	saveAgentLines(t, state,
+		"harness=claude,model=claude-fable-5-1[1m]", "harness=claude,model=claude-fable-5-2[1m]",
+		"harness=codex,model=gpt-5", "harness=codex,model=gpt-5.5")
+	writeAgentsCache(rt, agentsOffer{models: []string{"claude/claude-fable-5-2[1m]", "claude/opus", "codex/gpt-5.5"}}.cache(time.Now()))
+	const wantBoth = "1 model your CLIs offer but no agent registers: brigada agents\n" + "2 agents run a model a newer version replaces: brigada agents update"
+	if hint := agentsHint(ctx, rt, false); hint != wantBoth {
+		t.Fatalf("hint = %q, want %q", hint, wantBoth)
+	}
+
+	// Unregistered only: today's string, unchanged.
+	saveAgentLines(t, state, "harness=claude,model=sonnet")
+	writeAgentsCache(rt, agentsOffer{models: []string{"claude/sonnet", "claude/opus"}}.cache(time.Now()))
+	const want = "1 model your CLIs offer but no agent registers: brigada agents"
+	if hint := agentsHint(ctx, rt, false); hint != want {
+		t.Fatalf("hint = %q, want %q", hint, want)
+	}
+}
+
 func TestAgentsListRefreshesTheCache(t *testing.T) {
 	fakeInitPATH(t, "opencode")
 	state := testsupport.ShortStateDir(t)
@@ -381,6 +415,22 @@ func TestTopHeaderShowsTheAgentsHint(t *testing.T) {
 	}
 	if rows := topHeader(topModel{hint: hint}, time.Now(), style, 80); len(rows) != 1 {
 		t.Fatalf("header = %q, want the hint under the meters row, not in it", rows)
+	}
+}
+
+// The hint can carry two lines; top renders one Dim row per line, each cut
+// to the width.
+func TestTopHintRendersEachHintLine(t *testing.T) {
+	style := term.New(logo.Caps{})
+	first := "1 model your CLIs offer but no agent registers: brigada agents"
+	second := "1 agent runs a model a newer version replaces: brigada agents update"
+	lines := topHint(topModel{hint: first + "\n" + second}, style, 80)
+	if len(lines) != 2 || lines[0] != first || lines[1] != second {
+		t.Fatalf("hint = %q, want [%q %q]", lines, first, second)
+	}
+	if lines := topHint(topModel{hint: first + "\n" + second}, style, 40); len(lines) != 2 ||
+		lines[0] != cutLine(first, 40) || lines[1] != cutLine(second, 40) {
+		t.Fatalf("narrow hint = %q, want each line cut to 40", lines)
 	}
 }
 
