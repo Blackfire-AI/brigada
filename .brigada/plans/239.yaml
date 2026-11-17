@@ -29,7 +29,7 @@ tasks:
     base: ""
     effort: medium
     skills: ["cli-flag"]
-    state: ready
+    state: running
     branch: "brigada/task-943"
     rounds: 0
   - id: 944
