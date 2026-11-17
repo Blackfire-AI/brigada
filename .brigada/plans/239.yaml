@@ -29,8 +29,8 @@ tasks:
     base: ""
     effort: medium
     skills: ["cli-flag"]
-    state: running
-    branch: "brigada/task-943"
+    state: reviewing
+    branch: "brigada/task-943-r1"
     rounds: 0
   - id: 944
     name: "agents-update-hint"
