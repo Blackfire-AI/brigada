@@ -60,7 +60,7 @@ One step sets a repo up. The GUIDE's §1 describes the questions: the foreman mo
 
 **Tiers, effort and tasks at once.** With tiers (§6.1, §8) the user chooses which models may work: the foreman picks a tier and an effort per task, and the engine picks the agent. The questions are:
 
-1. **The foreman.** After the sign-in probes, a numbered menu of every model the signed-in claude, codex, opencode and qwen-code CLIs list (Claude's aliases, Codex's `debug models` catalog, OpenCode's `provider/model` list, Qwen Code's static pair of subscription models, models of unknown family left out), then its effort: the effort menu, asked once, for the foreman only. Enter picks the first usable resume-capable model, claude before codex before opencode before qwen-code.
+1. **The foreman.** After the sign-in probes, a numbered menu of every model the signed-in claude, codex, opencode and qwen-code CLIs list (Claude's aliases, Codex's `debug models` catalog, OpenCode's `provider/model` list, Qwen Code's `--list-models` rows, models of unknown family left out), then its effort: the effort menu, asked once, for the foreman only. Enter picks the first usable resume-capable model, claude before codex before opencode before qwen-code.
 
    A foreman model whose harness is not used for tasks is registered as an agent with no classes, so it serves foreman turns and nothing else. The runner accepts `classes=none`, and the engine exempts foreman turns from the class filter: the harness-and-model pair is their constraint, so this agent takes no task job.
 
@@ -82,7 +82,7 @@ The plan block gains a tier column in the agents table, the foreman's effort, an
 
 Nothing re-reads the CLIs' model lists on its own, so a model a CLI offers later stays unregistered until the user says so.
 
-`brigada agents` (read-only) runs the cheap listings init uses for claude, codex and opencode and reports the models offered but not registered, each with its tier (§8, after any `tier.<harness>/<model>` override) and the account it would share, and the registered models a CLI no longer lists (never claude's, whose alias list is not whole, nor from a listing that left out a model of unknown family).
+`brigada agents` (read-only) runs the cheap listings init uses for every harness — the claude, codex and opencode CLIs, kimi's config tables, `qwen --list-models`, and dsh's static list — and reports the models offered but not registered, each with its tier (§8, after any `tier.<harness>/<model>` override) and the account it would share, and the registered models a CLI no longer lists (never claude's, whose alias list is not whole, never kimi's or dsh's, whose lists are not the CLI's catalog, never qwen-code's static fallback, and never from a listing that left out a model of unknown family).
 
 A model is superseded when a newer version of its line is offered by the same CLI or registered: its line is the name with each version taken out — a version segment such as `5`, `6.1` or `v4`, or one glued to a word, such as `qwen3.8` — keeping the provider prefix and the context suffix; versions compare number by number, a release-date segment counts for neither, and a name with no version, such as an alias, is never superseded. `brigada agents` leaves superseded models out of the unregistered list and reports each registered agent whose model is superseded, naming the newer model; nothing is removed from the agents file, and a superseded line moves to the newer model only when `brigada agents update` rewrites it on request.
 

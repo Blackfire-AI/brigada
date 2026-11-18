@@ -14,6 +14,7 @@ func TestModelFamily(t *testing.T) {
 		{"google/gemini-2.5-pro", "google"},
 		{"deepseek-chat", "deepseek"}, {"qwen-3", "alibaba"}, {"qwen3.8-max", "alibaba"},
 		{"qwen-subscription/qwen3.8-max", "alibaba"}, {"qwen-subscription/qwen3.8-flash", "alibaba"},
+		{"qwen4-max", "alibaba"}, {"qwen-subscription/qwen4-max", "alibaba"}, {"qwen4", "alibaba"},
 		{"llama-4", "meta"},
 		{"mistral-large", "mistral"}, {"codestral", "mistral"}, {"devstral-2", "mistral"},
 		{"glm-5.3", "zhipu"}, {"zai-coding-plan/glm-5.3", "zhipu"},
@@ -30,7 +31,7 @@ func TestModelFamily(t *testing.T) {
 			}
 		})
 	}
-	for _, model := range []string{"", "default", "custom/unknown", "gpt-5\nSECRET", "claudeevil", "sonnet other", "glmevil"} {
+	for _, model := range []string{"", "default", "custom/unknown", "gpt-5\nSECRET", "claudeevil", "sonnet other", "glmevil", "beam3-free"} {
 		if _, err := ModelFamily(model); err == nil {
 			t.Errorf("accepted unknown/invalid model %q", model)
 		}

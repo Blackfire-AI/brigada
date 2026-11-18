@@ -52,6 +52,74 @@ func fakeInitCodexCatalog(t *testing.T) {
 	writeInitCodexScript(t, "  debug  Diagnostic tools\n  login  Authentication", "  models  Render the raw model catalog as JSON", "      --bundled  Skip refresh", initCodexCatalogCommand, "exit 89")
 }
 
+const (
+	initQwenListModelsHelp = `printf '%s\n' '  --model <model>  Model for the current session' '  --list-models  List available models for the current user'`
+	initQwenListModels     = `printf '%s\n' 'MODEL' 'Qwen4-Max (qwen-subscription/qwen4-max)' 'Qwen3.8-Max (qwen-subscription/qwen3.8-max)' 'Qwen3.8-Flash (qwen-subscription/qwen3.8-flash)'`
+)
+
+// writeInitQwenScript replaces the generic qwen fake: help and listing are the
+// shell bodies of the --help and --list-models cases.
+func writeInitQwenScript(t *testing.T, help, listing string) {
+	t.Helper()
+	script := `#!/bin/sh
+printf 'qwen %s\n' "$*" >> "$INIT_CALLS"
+case "$*" in
+ --help) ` + help + ` ;;
+ --list-models) ` + listing + ` ;;
+ --version) echo 1.0.0-preview.2 ;;
+ *) exit 89 ;;
+esac
+`
+	if err := os.WriteFile(filepath.Join(os.Getenv("PATH"), "qwen"), []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestInitQwenModelSource(t *testing.T) {
+	// A live directory: earlier tests' state-directory chdirs can leave a
+	// deleted one, and the getcwd noise a shell prints from it would count as
+	// a row the parse cannot read.
+	t.Chdir(t.TempDir())
+	fakeInitPATH(t, "qwen")
+	writeInitQwenScript(t, initQwenListModelsHelp,
+		initQwenListModels+`; printf '%s\n' 'MODEL' 'Qwen3.8-Flash (qwen-subscription/qwen3.8-flash)' 'Outside (vendor/omni-x)' 'Bad Model (bad id!)'; printf '%s\n' 'warning never-print-me (unknown-alias)' >&2`)
+	got := initQwenModels(context.Background())
+	want := []initModelEntry{
+		{id: 1, name: "qwen-subscription/qwen4-max", value: "qwen-subscription/qwen4-max", note: "Qwen4-Max"},
+		{id: 2, name: "qwen-subscription/qwen3.8-max", value: "qwen-subscription/qwen3.8-max", note: "Qwen3.8-Max"},
+		{id: 3, name: "qwen-subscription/qwen3.8-flash", value: "qwen-subscription/qwen3.8-flash", note: "Qwen3.8-Flash"},
+	}
+	if !reflect.DeepEqual(got.entries, want) || !got.listed || got.unknownCount != 3 || !got.signIn.installed || got.signIn.signedIn {
+		t.Fatalf("source = %+v", got)
+	}
+	assertInitModelPrivacy(t, got)
+}
+
+func TestInitQwenModelFallbacks(t *testing.T) {
+	for name, tc := range map[string]struct {
+		fake, help, listing string
+	}{
+		"not installed":     {},
+		"flag undocumented": {"qwen", `printf '%s\n' '  --model <model>  Model for the current session'`, initQwenListModels},
+		"listing fails":     {"qwen", initQwenListModelsHelp, "exit 1"},
+		"no usable rows":    {"qwen", initQwenListModelsHelp, `printf '%s\n' 'MODEL' 'Bad Model (bad id!)'`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if tc.fake == "" {
+				fakeInitPATH(t)
+			} else {
+				fakeInitPATH(t, tc.fake)
+				writeInitQwenScript(t, tc.help, tc.listing)
+			}
+			got := initQwenModels(context.Background())
+			if !reflect.DeepEqual(got.entries, initQwenStaticModels()) || got.listed || got.unknownCount != 0 {
+				t.Fatalf("source = %+v", got)
+			}
+			assertInitModelPrivacy(t, got)
+		})
+	}
+}
+
 func writeInitModelFixture(t *testing.T, path, body string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {

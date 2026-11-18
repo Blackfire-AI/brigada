@@ -139,6 +139,17 @@ func ModelFamily(model string) (string, error) {
 			}
 		}
 	}
+	// A name can glue its version to a prefix with no separator, as qwen's
+	// names do (qwen4-max): the word in front of the glued version is the
+	// prefix then. A prefix that is itself a version (o3, k2) still needs its
+	// own row.
+	if m := gluedVersion.FindStringSubmatch(strings.SplitN(name, "-", 2)[0]); m != nil {
+		for _, group := range modelFamilyPrefixes {
+			if slices.Contains(group.prefixes, m[1]) {
+				return group.family, nil
+			}
+		}
+	}
 	return "", fmt.Errorf("cannot identify the family of model %q: brigada recognises model names starting with %s", model, strings.Join(prefixes, ", "))
 }
 

@@ -22,18 +22,19 @@ import (
 // agentsStdin is where agents update reads its answers; tests inject them.
 var agentsStdin io.Reader = os.Stdin
 
-// agentsListed are the harnesses whose CLI lists its models cheaply, with
-// the sources init uses. Kimi reads a config file and dsh has a static list:
-// neither can offer a model init did not already show.
-var agentsListed = []string{"claude", "codex", "opencode"}
+// agentsListed are the harnesses whose models the listing sources init uses
+// cover — all of init's, in its order: claude, codex and opencode list through
+// their CLIs, kimi through its config tables, qwen-code through
+// `qwen --list-models`, and dsh through a static list.
+var agentsListed = initHarnesses
 
 // agentsCacheTTL is how long status and top trust the cached listing before
-// status runs the CLIs again.
+// status runs the harnesses again.
 const agentsCacheTTL = 12 * time.Hour
 
 const agentsCacheName = "models-offered.json"
 
-// agentsOffer is what the CLIs list: harness/model pairs in listing order.
+// agentsOffer is what the harnesses list: harness/model pairs in listing order.
 type agentsOffer struct {
 	models []string
 	// defaults maps a harness to the model its own default resolves to, so a
@@ -131,8 +132,14 @@ func listOfferedAgents(ctx context.Context) agentsOffer {
 			source = initClaudeModels(ctx)
 		case "codex":
 			source = initCodexModels(ctx)
+		case "kimi":
+			source = initKimiModels(ctx)
 		case "opencode":
 			source = initOpenCodeModels(ctx)
+		case "dsh":
+			source = initDshModels(ctx)
+		case "qwen-code":
+			source = initQwenModels(ctx)
 		}
 		if !source.signIn.installed {
 			continue
@@ -148,12 +155,16 @@ func listOfferedAgents(ctx context.Context) agentsOffer {
 			}
 		}
 		// Models of unknown family are left out of the entries, so a list
-		// that skipped any cannot say a registered model is gone.
+		// that skipped any cannot say a registered model is gone. Kimi's
+		// config tables and dsh's static list are not the CLI's whole catalog,
+		// so neither says a model is gone either.
 		switch harness {
 		case "codex":
 			offer.complete[harness] = len(source.entries) > 1 && source.unknownCount == 0
 		case "opencode":
 			offer.complete[harness] = len(source.entries) > 0 && source.unknownCount == 0
+		case "qwen-code":
+			offer.complete[harness] = source.listed && len(source.entries) > 0 && source.unknownCount == 0
 		}
 	}
 	return offer
@@ -243,7 +254,7 @@ func supersededPairs(offered []string, registered []agentSpec) map[string]string
 	return out
 }
 
-// agentsHint is the one to two lines status and top show when the CLIs offer
+// agentsHint is the one to two lines status and top show when the harnesses offer
 // models no agent registers or when a newer model version replaces registered
 // ones, or "" when there is none to say. It never runs a CLI on its own: with
 // refresh it lists again when the cache is missing or older than the TTL, and
@@ -267,7 +278,7 @@ func agentsHint(ctx context.Context, rt *runtime, refresh bool) string {
 		if n == 1 {
 			noun = "model"
 		}
-		hint = append(hint, fmt.Sprintf("%d %s your CLIs offer but no agent registers: brigada agents", n, noun))
+		hint = append(hint, fmt.Sprintf("%d %s your harnesses offer but no agent registers: brigada agents", n, noun))
 	}
 	if n := len(d.superseded); n > 0 {
 		runs := fmt.Sprintf("%d agents run", n)
@@ -279,7 +290,7 @@ func agentsHint(ctx context.Context, rt *runtime, refresh bool) string {
 	return strings.Join(hint, "\n")
 }
 
-// refreshAgentsCacheIfStale lists the CLIs again when agents are saved and
+// refreshAgentsCacheIfStale lists the harnesses again when agents are saved and
 // the cache is missing or older than the TTL; otherwise it does nothing.
 func refreshAgentsCacheIfStale(ctx context.Context, rt *runtime) {
 	if lines, err := runnerstate.LoadAgents(runnerStateDir(rt)); err != nil || len(lines) == 0 {
@@ -307,12 +318,12 @@ func runAgents(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	return runAgentsList(ctx, args, stdout, stderr)
 }
 
-// runAgentsList compares what the CLIs offer with the agents file and prints
+// runAgentsList compares what the harnesses offer with the agents file and prints
 // the difference; it changes nothing but the cached listing.
 func runAgentsList(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := newFlagSet("agents",
 		"brigada agents",
-		"Show the models your CLIs offer that no agent registers, and registered models a CLI no longer lists; read-only. brigada agents add <harness>/<model> registers one.")
+		"Show the models your harnesses offer that no agent registers, and registered models a CLI no longer lists; read-only. brigada agents add <harness>/<model> registers one.")
 	stderr = commandStderr(stderr, fs.Name())
 	common := addCommon(fs)
 	if code, stop := common.parse(stdout, stderr, args); stop {
@@ -341,14 +352,14 @@ func runAgentsList(ctx context.Context, args []string, stdout, stderr io.Writer)
 
 func printAgentsReport(w io.Writer, path string, offer agentsOffer, registered []agentSpec, d agentsDiff, tier func(harness, model string) string) {
 	if len(offer.models) == 0 {
-		fmt.Fprintln(w, "No model listing came back: none of the claude, codex or opencode CLIs listed models.")
+		fmt.Fprintln(w, "No model listing came back: no harness offered models.")
 	}
 	if len(d.unregistered) == 0 {
 		if len(offer.models) > 0 {
-			fmt.Fprintln(w, "Every model your CLIs offer is registered.")
+			fmt.Fprintln(w, "Every model your harnesses offer is registered.")
 		}
 	} else {
-		fmt.Fprintf(w, "Offered by your CLIs, not registered (%d):\n", len(d.unregistered))
+		fmt.Fprintf(w, "Offered by your harnesses, not registered (%d):\n", len(d.unregistered))
 		width := 0
 		for _, pair := range d.unregistered {
 			width = max(width, len(pair))
@@ -563,7 +574,7 @@ type agentsUpdateCandidate struct {
 func runAgentsUpdate(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := newFlagSet("agents update",
 		"brigada agents update [--yes] [--dry-run] [--now]",
-		"Move registered agents to the newer model of their line the CLIs list: rewrite each superseded line of the agents file in place, keeping every other line, and restart the runner to serve the new models.")
+		"Move registered agents to the newer model of their line the harnesses list: rewrite each superseded line of the agents file in place, keeping every other line, and restart the runner to serve the new models.")
 	stderr = commandStderr(stderr, fs.Name())
 	common := addCommon(fs)
 	yes := fs.Bool("yes", false, "apply every update without prompting")

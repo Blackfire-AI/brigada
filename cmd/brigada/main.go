@@ -102,14 +102,14 @@ Commands:
 	                plans and events (--interval, --project URL).
 	agent reset <harness>/<model>
 	                Clear a broken or cooling agent.
-	agents          Show the models your CLIs offer that no agent
+	agents          Show the models your harnesses offer that no agent
 	                registers, and registered models a CLI no longer
 	                lists; read-only.
 	agents add <harness>/<model>
 	                Register one such model as an agent (--classes,
 	                --effort); restart the runner to serve it.
 	agents update   Move registered agents to the newer model of their
-	                line the CLIs list (--yes, --dry-run, --now);
+	                line the harnesses list (--yes, --dry-run, --now);
 	                restart the runner to serve the new models.
 	plan approve <id>
 	                Approve a plan waiting at the plan gate, or release
