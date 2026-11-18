@@ -108,8 +108,12 @@ Commands:
 	agents add <harness>/<model>
 	                Register one such model as an agent (--classes,
 	                --effort); restart the runner to serve it.
+	agents remove <harness>/<model>
+	                Remove one agent: delete the lines that register it
+	                from the agents file; restart the runner to stop
+	                serving it (--now).
 	agents update   Move registered agents to the newer model of their
-	                line the harnesses list (--yes, --dry-run, --now);
+	                line the CLIs list (--yes, --dry-run, --now);
 	                restart the runner to serve the new models.
 	plan approve <id>
 	                Approve a plan waiting at the plan gate, or release

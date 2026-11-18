@@ -29,12 +29,12 @@ var agentsStdin io.Reader = os.Stdin
 var agentsListed = initHarnesses
 
 // agentsCacheTTL is how long status and top trust the cached listing before
-// status runs the harnesses again.
+// status runs the CLIs again.
 const agentsCacheTTL = 12 * time.Hour
 
 const agentsCacheName = "models-offered.json"
 
-// agentsOffer is what the harnesses list: harness/model pairs in listing order.
+// agentsOffer is what the CLIs list: harness/model pairs in listing order.
 type agentsOffer struct {
 	models []string
 	// defaults maps a harness to the model its own default resolves to, so a
@@ -254,7 +254,7 @@ func supersededPairs(offered []string, registered []agentSpec) map[string]string
 	return out
 }
 
-// agentsHint is the one to two lines status and top show when the harnesses offer
+// agentsHint is the one to two lines status and top show when the CLIs offer
 // models no agent registers or when a newer model version replaces registered
 // ones, or "" when there is none to say. It never runs a CLI on its own: with
 // refresh it lists again when the cache is missing or older than the TTL, and
@@ -290,7 +290,7 @@ func agentsHint(ctx context.Context, rt *runtime, refresh bool) string {
 	return strings.Join(hint, "\n")
 }
 
-// refreshAgentsCacheIfStale lists the harnesses again when agents are saved and
+// refreshAgentsCacheIfStale lists the CLIs again when agents are saved and
 // the cache is missing or older than the TTL; otherwise it does nothing.
 func refreshAgentsCacheIfStale(ctx context.Context, rt *runtime) {
 	if lines, err := runnerstate.LoadAgents(runnerStateDir(rt)); err != nil || len(lines) == 0 {
@@ -304,13 +304,15 @@ func refreshAgentsCacheIfStale(ctx context.Context, rt *runtime) {
 	writeAgentsCache(rt, listOfferedAgents(ctx).cache(time.Now()))
 }
 
-// runAgents is `brigada agents`, `brigada agents add` and
-// `brigada agents update`.
+// runAgents is `brigada agents`, `brigada agents add`, `brigada agents
+// remove` and `brigada agents update`.
 func runAgents(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if len(args) > 0 {
 		switch args[0] {
 		case "add":
 			return runAgentsAdd(ctx, args[1:], stdout, stderr)
+		case "remove":
+			return runAgentsRemove(ctx, args[1:], stdout, stderr)
 		case "update":
 			return runAgentsUpdate(ctx, args[1:], stdout, stderr)
 		}
@@ -318,7 +320,7 @@ func runAgents(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	return runAgentsList(ctx, args, stdout, stderr)
 }
 
-// runAgentsList compares what the harnesses offer with the agents file and prints
+// runAgentsList compares what the CLIs offer with the agents file and prints
 // the difference; it changes nothing but the cached listing.
 func runAgentsList(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := newFlagSet("agents",
@@ -346,45 +348,73 @@ func runAgentsList(ctx context.Context, args []string, stdout, stderr io.Writer)
 	offer := listOfferedAgents(ctx)
 	writeAgentsCache(rt, offer.cache(time.Now()))
 	registered := registeredAgents(lines)
-	printAgentsReport(stdout, filepath.Join(runnerStateDir(rt), "agents"), offer, registered, diffAgents(offer, registered), rt.file.Caps.TierOf)
+	printAgentsReport(stdout, offer, registered, diffAgents(offer, registered), rt.file.Caps.TierOf)
 	return 0
 }
 
-func printAgentsReport(w io.Writer, path string, offer agentsOffer, registered []agentSpec, d agentsDiff, tier func(harness, model string) string) {
+func printAgentsReport(w io.Writer, offer agentsOffer, registered []agentSpec, d agentsDiff, tier func(harness, model string) string) {
 	if len(offer.models) == 0 {
 		fmt.Fprintln(w, "No model listing came back: no harness offered models.")
-	}
-	if len(d.unregistered) == 0 {
-		if len(offer.models) > 0 {
-			fmt.Fprintln(w, "Every model your harnesses offer is registered.")
+		// Registered agents whose models supersede each other are still
+		// worth naming without a listing.
+		if len(d.superseded) > 0 {
+			pairs := slices.Sorted(maps.Keys(d.superseded))
+			for _, pair := range pairs {
+				fmt.Fprintf(w, "  %s  superseded  (replaced by %s)\n", pair, d.superseded[pair])
+			}
 		}
 	} else {
-		fmt.Fprintf(w, "Offered by your harnesses, not registered (%d):\n", len(d.unregistered))
-		width := 0
-		for _, pair := range d.unregistered {
-			width = max(width, len(pair))
+		// Every pair the harnesses offer, listed whole, each marked by
+		// registration: the roster a removal or an add names its pairs
+		// from. A pair whose model a newer version of the same line
+		// replaces — registered or not — shows as superseded instead of
+		// registered or not registered, with the newer pair named; the
+		// coverage clauses are diffAgents' own, so a registered default
+		// covers the model the CLI lists as its default.
+		fmt.Fprintf(w, "Offered by your harnesses (%d):\n", len(offer.models))
+		type agentsRow struct {
+			pair, status, replacedBy string
 		}
-		for _, pair := range d.unregistered {
-			harness, model, _ := strings.Cut(pair, "/")
-			fmt.Fprintf(w, "  %-*s  tier %s, shares account %s\n", width, pair, tier(harness, model), agentsAccount(registered, harness))
+		superseded := supersededPairs(offer.models, registered)
+		have := map[string]bool{}
+		for _, spec := range registered {
+			have[agentPair(spec)] = true
+		}
+		var rows []agentsRow
+		for _, pair := range offer.models {
+			r := agentsRow{pair: pair, status: "not registered"}
+			if newer := superseded[pair]; newer != "" {
+				r.status, r.replacedBy = "superseded", newer
+			} else {
+				harness, model, _ := strings.Cut(pair, "/")
+				if have[pair] || (offer.defaults[harness] == model && have[harness+"/default"]) {
+					r.status = "registered"
+				}
+			}
+			rows = append(rows, r)
+		}
+		pairW, statusW := 0, 0
+		for _, r := range rows {
+			pairW = max(pairW, len(r.pair))
+			statusW = max(statusW, len(r.status))
+		}
+		for _, r := range rows {
+			harness, model, _ := strings.Cut(r.pair, "/")
+			fmt.Fprintf(w, "  %-*s  %-*s  tier %s, shares account %s", pairW, r.pair, statusW, r.status, tier(harness, model), agentsAccount(registered, harness))
+			if r.replacedBy != "" {
+				fmt.Fprintf(w, "  (replaced by %s)", r.replacedBy)
+			}
+			fmt.Fprintln(w)
 		}
 		fmt.Fprintln(w, "Register one with: brigada agents add <harness>/<model> [--classes ...] [--effort ...]")
 		fmt.Fprintln(w, "Nothing is registered automatically: a new model can spend a paid account.")
-		fmt.Fprintln(w, "A tier here comes from brigada's model table unless tier.<harness>/<model> in the config file sets it. Models a newer version of the same line replaces are left out.")
-	}
-	if len(d.superseded) > 0 {
-		fmt.Fprintln(w)
-		fmt.Fprintf(w, "Registered, but a newer version of the model is listed or registered (%d):\n", len(d.superseded))
-		pairs := slices.Sorted(maps.Keys(d.superseded))
-		width := 0
-		for _, pair := range pairs {
-			width = max(width, len(pair))
+		fmt.Fprintln(w, "A tier here comes from brigada's model table unless tier.<harness>/<model> in the config file sets it.")
+		for _, r := range rows {
+			if r.replacedBy != "" {
+				fmt.Fprintln(w, "A superseded model is one a newer version of the same line replaces: brigada agents update moves a registered one to the newer model; brigada agents remove retires one.")
+				break
+			}
 		}
-		for _, pair := range pairs {
-			fmt.Fprintf(w, "  %-*s  replaced by %s\n", width, pair, d.superseded[pair])
-		}
-		fmt.Fprintf(w, "To retire one, remove its line from %s and restart the runner.\n", initHomePath(path))
-		fmt.Fprintln(w, "To move one to the newer model, run brigada agents update: it rewrites each line you accept and restarts the runner.")
 	}
 	if len(d.gone) > 0 {
 		fmt.Fprintln(w)
@@ -392,7 +422,7 @@ func printAgentsReport(w io.Writer, path string, offer agentsOffer, registered [
 		for _, pair := range d.gone {
 			fmt.Fprintf(w, "  %s\n", pair)
 		}
-		fmt.Fprintf(w, "If a model is gone, remove its line from %s and restart the runner.\n", initHomePath(path))
+		fmt.Fprintf(w, "If a model is gone, run brigada agents remove <harness>/<model>.\n")
 	}
 }
 
@@ -505,11 +535,128 @@ func runAgentsAdd(ctx context.Context, args []string, stdout, stderr io.Writer) 
 	return restartRunnerForAgents(ctx, rt, *now, stdout, stderr)
 }
 
-// restartRunnerForAgents is the shared tail of agents add and agents
-// update: a running runner is handed a restart request it honours between
-// jobs, so no running job is cut — unless now asked for exactly that.
-// Without one there is nothing to restart; the changed lines serve from
-// the next start.
+// runAgentsRemove deletes every agent line that registers the named pair
+// from the agents file. It refuses a pair no line registers and a removal
+// that would leave the runner nothing to serve — both with the file
+// untouched — then hands the running runner a restart request it honours
+// between jobs, so the fresh runner no longer serves the agent, or notes
+// the next start when none runs.
+func runAgentsRemove(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	fs := newFlagSet("agents remove",
+		"brigada agents remove [--now] <harness>/<model>",
+		"Remove one agent: delete every line that registers it from the agents file, keeping every other line, and restart the runner to stop serving it.")
+	stderr = commandStderr(stderr, fs.Name())
+	common := addCommon(fs)
+	now := fs.Bool("now", false, "restart the runner at once, cutting its running jobs; without it the restart waits out running jobs")
+	// The model and the flags may interleave; the flag package stops at the
+	// first positional, so parse again after each one.
+	var rest []string
+	remaining := args
+	for {
+		if code, stop := common.parse(stdout, stderr, remaining); stop {
+			return code
+		}
+		left := fs.Args()
+		if len(left) == 0 {
+			break
+		}
+		rest = append(rest, left[0])
+		remaining = left[1:]
+	}
+	if len(rest) != 1 {
+		return usagef(stderr, "usage: brigada agents remove <harness>/<model>")
+	}
+	harness, model, ok := strings.Cut(rest[0], "/")
+	if !ok || harness == "" || model == "" {
+		return usagef(stderr, "agent must be <harness>/<model>, got %q", rest[0])
+	}
+	// A comma would end the model field of the line the runner parses.
+	if strings.ContainsAny(model, ", \t\r\n") {
+		return usagef(stderr, "model %q must not contain commas or whitespace", model)
+	}
+	rt, code := resolveRuntime(common, stderr)
+	if code != 0 {
+		return code
+	}
+	dir := runnerStateDir(rt)
+	lines, err := runnerstate.LoadAgents(dir)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	if len(lines) == 0 {
+		return fail(stderr, fmt.Errorf("no saved agents; run brigada init in a repository first"))
+	}
+	// The pair matches every line that registers it, each read the way the
+	// runner reads the file at startup; a comment or a line of a newer
+	// format stays in the file and registers nothing here. serveable counts
+	// the parsable lines the removal would leave, so the runner is never
+	// left with nothing to serve.
+	pair := harness + "/" + model
+	var matching []string
+	var saved []string
+	serveable := 0
+	for _, line := range lines {
+		var one agentSpecs
+		if one.Set(line) != nil {
+			continue
+		}
+		have := agentPair(one.specs[0])
+		saved = append(saved, have)
+		if have == pair {
+			if !slices.Contains(matching, line) {
+				matching = append(matching, line)
+			}
+			continue
+		}
+		serveable++
+	}
+	if len(matching) == 0 {
+		return fail(stderr, fmt.Errorf("agent %s is not registered; %s", pair, notRegisteredHint(pair, saved)))
+	}
+	if serveable == 0 {
+		return fail(stderr, fmt.Errorf("removing %s would leave no agent for the runner to serve; add another agent first with brigada agents add <harness>/<model>", pair))
+	}
+	fmt.Fprintf(stdout, "removed %s\n", pair)
+	path := initHomePath(filepath.Join(dir, "agents"))
+	for _, line := range matching {
+		n, err := runnerstate.RemoveAgent(dir, line)
+		if err != nil {
+			return fail(stderr, err)
+		}
+		if n > 1 {
+			fmt.Fprintf(stdout, "removed %d copies from %s: %s\n", n, path, line)
+			continue
+		}
+		fmt.Fprintf(stdout, "removed from %s: %s\n", path, line)
+	}
+	fmt.Fprintln(stdout, "If this agent was a project's foreman, its turns wait until another registered agent offers the pair (brigada project list shows them).")
+	return restartRunnerForAgents(ctx, rt, *now, stdout, stderr)
+}
+
+// notRegisteredHint is the second half of a not-registered refusal. Top and
+// the job cells show an agent as a short pair — the harness and the model's
+// last segment (topShortAgent) — which is not a pair the agents file
+// registers; when the refused pair is exactly one saved pair's short form,
+// the hint names that pair, else it points at the listing that shows pairs
+// whole.
+func notRegisteredHint(pair string, saved []string) string {
+	var full []string
+	for _, have := range saved {
+		if topShortAgent(have) == topShortAgent(pair) {
+			full = append(full, have)
+		}
+	}
+	if len(full) == 1 {
+		return fmt.Sprintf("the saved pair is %s", full[0])
+	}
+	return "brigada capacity lists the registered agents"
+}
+
+// restartRunnerForAgents is the shared tail of agents add, agents remove and
+// agents update: a running runner is handed a restart request it honours
+// between jobs, so no running job is cut — unless now asked for exactly
+// that. Without one there is nothing to restart; the changed lines serve
+// from the next start.
 func restartRunnerForAgents(ctx context.Context, rt *runtime, now bool, stdout, stderr io.Writer) int {
 	dir := runnerStateDir(rt)
 	if _, running, err := runnerstate.Running(dir); err != nil {
@@ -551,7 +698,7 @@ func restartRunnerForAgents(ctx context.Context, rt *runtime, now bool, stdout, 
 		return fail(stderr, err)
 	}
 	if result.Existing {
-		fmt.Fprintf(stdout, "runner already running (pid %d); the new line serves after its next restart\n", result.Record.PID)
+		fmt.Fprintf(stdout, "runner already running (pid %d); the change serves after its next restart\n", result.Record.PID)
 	} else {
 		fmt.Fprintf(stdout, "runner restarted (pid %d)\n", result.Record.PID)
 	}
@@ -574,7 +721,7 @@ type agentsUpdateCandidate struct {
 func runAgentsUpdate(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := newFlagSet("agents update",
 		"brigada agents update [--yes] [--dry-run] [--now]",
-		"Move registered agents to the newer model of their line the harnesses list: rewrite each superseded line of the agents file in place, keeping every other line, and restart the runner to serve the new models.")
+		"Move registered agents to the newer model of their line the CLIs list: rewrite each superseded line of the agents file in place, keeping every other line, and restart the runner to serve the new models.")
 	stderr = commandStderr(stderr, fs.Name())
 	common := addCommon(fs)
 	yes := fs.Bool("yes", false, "apply every update without prompting")

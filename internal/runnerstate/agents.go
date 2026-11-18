@@ -50,6 +50,31 @@ func ReplaceAgent(dir, old, new string) error {
 	return fmt.Errorf("agent line not found: %q", old)
 }
 
+// RemoveAgent deletes every line equal to line and keeps every other line,
+// comments and lines it does not understand included. Every copy goes: an
+// agent left registered by a leftover duplicate is not removed. line not in
+// the file is an error and the file stays as it was. The count is how many
+// copies the file held.
+func RemoveAgent(dir, line string) (int, error) {
+	lines, err := LoadAgents(dir)
+	if err != nil {
+		return 0, err
+	}
+	kept := make([]string, 0, len(lines))
+	removed := 0
+	for _, l := range lines {
+		if l == line {
+			removed++
+			continue
+		}
+		kept = append(kept, l)
+	}
+	if removed == 0 {
+		return 0, fmt.Errorf("agent line not found: %q", line)
+	}
+	return removed, SaveAgents(dir, kept)
+}
+
 // SaveAgents atomically replaces the private, durable runner choices. The
 // live runner.json record is published separately by the runner itself.
 func SaveAgents(dir string, specs []string) error {
