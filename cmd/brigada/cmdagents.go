@@ -23,10 +23,10 @@ import (
 var agentsStdin io.Reader = os.Stdin
 
 // agentsListed are the harnesses whose models the listing sources init uses
-// cover, in init's order: claude, codex and opencode list through their CLIs,
-// kimi through its config tables, qwen-code through `qwen --list-models`, and
-// dsh through a static list.
-var agentsListed = []string{"claude", "codex", "kimi", "opencode", "dsh", "qwen-code"}
+// cover — all of init's, in its order: claude, codex and opencode list through
+// their CLIs, kimi through its config tables, qwen-code through
+// `qwen --list-models`, and dsh through a static list.
+var agentsListed = initHarnesses
 
 // agentsCacheTTL is how long status and top trust the cached listing before
 // status runs the CLIs again.
@@ -352,7 +352,7 @@ func runAgentsList(ctx context.Context, args []string, stdout, stderr io.Writer)
 
 func printAgentsReport(w io.Writer, path string, offer agentsOffer, registered []agentSpec, d agentsDiff, tier func(harness, model string) string) {
 	if len(offer.models) == 0 {
-		fmt.Fprintln(w, "No model listing came back: none of the CLIs listed models.")
+		fmt.Fprintln(w, "No model listing came back: no harness offered models.")
 	}
 	if len(d.unregistered) == 0 {
 		if len(offer.models) > 0 {

@@ -77,6 +77,29 @@ func TestListOfferedAgentsCoversKimiDshAndQwen(t *testing.T) {
 	}
 }
 
+// A qwen-code listing that fell back to the static pair is not whole: it
+// never reports a registered model gone.
+func TestAgentsQwenStaticFallbackNeverReportsGone(t *testing.T) {
+	fakeInitPATH(t, "qwen")
+	writeInitQwenScript(t, `printf '%s\n' '  --model <model>  Model for the current session'`, initQwenListModels)
+	state := testsupport.ShortStateDir(t)
+	saveAgentLines(t, state,
+		"harness=qwen-code,model=qwen-subscription/qwen3.8-max",
+		"harness=qwen-code,model=qwen-subscription/qwen3.8-flash")
+	lines, err := runnerstate.LoadAgents(filepath.Join(state, "runner"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	offer := listOfferedAgents(context.Background())
+	d := diffAgents(offer, registeredAgents(lines))
+	if len(d.gone) != 0 || len(d.unregistered) != 0 || len(d.superseded) != 0 {
+		t.Errorf("diff = gone %q unregistered %q superseded %q, want all empty", d.gone, d.unregistered, d.superseded)
+	}
+	if offer.complete["qwen-code"] {
+		t.Errorf("the static fallback claims a whole listing")
+	}
+}
+
 func TestAgentsShowsUnregisteredAndGone(t *testing.T) {
 	fakeInitPATH(t, "opencode")
 	state := testsupport.ShortStateDir(t)
