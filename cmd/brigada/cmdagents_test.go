@@ -52,6 +52,31 @@ func fakeOpenCodeModels(t *testing.T, models ...string) {
 	}
 }
 
+// The listing covers every harness with an adapter: kimi through its config
+// tables, dsh through its static list, qwen-code through `qwen --list-models`.
+// Only qwen-code's listing is whole enough to say a registered model is gone.
+func TestListOfferedAgentsCoversKimiDshAndQwen(t *testing.T) {
+	fakeInitPATH(t, "kimi", "dsh", "qwen")
+	writeInitQwenScript(t, initQwenListModelsHelp, initQwenListModels)
+	writeInitModelFixture(t, filepath.Join(os.Getenv("HOME"), ".kimi-code", "config.toml"),
+		"default_model = \"kimi-code/k3\"\n[models.\"kimi-code/k3\"]\n[models.\"kimi-code/k2.8-preview\"]\n")
+	offer := listOfferedAgents(context.Background())
+	wantModels := []string{
+		"kimi/kimi-code/k3", "kimi/kimi-code/k2.8-preview",
+		"dsh/deepseek-flash", "dsh/deepseek-v4-pro",
+		"qwen-code/qwen-subscription/qwen4-max", "qwen-code/qwen-subscription/qwen3.8-max", "qwen-code/qwen-subscription/qwen3.8-flash",
+	}
+	if !reflect.DeepEqual(offer.models, wantModels) {
+		t.Errorf("models = %q, want %q", offer.models, wantModels)
+	}
+	if want := map[string]string{"kimi": "kimi-code/k3"}; !reflect.DeepEqual(offer.defaults, want) {
+		t.Errorf("defaults = %v, want %v", offer.defaults, want)
+	}
+	if want := map[string]bool{"qwen-code": true}; !reflect.DeepEqual(offer.complete, want) {
+		t.Errorf("complete = %v, want %v", offer.complete, want)
+	}
+}
+
 func TestAgentsShowsUnregisteredAndGone(t *testing.T) {
 	fakeInitPATH(t, "opencode")
 	state := testsupport.ShortStateDir(t)
@@ -484,6 +509,32 @@ func TestAgentsUpdateAppliesWithYes(t *testing.T) {
 		"updated opencode/fixture/gpt-6-sol → opencode/fixture/gpt-6.1-sol\n",
 		"rewritten in ",
 		"No runner running; brigada start serves it.",
+	} {
+		if !strings.Contains(out, text) {
+			t.Errorf("output lacks %q:\n%s", text, out)
+		}
+	}
+}
+
+// qwen-code's own listing drives the upgrade: a registered qwen3.8-max moves
+// to the listed qwen4-max, the flash line untouched.
+func TestAgentsUpdateAppliesQwenSuperseded(t *testing.T) {
+	fakeInitPATH(t, "qwen")
+	writeInitQwenScript(t, initQwenListModelsHelp, initQwenListModels)
+	state := testsupport.ShortStateDir(t)
+	saveAgentLines(t, state, "harness=qwen-code,model=qwen-subscription/qwen3.8-max,classes=review,account=work")
+
+	code, out, errOut := agentsDo(t, "agents", "update", "--state-dir", state, "--yes")
+	if code != 0 || errOut != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+	want := []string{"harness=qwen-code,model=qwen-subscription/qwen4-max,classes=review,account=work"}
+	if got := loadAgentLines(t, state); !reflect.DeepEqual(got, want) {
+		t.Fatalf("lines = %q, want %q", got, want)
+	}
+	for _, text := range []string{
+		"qwen-code/qwen-subscription/qwen3.8-max → qwen-code/qwen-subscription/qwen4-max\n",
+		"updated qwen-code/qwen-subscription/qwen3.8-max → qwen-code/qwen-subscription/qwen4-max\n",
 	} {
 		if !strings.Contains(out, text) {
 			t.Errorf("output lacks %q:\n%s", text, out)

@@ -22,10 +22,11 @@ import (
 // agentsStdin is where agents update reads its answers; tests inject them.
 var agentsStdin io.Reader = os.Stdin
 
-// agentsListed are the harnesses whose CLI lists its models cheaply, with
-// the sources init uses. Kimi reads a config file and dsh has a static list:
-// neither can offer a model init did not already show.
-var agentsListed = []string{"claude", "codex", "opencode"}
+// agentsListed are the harnesses whose models the listing sources init uses
+// cover, in init's order: claude, codex and opencode list through their CLIs,
+// kimi through its config tables, qwen-code through `qwen --list-models`, and
+// dsh through a static list.
+var agentsListed = []string{"claude", "codex", "kimi", "opencode", "dsh", "qwen-code"}
 
 // agentsCacheTTL is how long status and top trust the cached listing before
 // status runs the CLIs again.
@@ -131,8 +132,14 @@ func listOfferedAgents(ctx context.Context) agentsOffer {
 			source = initClaudeModels(ctx)
 		case "codex":
 			source = initCodexModels(ctx)
+		case "kimi":
+			source = initKimiModels(ctx)
 		case "opencode":
 			source = initOpenCodeModels(ctx)
+		case "dsh":
+			source = initDshModels(ctx)
+		case "qwen-code":
+			source = initQwenModels(ctx)
 		}
 		if !source.signIn.installed {
 			continue
@@ -148,12 +155,16 @@ func listOfferedAgents(ctx context.Context) agentsOffer {
 			}
 		}
 		// Models of unknown family are left out of the entries, so a list
-		// that skipped any cannot say a registered model is gone.
+		// that skipped any cannot say a registered model is gone. Kimi's
+		// config tables and dsh's static list are not the CLI's whole catalog,
+		// so neither says a model is gone either.
 		switch harness {
 		case "codex":
 			offer.complete[harness] = len(source.entries) > 1 && source.unknownCount == 0
 		case "opencode":
 			offer.complete[harness] = len(source.entries) > 0 && source.unknownCount == 0
+		case "qwen-code":
+			offer.complete[harness] = source.listed && len(source.entries) > 1 && source.unknownCount == 0
 		}
 	}
 	return offer
@@ -341,7 +352,7 @@ func runAgentsList(ctx context.Context, args []string, stdout, stderr io.Writer)
 
 func printAgentsReport(w io.Writer, path string, offer agentsOffer, registered []agentSpec, d agentsDiff, tier func(harness, model string) string) {
 	if len(offer.models) == 0 {
-		fmt.Fprintln(w, "No model listing came back: none of the claude, codex or opencode CLIs listed models.")
+		fmt.Fprintln(w, "No model listing came back: none of the CLIs listed models.")
 	}
 	if len(d.unregistered) == 0 {
 		if len(offer.models) > 0 {

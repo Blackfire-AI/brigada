@@ -35,9 +35,10 @@ type initModelEntry struct {
 type initModelSource struct {
 	entries       []initModelEntry
 	signIn        harnessProbe
-	providerCount int // OpenCode only; no provider names or account output retained.
-	unknownCount  int // Catalog models omitted because their family is unknown.
-	defaultID     int // Entry picked on Enter; 0 means the first.
+	providerCount int  // OpenCode only; no provider names or account output retained.
+	unknownCount  int  // Catalog models omitted because their family is unknown.
+	listed        bool // The entries came from the CLI's own listing (qwen-code); a static fallback leaves it false.
+	defaultID     int  // Entry picked on Enter; 0 means the first.
 }
 
 // Notes for aliases live here; the CLI documents no descriptions for them.
@@ -367,16 +368,62 @@ func initDshModels(ctx context.Context) initModelSource {
 	}
 }
 
-// initQwenModels offers qwen-code's two models as a static list: qwen has no
-// cheap command that lists them, and init makes no model call.
-func initQwenModels(ctx context.Context) initModelSource {
-	return initModelSource{
-		entries: []initModelEntry{
-			{id: 1, name: "qwen-subscription/qwen3.8-max", value: "qwen-subscription/qwen3.8-max", note: "standard"},
-			{id: 2, name: "qwen-subscription/qwen3.8-flash", value: "qwen-subscription/qwen3.8-flash", note: "light"},
-		},
-		signIn: probeHarness(ctx, "qwen-code"),
+// initQwenModelRow matches one row of `qwen --list-models`: a display name and
+// the model id in parentheses.
+var initQwenModelRow = regexp.MustCompile(`^(.+) \(([A-Za-z0-9][A-Za-z0-9._/-]*)\)$`)
+
+// initQwenStaticModels is qwen-code's static list, used when its listing is
+// unavailable: init makes no model call.
+func initQwenStaticModels() []initModelEntry {
+	return []initModelEntry{
+		{id: 1, name: "qwen-subscription/qwen3.8-max", value: "qwen-subscription/qwen3.8-max", note: "standard"},
+		{id: 2, name: "qwen-subscription/qwen3.8-flash", value: "qwen-subscription/qwen3.8-flash", note: "light"},
 	}
+}
+
+// initQwenModels lists qwen-code's models with `qwen --list-models`, which the
+// root help documents. Without the flag, or when the listing comes back without
+// a usable model, it falls back to a static list.
+func initQwenModels(ctx context.Context) initModelSource {
+	source := initModelSource{signIn: probeHarness(ctx, "qwen-code")}
+	fallback := func() {
+		source.entries = initQwenStaticModels()
+		source.unknownCount = 0
+	}
+	if !source.signIn.installed {
+		fallback()
+		return source
+	}
+	help, err := cheapHarnessCommand(ctx, "qwen-code", "--help")
+	if err != nil || !helpNamesCommand(string(help), "--list-models") {
+		fallback()
+		return source
+	}
+	out, err := cheapHarnessCommand(ctx, "qwen-code", "--list-models")
+	if err != nil {
+		fallback()
+		return source
+	}
+	seen := map[string]bool{}
+	for _, line := range strings.Split(string(out), "\n") {
+		m := initQwenModelRow.FindStringSubmatch(initANSI.ReplaceAllString(line, ""))
+		if m == nil || seen[m[2]] {
+			continue
+		}
+		seen[m[2]] = true
+		if _, err := adapter.AgentFamily("qwen-code", m[2]); err != nil {
+			source.unknownCount++
+			continue
+		}
+		source.entries = append(source.entries, initModelEntry{id: len(source.entries) + 1,
+			name: m[2], value: m[2], note: initCleanText(m[1])})
+	}
+	if len(source.entries) == 0 {
+		fallback()
+		return source
+	}
+	source.listed = true
+	return source
 }
 
 func kimiConfigPath() string {

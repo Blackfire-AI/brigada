@@ -29,8 +29,8 @@ func TestInitDshProbe(t *testing.T) {
 	}
 }
 
-// qwen-code's binary is qwen: the probe runs `qwen --version` only, never a
-// status, model or credential command.
+// qwen-code's binary is qwen: the probe runs `qwen --version` and the cheap
+// `--help` its listing gate reads, never a status, model or credential command.
 func TestInitQwenProbe(t *testing.T) {
 	calls := fakeInitPATH(t, "qwen")
 	source := initQwenModels(context.Background())
@@ -45,8 +45,8 @@ func TestInitQwenProbe(t *testing.T) {
 	if strings.Join(models, ",") != "qwen-subscription/qwen3.8-max,qwen-subscription/qwen3.8-flash" {
 		t.Errorf("models = %v", models)
 	}
-	if data, _ := os.ReadFile(calls); strings.TrimSpace(string(data)) != "qwen --version" {
-		t.Errorf("probe ran %q; want only qwen --version", data)
+	if data, _ := os.ReadFile(calls); strings.TrimSpace(string(data)) != "qwen --version\nqwen --help" {
+		t.Errorf("probe ran %q; want only qwen --version and qwen --help", data)
 	}
 	fakeInitPATH(t)
 	if p := initQwenModels(context.Background()).signIn; p.installed || p.status != "not installed" {
