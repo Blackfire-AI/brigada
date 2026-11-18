@@ -616,15 +616,21 @@ func runAgentsRemove(ctx context.Context, args []string, stdout, stderr io.Write
 	if serveable == 0 {
 		return fail(stderr, fmt.Errorf("removing %s would leave no agent for the runner to serve; add another agent first with brigada agents add <harness>/<model>", pair))
 	}
-	fmt.Fprintf(stdout, "removed %s\n", pair)
-	path := initHomePath(filepath.Join(dir, "agents"))
-	for _, line := range matching {
+	// Every line is out of the file before anything says so; a failure
+	// mid-loop leaves nothing claimed that did not happen.
+	copies := make([]int, len(matching))
+	for i, line := range matching {
 		n, err := runnerstate.RemoveAgent(dir, line)
 		if err != nil {
 			return fail(stderr, err)
 		}
-		if n > 1 {
-			fmt.Fprintf(stdout, "removed %d copies from %s: %s\n", n, path, line)
+		copies[i] = n
+	}
+	fmt.Fprintf(stdout, "removed %s\n", pair)
+	path := initHomePath(filepath.Join(dir, "agents"))
+	for i, line := range matching {
+		if copies[i] > 1 {
+			fmt.Fprintf(stdout, "removed %d copies from %s: %s\n", copies[i], path, line)
 			continue
 		}
 		fmt.Fprintf(stdout, "removed from %s: %s\n", path, line)
