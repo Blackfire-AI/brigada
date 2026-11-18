@@ -4365,7 +4365,7 @@ func TestTopBandFramesFit(t *testing.T) {
 // TestTopHintUnderHeader: the unregistered-models hint is a Dim line under
 // the header, in the snapshot as in the loop, the same text in plain style.
 func TestTopHintUnderHeader(t *testing.T) {
-	const hint = "2 models your CLIs offer but no agent registers: brigada agents"
+	const hint = "2 models your harnesses offer but no agent registers: brigada agents"
 	model := busyTopModel()
 	model.hint = hint
 	colour := term.New(logo.Caps{Color: logo.Color16, UTF8: true})
@@ -4403,7 +4403,7 @@ func TestTopHintUnderHeader(t *testing.T) {
 func TestRenderTopASCIIWithoutUTF8(t *testing.T) {
 	model := agentsModel()
 	nb := topNow.Add(5 * time.Minute).UTC().Format(engine.TimeLayout)
-	model.hint = "2 models your CLIs offer but no agent registers: brigada agents"
+	model.hint = "2 models your harnesses offer but no agent registers: brigada agents"
 	model.status.Plans[0].Tasks = append(model.status.Plans[0].Tasks,
 		engine.StatusTask{ID: 5, Title: "ship it", State: "done", Class: "implement", LandReady: "ready"},
 		engine.StatusTask{ID: 6, Title: "net", State: "ready"})

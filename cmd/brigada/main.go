@@ -102,7 +102,7 @@ Commands:
 	                plans and events (--interval, --project URL).
 	agent reset <harness>/<model>
 	                Clear a broken or cooling agent.
-	agents          Show the models your CLIs offer that no agent
+	agents          Show the models your harnesses offer that no agent
 	                registers, and registered models a CLI no longer
 	                lists; read-only.
 	agents add <harness>/<model>

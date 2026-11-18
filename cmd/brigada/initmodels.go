@@ -36,7 +36,7 @@ type initModelSource struct {
 	entries       []initModelEntry
 	signIn        harnessProbe
 	providerCount int  // OpenCode only; no provider names or account output retained.
-	unknownCount  int  // Catalog models omitted because their family is unknown.
+	unknownCount  int  // Listing rows the source left out: a family it cannot tell, or a row it cannot parse.
 	listed        bool // The entries came from the CLI's own listing (qwen-code); a static fallback leaves it false.
 	defaultID     int  // Entry picked on Enter; 0 means the first.
 }
@@ -406,8 +406,18 @@ func initQwenModels(ctx context.Context) initModelSource {
 	}
 	seen := map[string]bool{}
 	for _, line := range strings.Split(string(out), "\n") {
-		m := initQwenModelRow.FindStringSubmatch(initANSI.ReplaceAllString(line, ""))
-		if m == nil || seen[m[2]] {
+		line = strings.TrimSpace(initANSI.ReplaceAllString(line, ""))
+		if line == "" || line == "MODEL" {
+			continue
+		}
+		m := initQwenModelRow.FindStringSubmatch(line)
+		if m == nil {
+			// A row the parse cannot read leaves the listing not whole, so it
+			// can never say a registered model is gone.
+			source.unknownCount++
+			continue
+		}
+		if seen[m[2]] {
 			continue
 		}
 		seen[m[2]] = true

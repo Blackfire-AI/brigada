@@ -141,7 +141,8 @@ func ModelFamily(model string) (string, error) {
 	}
 	// A name can glue its version to a prefix with no separator, as qwen's
 	// names do (qwen4-max): the word in front of the glued version is the
-	// prefix then, so a new generation needs no row of its own.
+	// prefix then. A prefix that is itself a version (o3, k2) still needs its
+	// own row.
 	if m := gluedVersion.FindStringSubmatch(strings.SplitN(name, "-", 2)[0]); m != nil {
 		for _, group := range modelFamilyPrefixes {
 			if slices.Contains(group.prefixes, m[1]) {

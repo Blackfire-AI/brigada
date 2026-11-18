@@ -22,7 +22,7 @@ import (
 //
 //	go test -tags qwenlive -count=1 -run TestLive -v ./internal/adapter/qwencode
 func TestLive(t *testing.T) {
-	for _, args := range [][]string{{"--version"}, {"--help"}} {
+	for _, args := range [][]string{{"--version"}, {"--help"}, {"--list-models"}} {
 		out, err := exec.Command("qwen", args...).CombinedOutput()
 		if err != nil {
 			t.Fatalf("qwen %v: %v\n%s", args, err, out)

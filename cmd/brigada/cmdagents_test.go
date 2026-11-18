@@ -56,6 +56,9 @@ func fakeOpenCodeModels(t *testing.T, models ...string) {
 // tables, dsh through its static list, qwen-code through `qwen --list-models`.
 // Only qwen-code's listing is whole enough to say a registered model is gone.
 func TestListOfferedAgentsCoversKimiDshAndQwen(t *testing.T) {
+	// A live directory, so shell getcwd noise from a deleted one cannot mark
+	// the qwen listing not whole.
+	t.Chdir(t.TempDir())
 	fakeInitPATH(t, "kimi", "dsh", "qwen")
 	writeInitQwenScript(t, initQwenListModelsHelp, initQwenListModels)
 	writeInitModelFixture(t, filepath.Join(os.Getenv("HOME"), ".kimi-code", "config.toml"),
@@ -74,6 +77,60 @@ func TestListOfferedAgentsCoversKimiDshAndQwen(t *testing.T) {
 	}
 	if want := map[string]bool{"qwen-code": true}; !reflect.DeepEqual(offer.complete, want) {
 		t.Errorf("complete = %v, want %v", offer.complete, want)
+	}
+}
+
+// A qwen-code listing that fell back to the static pair is not whole: it
+// never reports a registered model gone.
+// A whole qwen-code listing is the one case that reports a registered model
+// gone: every listed row parsed and every family was known.
+func TestAgentsQwenWholeListingReportsGone(t *testing.T) {
+	// A live directory, so shell getcwd noise from a deleted one cannot mark
+	// the listing not whole.
+	t.Chdir(t.TempDir())
+	fakeInitPATH(t, "qwen")
+	writeInitQwenScript(t, initQwenListModelsHelp, `printf '%s\n' 'MODEL' 'Qwen4-Max (qwen-subscription/qwen4-max)'`)
+	state := testsupport.ShortStateDir(t)
+	saveAgentLines(t, state, "harness=qwen-code,model=qwen-subscription/qwen3.8-max")
+	lines, err := runnerstate.LoadAgents(filepath.Join(state, "runner"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	offer := listOfferedAgents(context.Background())
+	d := diffAgents(offer, registeredAgents(lines))
+	if want := []string{"qwen-code/qwen-subscription/qwen3.8-max"}; !reflect.DeepEqual(d.gone, want) {
+		t.Errorf("gone = %q, want %q", d.gone, want)
+	}
+	if !offer.complete["qwen-code"] {
+		t.Errorf("complete[qwen-code] = false, want true")
+	}
+}
+
+// One row the listing cannot parse, or one of an unknown family, leaves the
+// listing not whole: a registered model it omits stays, never gone.
+func TestAgentsQwenPartialListingNeverReportsGone(t *testing.T) {
+	for name, listing := range map[string]string{
+		"unknown family": initQwenListModels + `; printf '%s\n' 'Outside (vendor/omni-x)'`,
+		"unparsed row":   initQwenListModels + `; printf '%s\n' 'Qwen3.8-Max (qwen-subscription/qwen3.8-max,extra)'`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			fakeInitPATH(t, "qwen")
+			writeInitQwenScript(t, initQwenListModelsHelp, listing)
+			state := testsupport.ShortStateDir(t)
+			saveAgentLines(t, state, "harness=qwen-code,model=qwen-subscription/qwen3.7-max")
+			lines, err := runnerstate.LoadAgents(filepath.Join(state, "runner"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			offer := listOfferedAgents(context.Background())
+			d := diffAgents(offer, registeredAgents(lines))
+			if len(d.gone) != 0 {
+				t.Errorf("gone = %q, want none", d.gone)
+			}
+			if offer.complete["qwen-code"] {
+				t.Errorf("complete[qwen-code] = true, want false")
+			}
+		})
 	}
 }
 
@@ -110,7 +167,7 @@ func TestAgentsShowsUnregisteredAndGone(t *testing.T) {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errOut)
 	}
 	for _, want := range []string{
-		"Offered by your CLIs, not registered (1):\n  opencode/fixture/glm-5.3  tier standard, shares account work\n",
+		"Offered by your harnesses, not registered (1):\n  opencode/fixture/glm-5.3  tier standard, shares account work\n",
 		"Nothing is registered automatically",
 		"tier.<harness>/<model>",
 		"Models a newer version of the same line replaces are left out.",
@@ -160,7 +217,7 @@ func TestAgentsLeavesOutSupersededModels(t *testing.T) {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errOut)
 	}
 	for _, want := range []string{
-		"Offered by your CLIs, not registered (1):\n  opencode/fixture/gpt-6.1-sol  tier standard",
+		"Offered by your harnesses, not registered (1):\n  opencode/fixture/gpt-6.1-sol  tier standard",
 		"Registered, but a newer version of the model is listed or registered (1):\n  opencode/fixture/gpt-6-sol  replaced by opencode/fixture/gpt-6.1-sol\n",
 		"To retire one, remove its line from",
 		"To move one to the newer model, run brigada agents update: it rewrites each line you accept and restarts the runner.",
@@ -182,7 +239,7 @@ func TestAgentsAllRegistered(t *testing.T) {
 	state := testsupport.ShortStateDir(t)
 	saveAgentLines(t, state, "harness=opencode,model=fixture/gpt-5", "harness=opencode,model=fixture/glm-5.3")
 	code, out, _ := agentsDo(t, "agents", "--state-dir", state)
-	if code != 0 || out != "Every model your CLIs offer is registered.\n" {
+	if code != 0 || out != "Every model your harnesses offer is registered.\n" {
 		t.Fatalf("code=%d stdout=%q", code, out)
 	}
 }
@@ -349,7 +406,7 @@ func TestAgentsHintReadsTheCache(t *testing.T) {
 	if hint := agentsHint(ctx, rt, false); hint != "" || called() != 0 {
 		t.Fatalf("no cache, no refresh: hint=%q, %d CLI calls", hint, called())
 	}
-	const want = "1 model your CLIs offer but no agent registers: brigada agents"
+	const want = "1 model your harnesses offer but no agent registers: brigada agents"
 	if hint := agentsHint(ctx, rt, true); hint != want {
 		t.Fatalf("hint = %q, want %q", hint, want)
 	}
@@ -408,7 +465,7 @@ func TestAgentsHintCountsSuperseded(t *testing.T) {
 		"harness=claude,model=claude-fable-5-1[1m]", "harness=claude,model=claude-fable-5-2[1m]",
 		"harness=codex,model=gpt-5", "harness=codex,model=gpt-5.5")
 	writeAgentsCache(rt, agentsOffer{models: []string{"claude/claude-fable-5-2[1m]", "claude/opus", "codex/gpt-5.5"}}.cache(time.Now()))
-	const wantBoth = "1 model your CLIs offer but no agent registers: brigada agents\n" + "2 agents run a model a newer version replaces: brigada agents update"
+	const wantBoth = "1 model your harnesses offer but no agent registers: brigada agents\n" + "2 agents run a model a newer version replaces: brigada agents update"
 	if hint := agentsHint(ctx, rt, false); hint != wantBoth {
 		t.Fatalf("hint = %q, want %q", hint, wantBoth)
 	}
@@ -416,7 +473,7 @@ func TestAgentsHintCountsSuperseded(t *testing.T) {
 	// Unregistered only: today's string, unchanged.
 	saveAgentLines(t, state, "harness=claude,model=sonnet")
 	writeAgentsCache(rt, agentsOffer{models: []string{"claude/sonnet", "claude/opus"}}.cache(time.Now()))
-	const want = "1 model your CLIs offer but no agent registers: brigada agents"
+	const want = "1 model your harnesses offer but no agent registers: brigada agents"
 	if hint := agentsHint(ctx, rt, false); hint != want {
 		t.Fatalf("hint = %q, want %q", hint, want)
 	}
@@ -454,7 +511,7 @@ func TestDiffAgentsCoversTheDefaultModel(t *testing.T) {
 
 func TestTopHeaderShowsTheAgentsHint(t *testing.T) {
 	style := term.New(logo.Caps{})
-	hint := "2 models your CLIs offer but no agent registers: brigada agents"
+	hint := "2 models your harnesses offer but no agent registers: brigada agents"
 	lines := topHint(topModel{hint: hint}, style, 80)
 	if len(lines) != 1 || lines[0] != hint {
 		t.Fatalf("hint = %q", lines)
@@ -471,7 +528,7 @@ func TestTopHeaderShowsTheAgentsHint(t *testing.T) {
 // to the width.
 func TestTopHintRendersEachHintLine(t *testing.T) {
 	style := term.New(logo.Caps{})
-	first := "1 model your CLIs offer but no agent registers: brigada agents"
+	first := "1 model your harnesses offer but no agent registers: brigada agents"
 	second := "1 agent runs a model a newer version replaces: brigada agents update"
 	lines := topHint(topModel{hint: first + "\n" + second}, style, 80)
 	if len(lines) != 2 || lines[0] != first || lines[1] != second {

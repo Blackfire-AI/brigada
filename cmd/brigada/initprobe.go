@@ -51,7 +51,8 @@ func probeHarness(ctx context.Context, harness string) harnessProbe {
 	if harness == "dsh" || harness == "qwen-code" {
 		// dsh keeps its key in the environment or in its own store, and qwen-code
 		// has no verified status command: there is nothing to run for sign-in,
-		// and init makes no model call. Only the version is read.
+		// and init makes no model call. Only the version is read here; init's
+		// model listing runs `qwen --help` and `qwen --list-models` itself.
 		if out, err := cheapHarnessCommand(ctx, harness, "--version"); err == nil {
 			if v := dshVersion.FindString(string(out)); v != "" {
 				p.status = "version " + v + ", sign-in can't be checked"

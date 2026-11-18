@@ -76,6 +76,10 @@ esac
 }
 
 func TestInitQwenModelSource(t *testing.T) {
+	// A live directory: earlier tests' state-directory chdirs can leave a
+	// deleted one, and the getcwd noise a shell prints from it would count as
+	// a row the parse cannot read.
+	t.Chdir(t.TempDir())
 	fakeInitPATH(t, "qwen")
 	writeInitQwenScript(t, initQwenListModelsHelp,
 		initQwenListModels+`; printf '%s\n' 'MODEL' 'Qwen3.8-Flash (qwen-subscription/qwen3.8-flash)' 'Outside (vendor/omni-x)' 'Bad Model (bad id!)'; printf '%s\n' 'warning never-print-me (unknown-alias)' >&2`)
@@ -85,7 +89,7 @@ func TestInitQwenModelSource(t *testing.T) {
 		{id: 2, name: "qwen-subscription/qwen3.8-max", value: "qwen-subscription/qwen3.8-max", note: "Qwen3.8-Max"},
 		{id: 3, name: "qwen-subscription/qwen3.8-flash", value: "qwen-subscription/qwen3.8-flash", note: "Qwen3.8-Flash"},
 	}
-	if !reflect.DeepEqual(got.entries, want) || !got.listed || got.unknownCount != 2 || !got.signIn.installed || got.signIn.signedIn {
+	if !reflect.DeepEqual(got.entries, want) || !got.listed || got.unknownCount != 3 || !got.signIn.installed || got.signIn.signedIn {
 		t.Fatalf("source = %+v", got)
 	}
 	assertInitModelPrivacy(t, got)

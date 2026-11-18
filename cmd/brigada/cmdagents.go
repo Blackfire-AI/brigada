@@ -164,7 +164,7 @@ func listOfferedAgents(ctx context.Context) agentsOffer {
 		case "opencode":
 			offer.complete[harness] = len(source.entries) > 0 && source.unknownCount == 0
 		case "qwen-code":
-			offer.complete[harness] = source.listed && len(source.entries) > 1 && source.unknownCount == 0
+			offer.complete[harness] = source.listed && len(source.entries) > 0 && source.unknownCount == 0
 		}
 	}
 	return offer
@@ -278,7 +278,7 @@ func agentsHint(ctx context.Context, rt *runtime, refresh bool) string {
 		if n == 1 {
 			noun = "model"
 		}
-		hint = append(hint, fmt.Sprintf("%d %s your CLIs offer but no agent registers: brigada agents", n, noun))
+		hint = append(hint, fmt.Sprintf("%d %s your harnesses offer but no agent registers: brigada agents", n, noun))
 	}
 	if n := len(d.superseded); n > 0 {
 		runs := fmt.Sprintf("%d agents run", n)
@@ -323,7 +323,7 @@ func runAgents(ctx context.Context, args []string, stdout, stderr io.Writer) int
 func runAgentsList(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := newFlagSet("agents",
 		"brigada agents",
-		"Show the models your CLIs offer that no agent registers, and registered models a CLI no longer lists; read-only. brigada agents add <harness>/<model> registers one.")
+		"Show the models your harnesses offer that no agent registers, and registered models a CLI no longer lists; read-only. brigada agents add <harness>/<model> registers one.")
 	stderr = commandStderr(stderr, fs.Name())
 	common := addCommon(fs)
 	if code, stop := common.parse(stdout, stderr, args); stop {
@@ -356,10 +356,10 @@ func printAgentsReport(w io.Writer, path string, offer agentsOffer, registered [
 	}
 	if len(d.unregistered) == 0 {
 		if len(offer.models) > 0 {
-			fmt.Fprintln(w, "Every model your CLIs offer is registered.")
+			fmt.Fprintln(w, "Every model your harnesses offer is registered.")
 		}
 	} else {
-		fmt.Fprintf(w, "Offered by your CLIs, not registered (%d):\n", len(d.unregistered))
+		fmt.Fprintf(w, "Offered by your harnesses, not registered (%d):\n", len(d.unregistered))
 		width := 0
 		for _, pair := range d.unregistered {
 			width = max(width, len(pair))
