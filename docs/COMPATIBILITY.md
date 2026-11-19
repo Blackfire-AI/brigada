@@ -6,7 +6,7 @@ What brigada 1.0 promises until 2.0.
 
 ## What is covered
 
-**The CLI commands and their subcommands.** The top-level commands are `init`, `remove`, `instructions`, `attach`, `ask`, `review`, `engine`, `runner`, `start`, `pause`, `resume`, `config`, `stop`, `mcp`, `status`, `task`, `project`, `history`, `stats`, `capacity`, `top`, `cancel`, `agent`, `agents`, `plan`, `budget`, `recover`, `diff`, `land`, `push`, `logs`, `version` and `help`. The subcommands are `instructions diff`; `task submit` and `task retire`; `project foreman`, `project list`, `project set`, `project show` and `project import`; `agent reset`; `agents add` and `agents update`; `plan approve` and `plan reject`; `land approve` and `land reject`; `push approve`; and `hold yield` and `hold confirm`, which stay as no-ops that always exit 0. A bare `brigada` is `attach`. Their names and subcommand names keep working.
+**The CLI commands and their subcommands.** The top-level commands are `init`, `remove`, `instructions`, `attach`, `ask`, `review`, `engine`, `runner`, `start`, `pause`, `resume`, `config`, `stop`, `mcp`, `status`, `task`, `project`, `history`, `stats`, `capacity`, `top`, `cancel`, `agent`, `agents`, `plan`, `budget`, `recover`, `diff`, `land`, `push`, `logs`, `version` and `help`. The subcommands are `instructions diff`; `task submit` and `task retire`; `project foreman`, `project list`, `project set`, `project show` and `project import`; `agent reset`; `agents add`, `agents remove` and `agents update`; `plan approve` and `plan reject`; `land approve` and `land reject`; `push approve`; and `hold yield` and `hold confirm`, which stay as no-ops that always exit 0. A bare `brigada` is `attach`. Their names and subcommand names keep working.
 
 **The CLI flags.** Every command takes `--state-dir DIR` and `--config PATH`. A command's other flags are frozen only where they are listed here; anything else its `--help` prints may change. The frozen flags:
 
@@ -34,7 +34,7 @@ What brigada 1.0 promises until 2.0.
 - `top`: `--interval`, `--project`, `--no-start`.
 - `cancel`: `--no-start`.
 - `agent reset`: `--no-start`.
-- `agents add`: `--classes`, `--effort`, `--now`; `agents update`: `--yes`, `--dry-run`, `--now`.
+- `agents add`: `--classes`, `--effort`, `--now`; `agents update`: `--yes`, `--dry-run`, `--now`; `agents remove`: `--now`.
 - `plan approve`: `--and-stop-asking`, `--no-start`; `plan reject`: `--no-start`.
 - `budget`: `--repo`, `--wakes`, `--no-start`.
 - `recover`: `--repo` (repeatable), `--snapshot-dir`.

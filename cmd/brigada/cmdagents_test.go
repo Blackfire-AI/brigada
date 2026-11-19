@@ -80,8 +80,6 @@ func TestListOfferedAgentsCoversKimiDshAndQwen(t *testing.T) {
 	}
 }
 
-// A qwen-code listing that fell back to the static pair is not whole: it
-// never reports a registered model gone.
 // A whole qwen-code listing is the one case that reports a registered model
 // gone: every listed row parsed and every family was known.
 func TestAgentsQwenWholeListingReportsGone(t *testing.T) {
@@ -142,15 +140,15 @@ func TestAgentsQwenStaticFallbackNeverReportsGone(t *testing.T) {
 	state := testsupport.ShortStateDir(t)
 	saveAgentLines(t, state,
 		"harness=qwen-code,model=qwen-subscription/qwen3.8-max",
-		"harness=qwen-code,model=qwen-subscription/qwen3.8-flash")
+		"harness=qwen-code,model=qwen-subscription/qwen3.7-max")
 	lines, err := runnerstate.LoadAgents(filepath.Join(state, "runner"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	offer := listOfferedAgents(context.Background())
 	d := diffAgents(offer, registeredAgents(lines))
-	if len(d.gone) != 0 || len(d.unregistered) != 0 || len(d.superseded) != 0 {
-		t.Errorf("diff = gone %q unregistered %q superseded %q, want all empty", d.gone, d.unregistered, d.superseded)
+	if len(d.gone) != 0 {
+		t.Errorf("gone = %q, want none", d.gone)
 	}
 	if offer.complete["qwen-code"] {
 		t.Errorf("the static fallback claims a whole listing")
@@ -167,18 +165,19 @@ func TestAgentsShowsUnregisteredAndGone(t *testing.T) {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errOut)
 	}
 	for _, want := range []string{
-		"Offered by your harnesses, not registered (1):\n  opencode/fixture/glm-5.3  tier standard, shares account work\n",
+		"Offered by your harnesses (2):\n",
+		"  opencode/fixture/gpt-5    registered      tier standard, shares account work\n",
+		"  opencode/fixture/glm-5.3  not registered  tier standard, shares account work\n",
 		"Nothing is registered automatically",
 		"tier.<harness>/<model>",
-		"Models a newer version of the same line replaces are left out.",
 		"Registered, but the CLI no longer lists the model (1):\n  opencode/fixture/retired\n",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
 		}
 	}
-	if strings.Contains(out, "opencode/fixture/gpt-5 ") {
-		t.Errorf("a registered model is listed as unregistered:\n%s", out)
+	if strings.Contains(out, "superseded") {
+		t.Errorf("nothing is superseded here:\n%s", out)
 	}
 	if got := loadAgentLines(t, state); !reflect.DeepEqual(got, saved) {
 		t.Errorf("agents file changed: %q", got)
@@ -197,8 +196,9 @@ func TestAgentsTierFromTableAndConfig(t *testing.T) {
 	// A faster serving keeps the model's tier, and the config's tier wins
 	// over the table's light for flash.
 	for _, want := range []string{
-		"  opencode/fixture/glm-5.3-highspeed  tier standard, shares account opencode\n",
-		"  opencode/fixture/glm-5.3-flash      tier standard, shares account opencode\n",
+		"  opencode/fixture/glm-5.3            registered      tier standard, shares account opencode\n",
+		"  opencode/fixture/glm-5.3-flash      not registered  tier standard, shares account opencode\n",
+		"  opencode/fixture/glm-5.3-highspeed  not registered  tier standard, shares account opencode\n",
 		"A tier here comes from brigada's model table unless tier.<harness>/<model> in the config file sets it.",
 	} {
 		if !strings.Contains(out, want) {
@@ -207,7 +207,7 @@ func TestAgentsTierFromTableAndConfig(t *testing.T) {
 	}
 }
 
-func TestAgentsLeavesOutSupersededModels(t *testing.T) {
+func TestAgentsMarksSupersededModels(t *testing.T) {
 	fakeOpenCodeModels(t, "fixture/gpt-6.1-sol", "fixture/gpt-6-sol", "fixture/gpt-5.6-sol", "fixture/gpt-6-luna", "fixture/gpt-5.6-luna")
 	state := testsupport.ShortStateDir(t)
 	saved := []string{"harness=opencode,model=fixture/gpt-6-sol", "harness=opencode,model=fixture/gpt-6-luna"}
@@ -217,17 +217,17 @@ func TestAgentsLeavesOutSupersededModels(t *testing.T) {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errOut)
 	}
 	for _, want := range []string{
-		"Offered by your harnesses, not registered (1):\n  opencode/fixture/gpt-6.1-sol  tier standard",
-		"Registered, but a newer version of the model is listed or registered (1):\n  opencode/fixture/gpt-6-sol  replaced by opencode/fixture/gpt-6.1-sol\n",
-		"To retire one, remove its line from",
-		"To move one to the newer model, run brigada agents update: it rewrites each line you accept and restarts the runner.",
+		"Offered by your harnesses (5):\n",
+		"  opencode/fixture/gpt-6.1-sol   not registered  tier standard, shares account opencode\n",
+		"  opencode/fixture/gpt-6-sol     superseded      tier standard, shares account opencode  (replaced by opencode/fixture/gpt-6.1-sol)\n",
+		"  opencode/fixture/gpt-5.6-sol   superseded      tier standard, shares account opencode  (replaced by opencode/fixture/gpt-6.1-sol)\n",
+		"  opencode/fixture/gpt-6-luna    registered      tier light, shares account opencode\n",
+		"  opencode/fixture/gpt-5.6-luna  superseded      tier light, shares account opencode  (replaced by opencode/fixture/gpt-6-luna)\n",
+		"A superseded model is one a newer version of the same line replaces: brigada agents update moves a registered one to the newer model; brigada agents remove retires one.",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
 		}
-	}
-	if strings.Contains(out, "gpt-5.6") {
-		t.Errorf("a superseded model is offered:\n%s", out)
 	}
 	if got := loadAgentLines(t, state); !reflect.DeepEqual(got, saved) {
 		t.Errorf("agents file changed: %q", got)
@@ -239,15 +239,27 @@ func TestAgentsAllRegistered(t *testing.T) {
 	state := testsupport.ShortStateDir(t)
 	saveAgentLines(t, state, "harness=opencode,model=fixture/gpt-5", "harness=opencode,model=fixture/glm-5.3")
 	code, out, _ := agentsDo(t, "agents", "--state-dir", state)
-	if code != 0 || out != "Every model your harnesses offer is registered.\n" {
+	if code != 0 {
 		t.Fatalf("code=%d stdout=%q", code, out)
+	}
+	for _, want := range []string{
+		"Offered by your harnesses (2):",
+		"  opencode/fixture/gpt-5    registered",
+		"  opencode/fixture/glm-5.3  registered",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "not registered") || strings.Contains(out, "superseded") {
+		t.Errorf("every offered model is registered:\n%s", out)
 	}
 }
 
 func TestAgentsNeedsSavedAgents(t *testing.T) {
 	fakeInitPATH(t, "opencode")
 	state := testsupport.ShortStateDir(t)
-	for _, args := range [][]string{{"agents", "--state-dir", state}, {"agents", "add", "--state-dir", state, "claude/opus"}} {
+	for _, args := range [][]string{{"agents", "--state-dir", state}, {"agents", "add", "--state-dir", state, "claude/opus"}, {"agents", "remove", "--state-dir", state, "claude/opus"}} {
 		if code, _, errOut := agentsDo(t, args...); code != 1 || !strings.Contains(errOut, "no saved agents") {
 			t.Errorf("%q: code=%d stderr=%q", args, code, errOut)
 		}
@@ -325,6 +337,101 @@ func TestAgentsAddRefusals(t *testing.T) {
 				t.Fatalf("agents file changed: %q", got)
 			}
 		})
+	}
+}
+
+func TestAgentsRemove(t *testing.T) {
+	fakeInitPATH(t, "opencode")
+	state := testsupport.ShortStateDir(t)
+	saveAgentLines(t, state,
+		"# mine",
+		"harness=claude,model=sonnet",
+		"harness=kimi,model=kimi-code/k3.1-pro-highspeed",
+		"harness=kimi,model=kimi-code/k3.1-pro-highspeed",
+		"harness=opencode,model=fixture/glm-5.3",
+	)
+
+	code, out, errOut := agentsDo(t, "agents", "remove", "--state-dir", state, "kimi/kimi-code/k3.1-pro-highspeed")
+	if code != 0 || errOut != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+	want := []string{"# mine", "harness=claude,model=sonnet", "harness=opencode,model=fixture/glm-5.3"}
+	if got := loadAgentLines(t, state); !reflect.DeepEqual(got, want) {
+		t.Fatalf("lines = %q, want %q", got, want)
+	}
+	for _, text := range []string{
+		"removed kimi/kimi-code/k3.1-pro-highspeed",
+		"removed 2 copies from ",
+		"If this agent was a project's foreman, its turns wait until another registered agent offers the pair",
+		"No runner running; brigada start serves it.",
+	} {
+		if !strings.Contains(out, text) {
+			t.Errorf("output lacks %q:\n%s", text, out)
+		}
+	}
+
+	// A provider/model name keeps its own slash; the harness is the first part.
+	if code, out, errOut = agentsDo(t, "agents", "remove", "--state-dir", state, "opencode/fixture/glm-5.3"); code != 0 || errOut != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+	want = []string{"# mine", "harness=claude,model=sonnet"}
+	if got := loadAgentLines(t, state); !reflect.DeepEqual(got, want) {
+		t.Fatalf("lines = %q, want %q", got, want)
+	}
+	if !strings.Contains(out, "removed from ") || strings.Contains(out, "copies") {
+		t.Errorf("output = %s", out)
+	}
+
+	// A line with no model registers the harness's default pair, and removing
+	// by that pair deletes the line.
+	saveAgentLines(t, state, want[0], want[1], "harness=codex")
+	if code, out, errOut = agentsDo(t, "agents", "remove", "--state-dir", state, "claude/sonnet"); code != 0 || errOut != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+	if got := loadAgentLines(t, state); !reflect.DeepEqual(got, []string{"# mine", "harness=codex"}) {
+		t.Fatalf("lines = %q", got)
+	}
+}
+
+func TestAgentsRemoveRefusals(t *testing.T) {
+	fakeInitPATH(t, "opencode")
+	state := testsupport.ShortStateDir(t)
+	saved := []string{"harness=claude,model=sonnet", "harness=kimi,model=kimi-code/k3.1-pro", "# mine"}
+	saveAgentLines(t, state, saved...)
+	for _, tc := range []struct {
+		name     string
+		args     []string
+		code     int
+		contains string
+	}{
+		{"not registered", []string{"claude/opus"}, 1, "agent claude/opus is not registered; brigada capacity lists the registered agents"},
+		{"short form", []string{"kimi/k3.1-pro"}, 1, "the saved pair is kimi/kimi-code/k3.1-pro"},
+		{"unknown harness", []string{"nonesuch/model"}, 1, "agent nonesuch/model is not registered"},
+		{"no model", []string{"claude"}, 2, "<harness>/<model>"},
+		{"nothing to remove", nil, 2, "usage: brigada agents remove"},
+		{"two models", []string{"claude/opus", "claude/haiku"}, 2, "usage: brigada agents remove"},
+		{"model with a comma", []string{"claude/opus,effort=low"}, 2, "commas"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			args := append([]string{"agents", "remove", "--state-dir", state}, tc.args...)
+			code, out, errOut := agentsDo(t, args...)
+			if code != tc.code || out != "" || !strings.Contains(errOut, tc.contains) {
+				t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errOut)
+			}
+			if got := loadAgentLines(t, state); !reflect.DeepEqual(got, saved) {
+				t.Fatalf("agents file changed: %q", got)
+			}
+		})
+	}
+	// The last registered agent stays: the runner would have nothing to
+	// serve, and the file stays as it was.
+	state = testsupport.ShortStateDir(t)
+	saveAgentLines(t, state, "harness=claude,model=sonnet", "# mine")
+	if code, out, errOut := agentsDo(t, "agents", "remove", "--state-dir", state, "claude/sonnet"); code != 1 || !strings.Contains(errOut, "would leave no agent for the runner to serve") {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+	if got := loadAgentLines(t, state); !reflect.DeepEqual(got, []string{"harness=claude,model=sonnet", "# mine"}) {
+		t.Fatalf("agents file changed: %q", got)
 	}
 }
 

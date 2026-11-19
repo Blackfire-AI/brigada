@@ -340,8 +340,8 @@ func TestCompatCommands(t *testing.T) {
 				t.Errorf("documented %q is not kept by runKeptHold", p)
 			}
 		case !slices.Contains(subTabled, p):
-			// land approve, agents add: handled inside their command, so the
-			// help is the only proof they exist.
+			// land approve, agents add, agents remove: handled inside their
+			// command, so the help is the only proof they exist.
 			helpFlagSet(t, p)
 		}
 		known = append(known, p)

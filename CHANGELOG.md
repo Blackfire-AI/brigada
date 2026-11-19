@@ -5,11 +5,16 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `brigada agents remove <harness>/<model> [--now]` removes an agent: it deletes every line that registers the pair from the agents file, keeping every other line, refuses a pair no line registers and the removal of the last registered agent with the file untouched, and restarts a running runner between jobs — or at once with `--now` — so the engine drops the agent, and its outcome record, when the fresh runner registers. A pair typed the short way `top` shows it, harness and the model's last segment, is answered with the saved pair's full name. It warns that a removed foreman's turns wait for another agent offering the pair. `brigada agents` now names the command where it told you to remove a line by hand.
+
 ### Changed
 
+- `brigada agents` prints every model the harnesses offer, each as its whole pair with its tier and account, marked registered, not registered or superseded (a newer version of its line is offered or registered, named as its replacement) — where it printed only the unregistered ones and left superseded models out of that list. Registered models a whole CLI list no longer shows keep their own section, and the `status`/`top` hint is unchanged.
 - An agent's default tier comes from a per-family model table instead of words shared by every vendor (issue #233). Anthropic's `fable` and `opus`, OpenAI's `astra` and `pro`, and Moonshot's `pro` are heavy; Anthropic's `haiku`, OpenAI's `luna` and any family's `mini`, `nano`, `flash`, `lite` and `free` are light; everything else is standard. Without a `tier.<harness>/<model>` override, these models change tier: `gemini-*-pro`, `deepseek-*-pro`, `*-max` (such as `qwen3.8-max`) and `*-ultra` go from heavy to standard, and `*-highspeed` from light to its model's tier. Outcome records stay keyed by agent, so a re-tiered agent keeps its record.
 - Every place that shows an agent's tier shows the configured one: `brigada agents`, `brigada agents add` and the runner's startup line now apply `tier.<harness>/<model>` as init, stats, capacity and top already did (issue #233).
-- `brigada init` no longer offers a model that a newer version of the same line in the CLI's list replaces, such as `gpt-5.6-sol` beside `gpt-6.1-sol`, unless the model is already saved; `brigada agents` leaves such models out of the unregistered list and reports registered agents whose model is superseded, naming the newer one. Nothing is removed from the agents file (issue #233).
+- `brigada init` no longer offers a model that a newer version of the same line in the CLI's list replaces, such as `gpt-5.6-sol` beside `gpt-6.1-sol`, unless the model is already saved; `brigada agents` marks such a model superseded, naming the newer one. Nothing is removed from the agents file (issue #233).
 
 ## [1.3.0] - 2026-11-13
 

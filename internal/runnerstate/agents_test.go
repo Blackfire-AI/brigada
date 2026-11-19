@@ -111,3 +111,36 @@ func TestReplaceAgentKeepsEveryLine(t *testing.T) {
 		t.Fatalf("after the failed replace: lines = %q, %v; want %q", got, err, want)
 	}
 }
+
+func TestRemoveAgentKeepsEveryOtherLine(t *testing.T) {
+	dir := t.TempDir()
+	saved := []string{"# mine", "harness=claude,model=sonnet", "", "not an agent line", "harness=claude,model=sonnet", "harness=kimi,model=kimi-k2,classes=review"}
+	if err := runnerstate.SaveAgents(dir, saved); err != nil {
+		t.Fatal(err)
+	}
+	n, err := runnerstate.RemoveAgent(dir, "harness=claude,model=sonnet")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Every copy goes.
+	if n != 2 {
+		t.Fatalf("removed count = %d; want 2", n)
+	}
+	want := []string{"# mine", "", "not an agent line", "harness=kimi,model=kimi-k2,classes=review"}
+	got, err := runnerstate.LoadAgents(dir)
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("lines = %q, %v; want %q", got, err, want)
+	}
+	file := filepath.Join(dir, "agents")
+	info, err := os.Stat(file)
+	if err != nil || info.Mode().Perm() != 0600 {
+		t.Fatalf("saved mode: %v, %v", info, err)
+	}
+	// A line that is not there is an error and the file stays as it was.
+	if n, err := runnerstate.RemoveAgent(dir, "harness=codex,model=gpt-5"); err == nil || n != 0 {
+		t.Fatalf("a missing line was removed: %d, %v", n, err)
+	}
+	if got, err := runnerstate.LoadAgents(dir); err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("after the failed remove: lines = %q, %v; want %q", got, err, want)
+	}
+}

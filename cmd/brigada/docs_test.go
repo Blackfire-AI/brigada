@@ -35,7 +35,8 @@ import (
 // and --help. A documented flag must be in its command's set, so the docs
 // cannot drift from the code that defines the flags. A documented
 // subcommand must be in the command's table, or in COMPATIBILITY.md's list
-// of subcommands a command handles inside itself (land approve, agents add).
+// of subcommands a command handles inside itself (land approve, agents add,
+// agents remove).
 
 // docsFiles are the documents the verifier covers, relative to this package.
 var docsFiles = []string{docPath("docs/GUIDE.md"), docPath("docs/COMPATIBILITY.md"), docPath("CHANGELOG.md")}
