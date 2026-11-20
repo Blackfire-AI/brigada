@@ -443,7 +443,8 @@ func resultEvent(lj lineJSON) (adapter.Event, bool) {
 	return adapter.Event{}, false
 }
 
-// now is the clock resultEvent compares a reset time against; tests pin it.
+// now is the clock quota error classification compares a reset time against;
+// tests pin it.
 var now = time.Now
 
 // resetAt reads quota.reset_at (unix seconds) from the JSON object that
@@ -496,7 +497,7 @@ var errorPhrases = []errorPhrase{
 	{adapter.ErrResumeFailed, "conversation not found"},
 	// A 402 sorts as a spent balance (§8) here, ahead of the quota rows
 	// since its text also says insufficient_quota and first match wins;
-	// resultEvent turns one with a usable quota.reset_at into a limit.
+	// phraseEvent turns one with a usable quota.reset_at into a limit.
 	{adapter.ErrBalance, "http 402"},
 	{adapter.ErrBalance, "billing_error"},
 	{adapter.ErrBalance, "insufficient credits"},
@@ -518,7 +519,9 @@ var errorPhrases = []errorPhrase{
 }
 
 // phraseEvent sorts one piece of text. Text that names nothing is not an
-// event; callers that know the text is a failure fall back to ErrOther.
+// event; callers that know the text is a failure fall back to ErrOther. A
+// quota error carries its reset whether it arrived in a result's errors[] or
+// as a plain error line.
 func phraseEvent(text string) (adapter.Event, bool) {
 	if adapter.IsModelRejectedText(text) {
 		return adapter.Event{Kind: adapter.EvError, ErrorKind: adapter.ErrModel, Text: text}, true
@@ -526,7 +529,19 @@ func phraseEvent(text string) (adapter.Event, bool) {
 	lower := strings.ToLower(text)
 	for _, m := range errorPhrases {
 		if strings.Contains(lower, m.phrase) {
-			return adapter.Event{Kind: adapter.EvError, ErrorKind: m.kind, Text: text}, true
+			ev := adapter.Event{Kind: adapter.EvError, ErrorKind: m.kind, Text: text}
+			switch ev.ErrorKind {
+			case adapter.ErrBalance:
+				if until := resetAt([]string{text}); until != "" {
+					if t, err := time.Parse(time.RFC3339, until); err == nil && t.After(now()) {
+						ev.ErrorKind = adapter.ErrLimit
+						ev.LimitUntil = until
+					}
+				}
+			case adapter.ErrLimit:
+				ev.LimitUntil = resetAt([]string{text})
+			}
+			return ev, true
 		}
 	}
 	if adapter.IsInfraText(text) {

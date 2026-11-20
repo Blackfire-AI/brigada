@@ -2,6 +2,7 @@ package qwencode
 
 import (
 	"bufio"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -388,6 +389,21 @@ func TestWeeklyLimitFixtureStdout(t *testing.T) {
 	}
 	if !strings.Contains(last.Text, "HTTP 402") {
 		t.Errorf("Text = %q, want the errors text", last.Text)
+	}
+}
+
+func TestPlainErrorWeeklyLimit(t *testing.T) {
+	pinNow(t)
+	var result lineJSON
+	if err := json.Unmarshal([]byte(weeklyLimitResult), &result); err != nil {
+		t.Fatal(err)
+	}
+	a := &Adapter{}
+	for name, parse := range map[string]func([]byte) (adapter.Event, bool){"stdout": a.ParseEvent, "stderr": a.ParseErrEvent} {
+		ev, ok := parse([]byte(result.Errors[0]))
+		if !ok || ev.ErrorKind != adapter.ErrLimit || ev.LimitUntil != "2026-11-19T09:36:21Z" {
+			t.Errorf("%s plain error = %+v, %v; want the weekly limit until its reset", name, ev, ok)
+		}
 	}
 }
 
