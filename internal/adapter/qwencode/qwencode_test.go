@@ -407,6 +407,24 @@ func TestPlainErrorWeeklyLimit(t *testing.T) {
 	}
 }
 
+func TestWeeklyCreditsRelativeReset(t *testing.T) {
+	pinNow(t)
+	const message = "You've used up your weekly credits. Your credits are expected to reset in 1 day and 9 hours. You can wait or run /upgrade to get more credits."
+	lines := []string{
+		message,
+		`{"type":"result","subtype":"error_during_execution","is_error":true,"errors":["You've used up your weekly credits. Your credits are expected to reset in 1 day and 9 hours. You can wait or run /upgrade to get more credits."],"error_code":"insufficient_quota"}`,
+	}
+	a := &Adapter{}
+	for _, line := range lines {
+		for name, parse := range map[string]func([]byte) (adapter.Event, bool){"stdout": a.ParseEvent, "stderr": a.ParseErrEvent} {
+			ev, ok := parse([]byte(line))
+			if !ok || ev.ErrorKind != adapter.ErrLimit || ev.LimitUntil != "2026-11-14T09:00:00Z" {
+				t.Errorf("%s %q = %+v, %v; want the weekly limit until now+1d9h", name, line, ev, ok)
+			}
+		}
+	}
+}
+
 func TestBalanceResetAtMalformed(t *testing.T) {
 	pinNow(t)
 	a := &Adapter{}
