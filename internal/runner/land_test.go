@@ -408,6 +408,10 @@ func TestRunnerLandGateAskWaitsThenPushes(t *testing.T) {
 	if out := strings.TrimSpace(git(t, "", "--git-dir", strings.TrimPrefix(remote, "file://"), "rev-list", "--count", "main")); out != "2" {
 		t.Errorf("commits on main = %s, want the seed and the squash alone", out)
 	}
+	// The push phase prunes the landed task's branch family (§13.2).
+	if got := remoteBranchCommit(t, remote, taskBranch(task, 1)); got != "" {
+		t.Errorf("the result branch = %s after the push phase, want it pruned", got)
+	}
 }
 
 // TestRunnerLandGateAskStacksTwoLandings: two independent landings that
@@ -499,9 +503,11 @@ func TestRunnerLandRebuiltDependentDiffsAgainstTheTarget(t *testing.T) {
 
 	// The premise holds: the dependent's branch no longer descends from
 	// its dependency's, so a diff against that branch is the bug's shape.
+	// Both branches were pruned when their tasks landed (§13.2); the
+	// landed tips are the squash commits' own records.
 	bare := strings.TrimPrefix(remote, "file://")
-	depHead := remoteBranchCommit(t, remote, taskBranch(dep, 1))
-	if mb := strings.TrimSpace(git(t, "", "--git-dir", bare, "merge-base", taskBranch(dep, 1), branch)); mb == depHead {
+	depHead := landedBranchHead(t, remote, dep)
+	if mb := strings.TrimSpace(git(t, "", "--git-dir", bare, "merge-base", depHead, landedBranchHead(t, remote, dependent))); mb == depHead {
 		t.Fatalf("the dependent's branch still sits on its dependency's; the test rebuilt nothing")
 	}
 	// The landing is clean and carries the dependent's file alone: its
@@ -576,11 +582,13 @@ func TestRunnerLandStackedOnLandedDependencyDiffsTheTree(t *testing.T) {
 
 	// The premise holds: the dependent's branch still descends from its
 	// dependency's — the merge-base is the dependency's tip — so the
-	// diff from that branch is the bug's shape.
+	// diff from that branch is the bug's shape. Both branches were
+	// pruned when their tasks landed (§13.2); the landed tips are the
+	// squash commits' own records.
 	bare := strings.TrimPrefix(remote, "file://")
-	depHead := remoteBranchCommit(t, remote, depBranch)
-	if mb := strings.TrimSpace(git(t, "", "--git-dir", bare, "merge-base", depBranch, branch)); mb != depHead {
-		t.Fatalf("merge-base(%s, %s) = %s, want the dependency's tip %s: the test stacked nothing", depBranch, branch, mb, depHead)
+	depHead := landedBranchHead(t, remote, dep)
+	if mb := strings.TrimSpace(git(t, "", "--git-dir", bare, "merge-base", depHead, landedBranchHead(t, remote, dependent))); mb != depHead {
+		t.Fatalf("merge-base(%s's tip, %s's tip) = %s, want the dependency's tip %s: the test stacked nothing", depBranch, branch, mb, depHead)
 	}
 	// The landing is clean and carries the dependent's change alone:
 	// its squash sits on the target's moved head, main holds the seed
@@ -651,11 +659,13 @@ func TestRunnerLandStackedOnLandedDependencyDoesNotRevertLaterLandings(t *testin
 	commit := e.waitLanding(dependent, "pushed")
 
 	// The premise holds: the dependent's branch still descends from its
-	// dependency's, and its tree lacks the target's later landing.
+	// dependency's, and its tree lacks the target's later landing. Both
+	// branches were pruned when their tasks landed (§13.2); the landed
+	// tips are the squash commits' own records.
 	bare := strings.TrimPrefix(remote, "file://")
-	depHead := remoteBranchCommit(t, remote, depBranch)
-	if mb := strings.TrimSpace(git(t, "", "--git-dir", bare, "merge-base", depBranch, branch)); mb != depHead {
-		t.Fatalf("merge-base(%s, %s) = %s, want the dependency's tip %s: the test stacked nothing", depBranch, branch, mb, depHead)
+	depHead := landedBranchHead(t, remote, dep)
+	if mb := strings.TrimSpace(git(t, "", "--git-dir", bare, "merge-base", depHead, landedBranchHead(t, remote, dependent))); mb != depHead {
+		t.Fatalf("merge-base(%s's tip, %s's tip) = %s, want the dependency's tip %s: the test stacked nothing", depBranch, branch, mb, depHead)
 	}
 	// The landing is clean and carries the dependent's change alone:
 	// its squash sits on the target's moved head, the other task's work

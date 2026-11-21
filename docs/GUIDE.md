@@ -480,6 +480,7 @@ When `notify` is `auto` (the default), the engine also raises a desktop notifica
 - Run it inside the project's repository. The working directory's selected remote must be the task's repo, or diff refuses and names both; `--repo` says which URL the directory stands for when its selected remote is a mirror or fork.
 - It fetches the two refs from the project's remote (the one whose URL matches the task's repo, `origin` preferred; with `--repo` and no match, `origin`, else the only remote), with no checkout, and prints to stdout, so it pipes to a pager.
 - A task with no result branch yet says so.
+- A task whose result branch is no longer on the remote — pruned after the task landed, or after it was cancelled or retired — is refused in plain words: a `done` task's change is on the land target, its commit found by `git log --grep 'Brigada-Task: <id>'`, and a cancelled or retired task has nothing left to diff.
 
 `brigada logs <job-id>` prints what a job's worker did, from its transcript, as readable lines: messages, tool starts and ends, errors.
 
@@ -645,6 +646,7 @@ The file is flat: `key: value` lines, no nesting except the `instructions` map o
 | `foreman_rotate_tokens` | non-negative integer | `400000` | Input tokens on one foreman turn past which the next turn starts a fresh session; `0` never rotates ([section 11](#session-size-and-rotation)). |
 | `plan_files` | `on` or `off` | `on` | `off` stops the plan-file mirror: no plan file is written or pushed ([The plan file](#the-plan-file)). |
 | `plan_file_branch` | branch name | `brigada/plans` | The branch the plan files are pushed to; `main`, or the repository's default branch name, commits them to the default branch ([The plan file](#the-plan-file)). |
+| `branch_retention_days` | whole number of days, `0` or more | `7` | How long a cancelled or retired task's branches are kept after it settled, before the engine's start-up sweep deletes them; `0` deletes them at once. A landed task's branches are deleted by its landing, not by this window. |
 | `instructions_file` | repo-relative path | none | Alias for `instructions.worker`; setting both is refused. |
 | `instructions` | map of role names to repo-relative files | none | Roles: `foreman`, `plan_review`, `worker`, `reviewer`. An empty path uses `.brigada/instructions/<role>.md`; each text is at most 8192 bytes. |
 | `skills_dir` | repo-relative directory | `.brigada/skills` | Skills to read at import; a file that names no `skills_dir` reads `.brigada/skills` when that directory exists (see [Skills](#skills)). |
@@ -1477,6 +1479,7 @@ Every key that `brigada project set` and `project show` know, with each default 
 | `foreman_wakes_per_day` | `20`, or the config file's value | no, local only |
 | `plan_files` | `on` | yes |
 | `plan_file_branch` | `brigada/plans` | yes |
+| `branch_retention_days` | `7` | yes |
 | `instructions` | `none` | local worker-text override; the file uses an `instructions` role map or the `instructions_file` alias |
 | `skills_dir` | `.brigada/skills` | yes; `project show` only, `project set` refuses it |
 
@@ -1511,7 +1514,7 @@ A command's flags go after its name and before its positional arguments (`diff`,
 - `brigada agents remove <harness>/<model> [--now]`: remove one agent by deleting every line that registers it from the agents file; restart a running runner to stop serving it, waiting out its running jobs, or cutting them with `--now`. See [section 8](#models-added-later).
 - `brigada agents update [--yes] [--dry-run] [--now]`: move each registered agent whose model a newer version of the same line replaces to the newer model, rewriting its line in place; restart a running runner to serve the new models, waiting out its running jobs, or cutting them with `--now`. See [section 8](#models-added-later).
 - `brigada history [--task N] [--job N] [--limit N] [--all] [--raw]`: the timeline in plain words; bare, a table of the last 50 events, or every event with `--all`; `--raw` prints the internal form. See [section 4](#history-diffs-and-logs).
-- `brigada diff <task-id> [--stat] [--repo URL]`: what a task changed, as `git diff base...branch`; run inside the repo. See [section 4](#history-diffs-and-logs).
+- `brigada diff <task-id> [--stat] [--repo URL]`: what a task changed, as `git diff base...branch`; run inside the repo; a pruned result branch is refused in plain words. See [section 4](#history-diffs-and-logs).
 - `brigada logs <job-id> [--check] [--tail N] [--follow]`, or `brigada logs --task N`: a job's transcript as readable lines, or its check log. See [section 4](#history-diffs-and-logs).
 - `brigada stats`: tier, attempts, successes, rate and confidence per agent, class and repo. See [section 9](#9-the-record-and-stats).
 - `brigada top [--interval D] [--project URL] [--no-start]`: the engine full-screen as one column of boxes, with the same unregistered-or-superseded-models hint as `status`; one plain snapshot when piped. See [section 8](#capacity).

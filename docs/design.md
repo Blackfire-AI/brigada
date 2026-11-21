@@ -46,4 +46,5 @@ The design is one file per section under [design/](design/). A reference such as
   - [§12.3 Runner protocol](design/12-interfaces.md#123-runner-protocol)
 - [§13. Engine lifecycle](design/13-lifecycle.md)
   - [§13.1 `brigada init`](design/13-lifecycle.md#131-brigada-init)
+  - [§13.2 Pruning finished task branches](design/13-lifecycle.md#132-pruning-finished-task-branches)
 - [§16. Open questions](design/16-open-questions.md)

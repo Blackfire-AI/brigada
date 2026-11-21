@@ -31,6 +31,7 @@ const (
 	KindForeman    Kind = "foreman"
 	KindLand       Kind = "land"        // a landing (§7.1): no worker, a runner with git
 	KindPlanReview Kind = "plan_review" // a plan review (§6.2): no task, an agent of a family other than the foreman's
+	KindSweep      Kind = "sweep"       // dead task branches (§13.2): no task or worker, a runner with git
 )
 
 // Mode is how the runner starts the job (§5.6): a fresh session, or a

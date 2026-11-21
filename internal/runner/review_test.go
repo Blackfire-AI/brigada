@@ -335,13 +335,14 @@ func TestRunnerRunsReviewJobToEnd(t *testing.T) {
 	if n := checkRuns(t, markers); n != 1 {
 		t.Errorf("the check ran %d times, want the work round's alone", n)
 	}
-	// And it pushed nothing (§7): the remote holds what the work round
-	// pushed, and no branch more.
-	if got := remoteBranchCommit(t, remote, branch); got != pushed {
-		t.Errorf("the remote's %s moved during the review: %s -> %s", branch, pushed, got)
+	// And it pushed nothing (§7): the remote held what the work round
+	// pushed until the landing pruned the landed task's branch (§13.2),
+	// and no branch more.
+	if got := remoteBranchCommit(t, remote, branch); got != "" {
+		t.Errorf("the remote still holds %s after the landing: %s, want it pruned (§13.2)", branch, got)
 	}
-	if refs := remoteRefs(t, remote); len(refs) != 2 {
-		t.Errorf("the remote holds %v, want main and the task's branch alone", refs)
+	if refs := remoteRefs(t, remote); len(refs) != 1 {
+		t.Errorf("the remote holds %v, want main alone, the landed task's branch pruned (§13.2)", refs)
 	}
 
 	assertReviewerSaw(t, markers, branch, pushed)

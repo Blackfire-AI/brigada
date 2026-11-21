@@ -178,6 +178,8 @@ func (e *Engine) retireTx(tx *sql.Tx, project int64, tasks []int64, reason, call
 
 	// Write: jobs stop, the land hold drops, the state moves, and one
 	// task_retired event carries the reason verbatim and who asked. The
+	// retire settles the task (§13.2): settled_at starts the
+	// branch-retention window, for its branch can never land again. The
 	// row update marks the plan's file owed, as any task write does.
 	res := RetireResult{}
 	nowStr := fmtTime(now)
@@ -188,8 +190,8 @@ func (e *Engine) retireTx(tx *sql.Tx, project int64, tasks []int64, reason, call
 		if _, err := tx.Exec(`DELETE FROM land_holds WHERE task_id = ?`, t.id); err != nil {
 			return RetireResult{}, fmt.Errorf("drop the land hold of task %d: %w", t.id, err)
 		}
-		if _, err := tx.Exec(`UPDATE tasks SET state = ?, land_env_cause = '', updated_at = ? WHERE id = ?`,
-			taskRetired, nowStr, t.id); err != nil {
+		if _, err := tx.Exec(`UPDATE tasks SET state = ?, land_env_cause = '', updated_at = ?, settled_at = ? WHERE id = ?`,
+			taskRetired, nowStr, nowStr, t.id); err != nil {
 			return RetireResult{}, fmt.Errorf("retire task %d: %w", t.id, err)
 		}
 		if _, err := appendEventTx(tx, evTaskRetired, t.project, t.id, 0,

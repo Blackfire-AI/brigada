@@ -135,6 +135,13 @@ func (r *jobRun) execute(ctx context.Context) {
 		return
 	}
 
+	// A branch sweep likewise needs no worker or checkout (§13.2): only the
+	// runner's credentialed git talks to the remote.
+	if isSweepJob(r.grant) {
+		r.runSweepJob(ctx)
+		return
+	}
+
 	// The worker's kill switch exists before any goroutine that may
 	// fire it: the heartbeat loop (a stall) closes the channel, the
 	// worker's killer goroutine receives it — the field is written once,

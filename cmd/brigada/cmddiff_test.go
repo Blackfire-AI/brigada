@@ -112,17 +112,66 @@ func TestDiffTaskWithoutBranch(t *testing.T) {
 	}
 }
 
+func TestDiffRefusesPrunedResultBranch(t *testing.T) {
+	remote, clone := diffFixture(t)
+	// The task finished; its result branch was pruned from the remote,
+	// as a landing or an ended task's cleanup does.
+	gitIn(t, clone, "push", "-q", "origin", "--delete", "brigada/task-5")
+	for _, tc := range []struct{ state, want string }{
+		{"done", "was landed and its result branch brigada/task-5 was pruned from origin; the change is on the land target: git log --grep 'Brigada-Task: 5'"},
+		{"cancelled", "ended (cancelled) and its result branch brigada/task-5 was pruned from origin; there is nothing to diff"},
+		{"retired", "ended (retired) and its result branch brigada/task-5 was pruned from origin; there is nothing to diff"},
+	} {
+		t.Run(tc.state, func(t *testing.T) {
+			stub := stubTasks{task: engine.TaskInfo{ID: 5, State: tc.state, RepoURL: remote, BaseRef: "main", Branch: "brigada/task-5"}}
+			var out, errb bytes.Buffer
+			if code := printDiff(context.Background(), stub, clone, 5, "", false, &out, &errb); code != 1 {
+				t.Fatalf("exit %d, want 1", code)
+			}
+			if !strings.Contains(errb.String(), tc.want) {
+				t.Errorf("stderr = %q, want it to contain %q", errb.String(), tc.want)
+			}
+			if strings.Contains(errb.String(), "couldn't find remote ref") {
+				t.Errorf("stderr = %q, want no raw git error", errb.String())
+			}
+			if out.Len() != 0 {
+				t.Errorf("stdout = %q, want nothing", out.String())
+			}
+		})
+	}
+}
+
+func TestDiffKeepsFetchErrorWhenLsRemoteFails(t *testing.T) {
+	_, clone := diffFixture(t)
+	// An unreachable remote breaks ls-remote and fetch alike; the
+	// refusal is the fetch's own genuine error, not a pruned-branch one.
+	gone := filepath.Join(t.TempDir(), "gone")
+	gitIn(t, clone, "remote", "set-url", "origin", "file://"+gone)
+	stub := stubTasks{task: engine.TaskInfo{ID: 5, State: "done", RepoURL: "file:" + gone, BaseRef: "main", Branch: "brigada/task-5"}}
+	var out, errb bytes.Buffer
+	if code := printDiff(context.Background(), stub, clone, 5, "", false, &out, &errb); code != 1 {
+		t.Fatalf("exit %d, want 1", code)
+	}
+	if !strings.Contains(errb.String(), "fetch main and brigada/task-5 from origin:") {
+		t.Errorf("stderr = %q, want the genuine fetch error", errb.String())
+	}
+	if strings.Contains(errb.String(), "was pruned") {
+		t.Errorf("stderr = %q, want no pruned-branch refusal", errb.String())
+	}
+}
+
 func TestDiffCanonicalRepositoryURLs(t *testing.T) {
 	remote, clone := diffFixture(t)
 	git, err := exec.LookPath("git")
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Keep the real origin URL visible to gitOriginURL, but fetch from the
-	// fixture instead of the network. All fetches and diffs still use git.
+	// Keep the real origin URL visible to gitOriginURL, but run the
+	// remote-reading commands against the fixture instead of the
+	// network. All git calls still use git.
 	bin := t.TempDir()
 	script := "#!/bin/sh\n" +
-		"if [ \"$3\" = fetch ]; then\n" +
+		"if [ \"$3\" = fetch ] || [ \"$3\" = ls-remote ]; then\n" +
 		"  exec " + shellQuote(git) + " -c \"url.$BRIGADA_DIFF_REMOTE.insteadOf=$BRIGADA_DIFF_ORIGIN\" \"$@\"\n" +
 		"fi\nexec " + shellQuote(git) + " \"$@\"\n"
 	if err := os.WriteFile(filepath.Join(bin, "git"), []byte(script), 0o755); err != nil {

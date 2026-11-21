@@ -702,8 +702,12 @@ func (e *Engine) cancelPlanTx(tx *sql.Tx, proj, plan int64, eventKind string, no
 			}
 		}
 	}
-	if _, err := tx.Exec(`UPDATE tasks SET state = ?, updated_at = ? WHERE plan_id = ? AND state NOT IN (?, ?, ?)`,
-		taskCancelled, fmtTime(now), plan, taskDone, taskCancelled, taskRetired); err != nil {
+	// The close cancels the plan's live tasks, settling each one (§13.2):
+	// settled_at starts the branch-retention window. Done, cancelled and
+	// retired tasks keep their state and their own settled_at, for they are
+	// settled already.
+	if _, err := tx.Exec(`UPDATE tasks SET state = ?, updated_at = ?, settled_at = ? WHERE plan_id = ? AND state NOT IN (?, ?, ?)`,
+		taskCancelled, fmtTime(now), fmtTime(now), plan, taskDone, taskCancelled, taskRetired); err != nil {
 		return fmt.Errorf("cancel the tasks of plan %d: %w", plan, err)
 	}
 	if err := recordPlanOutcomeTx(tx, proj, false, now); err != nil {

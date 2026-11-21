@@ -1021,6 +1021,7 @@ func TestSchemaEditsMatchTheirMigrations(t *testing.T) {
 		59: "plan_needs_foreman",
 		64: "role_instructions",
 		71: "task_retired",
+		79: "task_branch_sweep",
 	}
 	migs, err := allMigrations()
 	if err != nil {
@@ -1100,6 +1101,60 @@ func TestTaskRetiredMigration(t *testing.T) {
 	}
 	if _, err := f.db.Exec(`UPDATE tasks SET state = 'bogus' WHERE id = ?`, f.task); err == nil || !strings.Contains(err.Error(), "CHECK") {
 		t.Errorf("task with a bogus state: err = %v; want a CHECK failure", err)
+	}
+}
+
+// TestTaskSettledAtMigrationKeepsTheRows builds the store of a binary
+// that predates 0078_task_settled_at — a task mid-flight and one already
+// cancelled — and opens it with this binary: the nullable column exists,
+// every old row reads NULL (nothing settled under the old binary's
+// writes), and the rows keep their values.
+func TestTaskSettledAtMigrationKeepsTheRows(t *testing.T) {
+	migs, err := allMigrations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := 0
+	for _, m := range migs {
+		if m.name == "task_settled_at" {
+			before = m.version - 1
+			break
+		}
+	}
+	if before == 0 {
+		t.Fatal("task_settled_at migration not found in allMigrations")
+	}
+	path := filepath.Join(t.TempDir(), "store.db")
+	db, err := sql.Open("sqlite", dsn(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range migs[:before] {
+		exec(t, db, m.sql)
+	}
+	exec(t, db, "PRAGMA user_version = "+strconv.Itoa(before))
+	project := insertProject(t, db)
+	plan := insertPlan(t, db, project)
+	task := insertTask(t, db, plan)
+	exec(t, db, "UPDATE tasks SET state = 'cancelled' WHERE id = ?", task)
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s := openStore(t, path)
+	if cols := queryStrings(t, s.db, "SELECT name FROM pragma_table_info('tasks')"); !slices.Contains(cols, "settled_at") {
+		t.Errorf("tasks after upgrade has no settled_at column: %v", cols)
+	}
+	if got := queryInt(t, s.db, "SELECT COUNT(*) FROM tasks WHERE settled_at IS NOT NULL"); got != 0 {
+		t.Errorf("tasks with settled_at after upgrade = %d, want 0: no old row carries a settle time", got)
+	}
+	if got := queryString(t, s.db, "SELECT state FROM tasks WHERE id = ?", task); got != "cancelled" {
+		t.Errorf("existing task state = %q, want cancelled untouched", got)
+	}
+	// The column takes the engine clock's text, the shape the cancel and
+	// retire writes give it.
+	exec(t, s.db, "UPDATE tasks SET settled_at = ? WHERE id = ?", ts, task)
+	if got := queryString(t, s.db, "SELECT settled_at FROM tasks WHERE id = ?", task); got != ts {
+		t.Errorf("settled_at = %q, want %q", got, ts)
 	}
 }
 

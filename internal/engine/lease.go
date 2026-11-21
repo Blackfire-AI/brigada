@@ -125,6 +125,9 @@ type LeaseGrant struct {
 	// refs/brigada/land/<target> before it stacks. False for the push
 	// phase and every other kind.
 	DropWaitingRef bool
+	// SweepTaskIDs is, for a sweep job (§13.2), the exact set of task ids
+	// whose branch families the runner may delete. Empty for every other kind.
+	SweepTaskIDs []int64
 	// Branch is the branch the engine names a work or fix job to work
 	// on (§5.1): a work job makes it from the base ref, a fix round
 	// continues the task's current branch, and the runner builds and
@@ -441,8 +444,8 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 		}
 
 		var cands []agentCand
-		if j.Kind == KindLand {
-			// A land job has no worker and no agent (§7.1): the label
+		if j.Kind == KindLand || j.Kind == KindSweep {
+			// Land and sweep jobs have no worker and no agent: the label
 			// check above is the whole placement, and the runner records
 			// no agent.
 			cands = []agentCand{{}}
@@ -733,6 +736,9 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 			// branch, the task's result branch and the project's default
 			// check are all the runner needs (§7.1).
 			return e.landLeaseGrantTx(tx, j, owner, leaseID, expires)
+		}
+		if j.Kind == KindSweep {
+			return e.sweepLeaseGrantTx(tx, j, owner, leaseID, expires)
 		}
 		repo, baseRef, checkCmd, branch, err := taskInfoTx(tx, j)
 		if err != nil {
@@ -1597,7 +1603,7 @@ func jobBranchTx(tx *sql.Tx, j *jobRow) (string, error) {
 		return "", fmt.Errorf("count the restarts of task %d: %w", j.TaskID, err)
 	}
 	if restarts == 0 {
-		return fmt.Sprintf("brigada/task-%d", j.TaskID), nil
+		return fmt.Sprintf("%s%d", taskBranchPrefix, j.TaskID), nil
 	}
-	return fmt.Sprintf("brigada/task-%d-r%d", j.TaskID, restarts), nil
+	return fmt.Sprintf("%s%d-r%d", taskBranchPrefix, j.TaskID, restarts), nil
 }
