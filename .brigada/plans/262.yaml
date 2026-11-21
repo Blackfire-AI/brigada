@@ -40,7 +40,7 @@ tasks:
     deps: ["design-note-2"]
     base: "design-note-2"
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-1062"
     rounds: 0
   - id: 1063
@@ -62,7 +62,7 @@ tasks:
     base: ""
     tier: heavy
     effort: medium
-    state: pending
+    state: running
     branch: ""
     rounds: 0
   - id: 1065
