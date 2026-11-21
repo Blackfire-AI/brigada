@@ -51,8 +51,8 @@ tasks:
     base: "design-note-2"
     effort: medium
     skills: ["config-setting", "schema-migration"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-1063"
     rounds: 0
   - id: 1064
     name: "reconcile-sweep"
