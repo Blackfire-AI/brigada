@@ -73,9 +73,9 @@ tasks:
     base: "design-note-2"
     effort: medium
     skills: ["bugfix"]
-    state: reviewing
+    state: running
     branch: "brigada/task-1065"
-    rounds: 0
+    rounds: 1
   - id: 1066
     name: "design-note-2"
     title: "design note: task-branch family and pruning rules"
