@@ -40,8 +40,8 @@ tasks:
     deps: ["design-note-2"]
     base: "design-note-2"
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-1062"
     rounds: 0
   - id: 1063
     name: "retention-window"
