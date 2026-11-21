@@ -51,7 +51,7 @@ tasks:
     base: "design-note-2"
     effort: medium
     skills: ["config-setting", "schema-migration"]
-    state: running
+    state: reviewing
     branch: "brigada/task-1063"
     rounds: 1
   - id: 1064
