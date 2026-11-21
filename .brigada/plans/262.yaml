@@ -5,9 +5,9 @@
 plan: 262
 title: "prune finished task branches (#247)"
 repo: "github.com/Blackfire-AI/brigada"
-state: needs_foreman
+state: reviewing
 created: 2026-11-21T20:52:37.611675Z
-updated: 2026-11-21T20:55:14.408998Z
+updated: 2026-11-21T20:59:06.649895Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -47,9 +47,8 @@ tasks:
     name: "retention-window"
     title: "branch_retention_days setting and settled_at"
     class: "implement"
-    deps: ["lander-hook"]
-    base: "lander-hook"
-    tier: heavy
+    deps: ["design-note"]
+    base: "design-note"
     effort: medium
     skills: ["config-setting", "schema-migration"]
     state: pending
@@ -59,10 +58,21 @@ tasks:
     name: "reconcile-sweep"
     title: "engine-start sweep prunes dead task branches"
     class: "implement"
-    deps: ["retention-window"]
-    base: "retention-window"
+    deps: ["lander-hook", "retention-window"]
+    base: ""
     tier: heavy
     effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 1065
+    name: "diff-pruned"
+    title: "brigada diff on a pruned result branch"
+    class: "implement"
+    deps: ["design-note"]
+    base: "design-note"
+    effort: medium
+    skills: ["bugfix"]
     state: pending
     branch: ""
     rounds: 0
