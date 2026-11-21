@@ -480,6 +480,7 @@ When `notify` is `auto` (the default), the engine also raises a desktop notifica
 - Run it inside the project's repository. The working directory's selected remote must be the task's repo, or diff refuses and names both; `--repo` says which URL the directory stands for when its selected remote is a mirror or fork.
 - It fetches the two refs from the project's remote (the one whose URL matches the task's repo, `origin` preferred; with `--repo` and no match, `origin`, else the only remote), with no checkout, and prints to stdout, so it pipes to a pager.
 - A task with no result branch yet says so.
+- A task whose result branch is no longer on the remote — pruned after the task landed, or after it was cancelled or retired — is refused in plain words: a `done` task's change is on the land target, its commit found by `git log --grep 'Brigada-Task: <id>'`, and a cancelled or retired task has nothing left to diff.
 
 `brigada logs <job-id>` prints what a job's worker did, from its transcript, as readable lines: messages, tool starts and ends, errors.
 
@@ -1509,7 +1510,7 @@ A command's flags go after its name and before its positional arguments (`diff`,
 - `brigada agents add <harness>/<model> [--classes CLASSES] [--effort LEVEL] [--now]`: register one model by appending its line to the agents file; restart a running runner to serve it, waiting out its running jobs, or cutting them with `--now`. See [section 8](#models-added-later).
 - `brigada agents update [--yes] [--dry-run] [--now]`: move each registered agent whose model a newer version of the same line replaces to the newer model, rewriting its line in place; restart a running runner to serve the new models, waiting out its running jobs, or cutting them with `--now`. See [section 8](#models-added-later).
 - `brigada history [--task N] [--job N] [--limit N] [--all] [--raw]`: the timeline in plain words; bare, a table of the last 50 events, or every event with `--all`; `--raw` prints the internal form. See [section 4](#history-diffs-and-logs).
-- `brigada diff <task-id> [--stat] [--repo URL]`: what a task changed, as `git diff base...branch`; run inside the repo. See [section 4](#history-diffs-and-logs).
+- `brigada diff <task-id> [--stat] [--repo URL]`: what a task changed, as `git diff base...branch`; run inside the repo; a pruned result branch is refused in plain words. See [section 4](#history-diffs-and-logs).
 - `brigada logs <job-id> [--check] [--tail N] [--follow]`, or `brigada logs --task N`: a job's transcript as readable lines, or its check log. See [section 4](#history-diffs-and-logs).
 - `brigada stats`: tier, attempts, successes, rate and confidence per agent, class and repo. See [section 9](#9-the-record-and-stats).
 - `brigada top [--interval D] [--project URL] [--no-start]`: the engine full-screen as one column of boxes, with the same unregistered-or-superseded-models hint as `status`; one plain snapshot when piped. See [section 8](#capacity).

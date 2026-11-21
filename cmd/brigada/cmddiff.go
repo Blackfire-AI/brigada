@@ -120,6 +120,14 @@ func printDiff(ctx context.Context, client taskReader, dir string, id int64, rep
 	if err != nil {
 		return fail(stderr, err)
 	}
+	// The remote may no longer hold the result branch: a landed task's
+	// goes with its landing, an ended task's with its cleanup. Ask the
+	// remote before fetching, so a pruned branch reads as brigada's own
+	// refusal; an ls-remote that itself fails (network, credentials)
+	// falls through to the fetch and its genuine error.
+	if held, err := branchHeld(ctx, dir, remote, task.Branch); err == nil && !held {
+		return fail(stderr, prunedBranchRefusal(id, task.State, task.Branch, remote))
+	}
 	if err := runGit(ctx, dir, nil, stderr, "fetch", "--quiet", remote,
 		"+"+task.BaseRef+":"+baseRef, "+"+task.Branch+":"+branchRef); err != nil {
 		return fail(stderr, fmt.Errorf("fetch %s and %s from %s: %w", task.BaseRef, task.Branch, remote, err))
@@ -133,6 +141,34 @@ func printDiff(ctx context.Context, client taskReader, dir string, id int64, rep
 		return fail(stderr, fmt.Errorf("diff %s...%s: %w", task.BaseRef, task.Branch, err))
 	}
 	return 0
+}
+
+// branchHeld reports whether the remote still holds the named branch,
+// asked directly (ls-remote, no fetch). A branch pruned after its task
+// landed or ended is held by no remote, and diff refuses it in plain
+// words; an ls-remote that itself fails returns its error, and the
+// caller falls through to the fetch and its genuine error.
+func branchHeld(ctx context.Context, dir, remote, branch string) (bool, error) {
+	var out bytes.Buffer
+	if err := runGit(ctx, dir, &out, io.Discard, "ls-remote", "--heads", remote, branch); err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(out.String()) != "", nil
+}
+
+// prunedBranchRefusal words the refusal for a result branch the remote
+// no longer holds, by the task's state: a done task's change lives on
+// its land target, its commit found by the Brigada-Task trailer; a
+// cancelled or retired task's change is gone with its branch.
+func prunedBranchRefusal(id int64, state, branch, remote string) error {
+	switch state {
+	case "done":
+		return fmt.Errorf("task %d was landed and its result branch %s was pruned from %s; the change is on the land target: git log --grep 'Brigada-Task: %d'", id, branch, remote, id)
+	case "cancelled", "retired":
+		return fmt.Errorf("task %d ended (%s) and its result branch %s was pruned from %s; there is nothing to diff", id, state, branch, remote)
+	default:
+		return fmt.Errorf("task %d's result branch %s is no longer on %s", id, branch, remote)
+	}
 }
 
 // runGit runs git in dir with the given output sinks; a nil stdout
