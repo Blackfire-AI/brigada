@@ -5,9 +5,9 @@
 plan: 262
 title: "prune finished task branches (#247)"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: reviewing
 created: 2026-11-21T20:52:37.611675Z
-updated: 2026-11-21T21:04:43.862982Z
+updated: 2026-11-21T21:05:59.286622Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -30,15 +30,15 @@ tasks:
     tier: light
     effort: low
     skills: ["docs-change"]
-    state: running
+    state: cancelled
     branch: ""
     rounds: 0
   - id: 1062
     name: "lander-hook"
     title: "land deletes the task's whole ref family"
     class: "implement"
-    deps: ["design-note"]
-    base: "design-note"
+    deps: ["design-note-2"]
+    base: "design-note-2"
     effort: medium
     state: pending
     branch: ""
@@ -47,8 +47,8 @@ tasks:
     name: "retention-window"
     title: "branch_retention_days setting and settled_at"
     class: "implement"
-    deps: ["design-note"]
-    base: "design-note"
+    deps: ["design-note-2"]
+    base: "design-note-2"
     effort: medium
     skills: ["config-setting", "schema-migration"]
     state: pending
@@ -73,6 +73,18 @@ tasks:
     base: "retention-window"
     effort: medium
     skills: ["bugfix"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 1066
+    name: "design-note-2"
+    title: "design note: task-branch family and pruning rules"
+    class: "implement"
+    deps: []
+    base: ""
+    tier: light
+    effort: low
+    skills: ["docs-change"]
     state: pending
     branch: ""
     rounds: 0
