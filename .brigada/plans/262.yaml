@@ -73,8 +73,8 @@ tasks:
     base: "design-note-2"
     effort: medium
     skills: ["bugfix"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-1065"
     rounds: 0
   - id: 1066
     name: "design-note-2"
