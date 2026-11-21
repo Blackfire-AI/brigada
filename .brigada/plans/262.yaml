@@ -5,9 +5,9 @@
 plan: 262
 title: "prune finished task branches (#247)"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: reviewing
 created: 2026-11-21T20:52:37.611675Z
-updated: 2026-11-21T21:00:37.946749Z
+updated: 2026-11-21T21:01:23.448304Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -69,8 +69,8 @@ tasks:
     name: "diff-pruned"
     title: "brigada diff on a pruned result branch"
     class: "implement"
-    deps: ["design-note"]
-    base: "design-note"
+    deps: ["retention-window"]
+    base: "retention-window"
     effort: medium
     skills: ["bugfix"]
     state: pending
