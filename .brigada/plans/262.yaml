@@ -73,7 +73,7 @@ tasks:
     base: "design-note-2"
     effort: medium
     skills: ["bugfix"]
-    state: reviewing
+    state: done
     branch: "brigada/task-1065"
     rounds: 1
   - id: 1066
