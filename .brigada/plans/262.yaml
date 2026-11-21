@@ -63,8 +63,8 @@ tasks:
     tier: heavy
     effort: medium
     state: running
-    branch: "brigada/task-1064"
-    rounds: 0
+    branch: "brigada/task-1064-r1"
+    rounds: 1
   - id: 1065
     name: "diff-pruned"
     title: "brigada diff on a pruned result branch"
