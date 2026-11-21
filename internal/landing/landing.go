@@ -129,6 +129,31 @@ func Landed(ctx context.Context, dir string, id int64) (bool, error) {
 	return strings.TrimSpace(out) != "", nil
 }
 
+// LandedBranchHead is the head the branch of task id's landing had when
+// it landed, read from the Brigada-Branch trailer of its squash commit
+// on the checked-out history (§7.1, §13.2): the recorded tip of a
+// dependency's branch that was pruned after it landed, which a
+// dependent's landing diffs from while its branch still stacks on it.
+// "" when no commit on the history carries the task's trailer or the
+// trailer names no head.
+func LandedBranchHead(ctx context.Context, dir string, id int64) (string, error) {
+	out, err := text(ctx, dir, "log", "-n1", "--format=%(trailers:key=Brigada-Branch,valueonly)", "-E",
+		fmt.Sprintf("--grep=^Brigada-Task: %d$", id), "HEAD")
+	if err != nil {
+		// An unborn branch has no history to carry a trailer.
+		if !succeeds(ctx, dir, "rev-parse", "--verify", "--quiet", "HEAD") {
+			return "", nil
+		}
+		return "", err
+	}
+	trailer := strings.TrimSpace(out)
+	at := strings.LastIndexByte(trailer, '@')
+	if at < 0 || at+1 == len(trailer) {
+		return "", nil
+	}
+	return trailer[at+1:], nil
+}
+
 // LandedCommits maps each task id a commit in ref's history carries as a
 // Brigada-Task trailer to that commit's full sha (§7.1): how the engine
 // recognizes tasks landed outside the land job — a hand squash, or a

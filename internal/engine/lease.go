@@ -1597,7 +1597,7 @@ func jobBranchTx(tx *sql.Tx, j *jobRow) (string, error) {
 		return "", fmt.Errorf("count the restarts of task %d: %w", j.TaskID, err)
 	}
 	if restarts == 0 {
-		return fmt.Sprintf("brigada/task-%d", j.TaskID), nil
+		return fmt.Sprintf("%s%d", taskBranchPrefix, j.TaskID), nil
 	}
-	return fmt.Sprintf("brigada/task-%d-r%d", j.TaskID, restarts), nil
+	return fmt.Sprintf("%s%d-r%d", taskBranchPrefix, j.TaskID, restarts), nil
 }

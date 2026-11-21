@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -31,7 +30,10 @@ import (
 // the hand-driven land builds; run the project's default check on the
 // result; then by the push gate push, record waiting, or record the
 // push command; after_land after the push, or after the landing when
-// the gate is never. Never a force-push, never another branch touched.
+// the gate is never. Once the landing's commit is on the target, the
+// task's whole branch family is deleted from the remote (§13.2): the
+// work is contained in the target, and the matcher alone picks the refs
+// — never a force-push, never another branch touched.
 // Under the ask gate a landing waits on the remote, not in the clone:
 // its commit is pushed, fast-forward only, to the target's waiting ref
 // (landWaitRef), and the next landing squashes onto that ref while it
@@ -263,8 +265,22 @@ func (r *jobRun) landAttempt(ctx context.Context, dir string) (*landOutcome, err
 	grant := r.grant
 	o := &landOutcome{target: grant.LandTarget}
 	refs := []string{grant.LandTarget, grant.Branch}
+	// A result branch is pruned once its task landed (§13.2), so a
+	// dependent's recorded base may be gone from the remote: its task's
+	// work is then in the history the squash lands on, and the diff is
+	// read from there below instead of from the branch.
+	basePruned := false
 	if grant.BaseRef != grant.LandTarget && grant.BaseRef != grant.Branch {
-		refs = append(refs, grant.BaseRef)
+		if _, _, family := engine.ParseTaskBranchRef(grant.BaseRef); family {
+			holds, err := r.landRemoteHas(ctx, dir, grant.BaseRef)
+			if err != nil {
+				return nil, err
+			}
+			basePruned = !holds
+		}
+		if !basePruned {
+			refs = append(refs, grant.BaseRef)
+		}
 	}
 	if err := engine.CheckBaseFetchable(grant.BaseRef); err != nil {
 		return nil, err
@@ -356,11 +372,35 @@ func (r *jobRun) landAttempt(ctx context.Context, dir string) (*landOutcome, err
 	treePatched := false
 	if grant.BaseRef == grant.LandTarget || grant.BaseRef == grant.Branch {
 		diffBase = "refs/heads/" + grant.BaseRef
+	} else if basePruned {
+		// The pruned base's task landed — its work is on the history the
+		// squash lands on — and the landing's Brigada-Branch trailer names
+		// the tip the branch had when it landed (§7.1, §13.2). While the
+		// task's branch still stacks on that tip, the pruned base's rule
+		// holds with the tip in the branch's place: the tree diff when
+		// the branch's tree holds the squash base's whole content, else
+		// the three-dot diff from the tip, which resolves as an ancestor
+		// of the branch. A branch rebuilt off the tip diffs against the
+		// squash base, as any base the branch no longer descends from
+		// does.
+		id, _, _ := engine.ParseTaskBranchRef(grant.BaseRef)
+		head, err := landing.LandedBranchHead(ctx, dir, id)
+		if err != nil {
+			return nil, fmt.Errorf("read the landed tip of %s: %v", grant.BaseRef, err)
+		}
+		if head != "" && r.landHasCommit(ctx, dir, head) {
+			if stacked, err := r.landIsAncestor(ctx, dir, head, "refs/heads/"+grant.Branch); err != nil {
+				return nil, fmt.Errorf("compare %s with %s: %v", grant.BaseRef, grant.Branch, err)
+			} else if stacked {
+				diffBase = head
+				treePatched = r.landBranchEncodes(ctx, dir, onto, grant.Branch)
+			}
+		}
 	} else if stacked, err := r.landIsAncestor(ctx, dir, "refs/heads/"+grant.BaseRef, "refs/heads/"+grant.Branch); err != nil {
 		return nil, fmt.Errorf("compare %s with %s: %v", grant.BaseRef, grant.Branch, err)
 	} else if stacked {
 		diffBase = "refs/heads/" + grant.BaseRef
-		if id, ok := landBaseTaskID(grant.BaseRef); ok {
+		if id, _, ok := engine.ParseTaskBranchRef(grant.BaseRef); ok {
 			landed, err := landing.Landed(ctx, dir, id)
 			if err != nil {
 				return nil, fmt.Errorf("read the landed mark of task %d: %v", id, err)
@@ -492,6 +532,7 @@ func (r *jobRun) landAttempt(ctx context.Context, dir string) (*landOutcome, err
 			return o, nil
 		}
 		o.pushed = "pushed"
+		r.landPruneFamily(ctx, dir)
 		o.afterErr = r.runAfterLand(ctx, dir)
 	}
 	return o, nil
@@ -570,6 +611,7 @@ func (r *jobRun) runLandPushPhase(ctx context.Context) {
 			return
 		}
 	}
+	r.landPruneFamily(ctx, dir)
 	r.finishLand(ctx, pushRecordJSON{
 		TargetBranch: grant.LandTarget,
 		Commit:       grant.LandCommit,
@@ -789,24 +831,56 @@ func (r *jobRun) landFetch(ctx context.Context, dir string, refs ...string) erro
 	return nil
 }
 
-// landBaseTaskID reads the task id a brigada result branch name carries
-// (brigada/task-<id>, with -r<n> after a restart or -a<n> after a
-// re-lease): the dependency a dependent's recorded base names, whose
-// landing the landing clone asks for by its Brigada-Task trailer.
-// false when the name is not one of the engine's branch names.
-func landBaseTaskID(ref string) (int64, bool) {
-	rest, ok := strings.CutPrefix(ref, "brigada/task-")
-	if !ok {
-		return 0, false
+// landRemoteHas reports whether the remote holds the branch: false when
+// it answers cleanly that it does not, an error when it could not be
+// asked.
+func (r *jobRun) landRemoteHas(ctx context.Context, dir, branch string) (bool, error) {
+	out, err := r.landGit(ctx, dir, "ls-remote", "origin", "refs/heads/"+branch)
+	if err != nil {
+		return false, fmt.Errorf("look for %s on %s: %v", branch, redactURL(r.grant.RepoURL), trimCmdError(out, err))
 	}
-	if s, _, found := strings.Cut(rest, "-"); found {
-		rest = s
+	return strings.TrimSpace(string(out)) != "", nil
+}
+
+// landPruneFamily deletes the landed task's whole branch family from
+// the remote (§13.2), right after the landing's commit is on the
+// target: the first attempt's branch, the re-lease and restart
+// branches, the salvages — the work they carried is contained in the
+// target, so the deletion is unconditionally safe. The grant carries no
+// restart-round data, so the exact set is read off the remote itself:
+// every head the family's matcher maps to the task's id, never a glob —
+// brigada/task-<id>* would catch a task id that merely shares the
+// numeric prefix, and the land target, the plans branch and the user's
+// branches are never the matcher's. A failure — the remote refusing, a
+// network fault — is logged, never the landing's: the push landed the
+// task, and the engine-start sweep tries the deletion again.
+func (r *jobRun) landPruneFamily(ctx context.Context, dir string) {
+	grant := r.grant
+	out, err := r.landGit(ctx, dir, "ls-remote", "--heads", "origin")
+	if err != nil {
+		r.cfg.Log.WarnContext(ctx, "list the remote's branches to prune the landed task's family",
+			"job_id", grant.JobID, "task_id", grant.TaskID, "err", trimCmdError(out, err))
+		return
 	}
-	id, err := strconv.ParseInt(rest, 10, 64)
-	if err != nil || id <= 0 {
-		return 0, false
+	var doomed []string
+	for _, line := range strings.Split(string(out), "\n") {
+		f := strings.Fields(line)
+		if len(f) < 2 {
+			continue
+		}
+		name := strings.TrimPrefix(f[1], "refs/heads/")
+		if id, _, ok := engine.ParseTaskBranchRef(name); ok && id == grant.TaskID {
+			doomed = append(doomed, ":"+f[1])
+		}
 	}
-	return id, true
+	if len(doomed) == 0 {
+		return
+	}
+	args := append([]string{"push", "--quiet", "origin"}, doomed...)
+	if out, err := r.landGit(ctx, dir, args...); err != nil {
+		r.cfg.Log.WarnContext(ctx, "prune the landed task's branch family from the remote",
+			"job_id", grant.JobID, "task_id", grant.TaskID, "err", trimCmdError(out, err))
+	}
 }
 
 // landWaitRef names the remote ref the target's waiting landings sit on

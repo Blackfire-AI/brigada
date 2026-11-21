@@ -383,6 +383,31 @@ func TestMessageAuthorAddresses(t *testing.T) {
 	}
 }
 
+// TestLandedBranchHead: the head a landed task's branch had is read
+// from its squash commit's Brigada-Branch trailer (§13.2); a history
+// without the task's trailer reads "".
+func TestLandedBranchHead(t *testing.T) {
+	dir := newRepo(t)
+	write(t, dir, "a.txt", "a\n")
+	git(t, dir, "add", "-A")
+	git(t, dir, "commit", "-qm", "task seven\n\nBrigada-Task: 7\nBrigada-Branch: brigada/task-7@0123456789abcdef0123456789abcdef01234567")
+	write(t, dir, "b.txt", "b\n")
+	git(t, dir, "add", "-A")
+	git(t, dir, "commit", "-qm", "no trailer")
+
+	const want = "0123456789abcdef0123456789abcdef01234567"
+	got, err := LandedBranchHead(context.Background(), dir, 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Errorf("LandedBranchHead(7) = %q, want the trailer's head %s", got, want)
+	}
+	if got, err := LandedBranchHead(context.Background(), dir, 9); err != nil || got != "" {
+		t.Errorf("LandedBranchHead(9) = %q, %v; want none", got, err)
+	}
+}
+
 // TestLandedCommits: a branch's history maps each task id a commit
 // carries as a Brigada-Task trailer to that commit's full sha — the
 // engine's way to recognize tasks landed outside the land job.
