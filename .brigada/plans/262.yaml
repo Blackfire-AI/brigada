@@ -40,7 +40,7 @@ tasks:
     deps: ["design-note-2"]
     base: "design-note-2"
     effort: medium
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 1063
@@ -51,7 +51,7 @@ tasks:
     base: "design-note-2"
     effort: medium
     skills: ["config-setting", "schema-migration"]
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 1064
@@ -73,7 +73,7 @@ tasks:
     base: "design-note-2"
     effort: medium
     skills: ["bugfix"]
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 1066
@@ -85,6 +85,6 @@ tasks:
     tier: light
     effort: low
     skills: ["docs-change"]
-    state: reviewing
+    state: done
     branch: "brigada/task-1066"
     rounds: 1
