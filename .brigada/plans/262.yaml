@@ -62,7 +62,7 @@ tasks:
     base: ""
     tier: heavy
     effort: medium
-    state: running
+    state: reviewing
     branch: "brigada/task-1064-r2"
     rounds: 2
   - id: 1065
