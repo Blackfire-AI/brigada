@@ -325,7 +325,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 			source = initQwenModels(ctx)
 		}
 		// Only OpenCode's picks are individual choices: a saved model its
-		// list no longer shows stays pickable. The other harnesses offer every model.
+		// list no longer shows stays pickable. The other CLIs offer every model.
 		if h == "opencode" {
 			for _, spec := range saved[h] {
 				source = initCurrentModel(source, spec)
