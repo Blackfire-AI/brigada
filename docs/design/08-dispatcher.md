@@ -113,7 +113,7 @@ The foreman's session uses quota on its own account, so task workers must not dr
 
 **What a pause stops.** The user can pause dispatch for the whole engine or for one project: `brigada pause` with no flag pauses the engine, `brigada pause --repo URL` one project, as the other project-scoped actions name it, and `brigada resume` with the same scope lifts that scope's pause and no other. A job is paused when its project or the engine is.
 
-While it is paused the lease hands out none of its jobs — work, fix, review, plan review, land and a foreman turn woken by judgment events alike, a turn already queued when the pause begins included — and the engine submits no new headless turn for a judgment event of a paused project: the events stay pending in its inbox.
+While it is paused the lease hands out none of its jobs — work, fix, review, plan review, land, branch sweep and a foreman turn woken by judgment events alike, a turn already queued when the pause begins included — and the engine submits no new headless turn for a judgment event of a paused project: the events stay pending in its inbox.
 
 A foreman turn that carries a user message (§4.2 item 3) still leases, and an attach still joins the session, for the user asking in person is not what a pause holds; such a turn and an attached chat read the pending events as they always do and may consume them, the user being present, and a plan they create is created and waits like any other work, its review job queued. Gate decisions are taken as usual, and the jobs they queue wait too.
 

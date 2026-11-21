@@ -208,6 +208,16 @@ func Run(ctx context.Context, cfg Config) error {
 	if err := eng.RecoverForemanWakes(ctx); err != nil {
 		return fmt.Errorf("engine: %w", err)
 	}
+	// The remote deletions belong to a runner, whose git holds the push
+	// credentials (§13.2). Start-up computes the deletable tasks and queues
+	// the work only; no remote is contacted in this process.
+	queuedSweeps, err := eng.QueueTaskBranchSweeps(ctx)
+	if err != nil {
+		return fmt.Errorf("engine: %w", err)
+	}
+	if queuedSweeps > 0 {
+		log.InfoContext(ctx, "queued task-branch reconcile sweeps", "projects", queuedSweeps)
+	}
 	srv, err := api.New(ctx, st, eng, log, p.Tokens)
 	if err != nil {
 		return fmt.Errorf("engine: %w", err)

@@ -162,6 +162,7 @@ var schemaEdits = map[int]func(ctx context.Context, tx *sql.Tx) error{
 	59: widenPlanNeedsForemanCheck,
 	64: seedRoleInstructions,
 	71: widenTaskStates,
+	79: widenTaskBranchSweepChecks,
 }
 
 // jobsPairingCheck is the CHECK 0001 put on jobs: foreman jobs have no
@@ -260,6 +261,24 @@ func widenPlanReviewChecks(ctx context.Context, tx *sql.Tx) error {
 		return err
 	}
 	return editTableCheck(ctx, tx, "plans", plansStateCheck, plansStateCheckReviewing)
+}
+
+// The checks 0079 widens for the task-branch reconcile sweep: a sweep job
+// belongs to a project but no task, like a plan review, and runs with the
+// runner's git credentials rather than an agent.
+const (
+	jobsKindCheckSweep    = "CHECK (kind IN ('work', 'fix', 'review', 'foreman', 'land', 'plan_review', 'sweep'))"
+	jobsPairingCheckSweep = "CHECK ((kind = 'foreman') = (task_id IS NULL) OR kind IN ('review', 'plan_review', 'sweep'))"
+)
+
+func widenTaskBranchSweepChecks(ctx context.Context, tx *sql.Tx) error {
+	// As in 0058, a store whose earlier migrations ran as SQL alone still
+	// carries 0001's wording, while a jumped or partially edited store may
+	// carry 0050's or 0023's. Accept every live predecessor of this edit.
+	if err := editTableCheckEither(ctx, tx, "jobs", []string{jobsKindCheckPlanReview, jobsKindCheckLand, jobsKindCheck}, jobsKindCheckSweep); err != nil {
+		return err
+	}
+	return editTableCheckEither(ctx, tx, "jobs", []string{jobsPairingCheckPlanReview, jobsPairingCheckRelaxed, jobsPairingCheck}, jobsPairingCheckSweep)
 }
 
 // editTableCheckEither is editTableCheck over the wordings an earlier

@@ -1021,6 +1021,7 @@ func TestSchemaEditsMatchTheirMigrations(t *testing.T) {
 		59: "plan_needs_foreman",
 		64: "role_instructions",
 		71: "task_retired",
+		79: "task_branch_sweep",
 	}
 	migs, err := allMigrations()
 	if err != nil {

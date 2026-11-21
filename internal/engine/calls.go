@@ -404,11 +404,11 @@ func (e *Engine) completeTx(tx *sql.Tx, owner, jobID int64, leaseID string, c Co
 	if err != nil {
 		return "", err
 	}
-	if c.Result != "" && job.Kind != KindLand {
+	if c.Result != "" && job.Kind != KindLand && job.Kind != KindSweep {
 		// The run's answer is a conversation item too (§9): what the
-		// worker ended saying, kept with the event that ended the job. A
-		// land job has no worker; its landing record is the job's result
-		// and the events below, never a worker's words.
+		// worker ended saying, kept with the event that ended the job. Land
+		// and sweep jobs have no worker; their internal records are the job's
+		// result and the events below, never a worker's words.
 		if err := appendMessageTx(tx, job.ProjectID, eventID, msgKindWorkerResult,
 			authorWorker, workerResultMessage(c.Result), now); err != nil {
 			return "", err
