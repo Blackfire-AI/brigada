@@ -62,8 +62,8 @@ tasks:
     base: ""
     tier: heavy
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-1064"
     rounds: 0
   - id: 1065
     name: "diff-pruned"
