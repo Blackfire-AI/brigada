@@ -2,6 +2,7 @@ package qwencode
 
 import (
 	"bufio"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -388,6 +389,39 @@ func TestWeeklyLimitFixtureStdout(t *testing.T) {
 	}
 	if !strings.Contains(last.Text, "HTTP 402") {
 		t.Errorf("Text = %q, want the errors text", last.Text)
+	}
+}
+
+func TestPlainErrorWeeklyLimit(t *testing.T) {
+	pinNow(t)
+	var result lineJSON
+	if err := json.Unmarshal([]byte(weeklyLimitResult), &result); err != nil {
+		t.Fatal(err)
+	}
+	a := &Adapter{}
+	for name, parse := range map[string]func([]byte) (adapter.Event, bool){"stdout": a.ParseEvent, "stderr": a.ParseErrEvent} {
+		ev, ok := parse([]byte(result.Errors[0]))
+		if !ok || ev.ErrorKind != adapter.ErrLimit || ev.LimitUntil != "2026-11-19T09:36:21Z" {
+			t.Errorf("%s plain error = %+v, %v; want the weekly limit until its reset", name, ev, ok)
+		}
+	}
+}
+
+func TestWeeklyCreditsRelativeReset(t *testing.T) {
+	pinNow(t)
+	const message = "You've used up your weekly credits. Your credits are expected to reset in 1 day and 9 hours. You can wait or run /upgrade to get more credits."
+	lines := []string{
+		message,
+		`{"type":"result","subtype":"error_during_execution","is_error":true,"errors":["You've used up your weekly credits. Your credits are expected to reset in 1 day and 9 hours. You can wait or run /upgrade to get more credits."],"error_code":"insufficient_quota"}`,
+	}
+	a := &Adapter{}
+	for _, line := range lines {
+		for name, parse := range map[string]func([]byte) (adapter.Event, bool){"stdout": a.ParseEvent, "stderr": a.ParseErrEvent} {
+			ev, ok := parse([]byte(line))
+			if !ok || ev.ErrorKind != adapter.ErrLimit || ev.LimitUntil != "2026-11-14T09:00:00Z" {
+				t.Errorf("%s %q = %+v, %v; want the weekly limit until now+1d9h", name, line, ev, ok)
+			}
+		}
 	}
 }
 

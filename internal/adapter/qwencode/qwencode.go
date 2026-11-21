@@ -20,6 +20,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -430,7 +432,9 @@ func resultEvent(lj lineJSON) (adapter.Event, bool) {
 				}
 			}
 		case adapter.ErrLimit:
-			ev.LimitUntil = resetAt(lj.Errors)
+			if until := resetAt(lj.Errors); until != "" {
+				ev.LimitUntil = until
+			}
 		}
 		return ev, true
 	}
@@ -443,7 +447,8 @@ func resultEvent(lj lineJSON) (adapter.Event, bool) {
 	return adapter.Event{}, false
 }
 
-// now is the clock resultEvent compares a reset time against; tests pin it.
+// now is the clock quota error classification compares a reset time against;
+// tests pin it.
 var now = time.Now
 
 // resetAt reads quota.reset_at (unix seconds) from the JSON object that
@@ -472,6 +477,39 @@ func resetAt(errs []string) string {
 	return ""
 }
 
+var resetInTokenRe = regexp.MustCompile(`(\d+)\s*(days?|d|hours?|hrs?|h|minutes?|mins?|m)\b`)
+
+var resetInUnits = map[string]time.Duration{
+	"d": 24 * time.Hour, "day": 24 * time.Hour, "days": 24 * time.Hour,
+	"h": time.Hour, "hr": time.Hour, "hrs": time.Hour,
+	"hour": time.Hour, "hours": time.Hour,
+	"m": time.Minute, "min": time.Minute, "mins": time.Minute,
+	"minute": time.Minute, "minutes": time.Minute,
+}
+
+// resetIn reads qwen's "reset in 1 day and 9 hours" span as an RFC3339 UTC
+// instant. A span with no readable number-unit pair is unknown.
+func resetIn(text string, at time.Time) string {
+	lower := strings.ToLower(text)
+	i := strings.Index(lower, "reset in ")
+	if i < 0 {
+		return ""
+	}
+	span := lower[i+len("reset in "):]
+	if j := strings.IndexAny(span, ".\n"); j >= 0 {
+		span = span[:j]
+	}
+	var total time.Duration
+	for _, m := range resetInTokenRe.FindAllStringSubmatch(span, -1) {
+		n, _ := strconv.Atoi(m[1])
+		total += time.Duration(n) * resetInUnits[m[2]]
+	}
+	if total <= 0 {
+		return ""
+	}
+	return at.Add(total).UTC().Format(time.RFC3339)
+}
+
 // errorPhrase is one row of the phrase table: what a failure's text looks
 // like, case-insensitively, and the kind it sorts into. First match wins.
 type errorPhrase struct {
@@ -485,9 +523,10 @@ type errorPhrase struct {
 // insufficient_quota) is verified against a real failure by the
 // failure-weekly-limit fixture: with quota.reset_at it is the subscription's
 // weekly window (the qwen UI showed "week limit reached" with the same reset
-// time), so resultEvent sorts it as a limit until that reset. The other
-// phrases are still UNVERIFIED against the real CLI, a best understanding
-// and not seen output.
+// time), so resultEvent sorts it as a limit until that reset. The
+// weekly-credits wording and its relative reset come from another live
+// failure. The remaining phrases are still UNVERIFIED against the real CLI,
+// a best understanding and not seen output.
 var errorPhrases = []errorPhrase{
 	// The session --resume named is gone (§5.6): a fresh run, not another resume.
 	{adapter.ErrResumeFailed, "session not found"},
@@ -496,7 +535,7 @@ var errorPhrases = []errorPhrase{
 	{adapter.ErrResumeFailed, "conversation not found"},
 	// A 402 sorts as a spent balance (§8) here, ahead of the quota rows
 	// since its text also says insufficient_quota and first match wins;
-	// resultEvent turns one with a usable quota.reset_at into a limit.
+	// phraseEvent turns one with a usable quota.reset_at into a limit.
 	{adapter.ErrBalance, "http 402"},
 	{adapter.ErrBalance, "billing_error"},
 	{adapter.ErrBalance, "insufficient credits"},
@@ -507,6 +546,7 @@ var errorPhrases = []errorPhrase{
 	{adapter.ErrLimit, "quota exceeded"},
 	{adapter.ErrLimit, "exceeded your quota"},
 	{adapter.ErrLimit, "insufficient_quota"},
+	{adapter.ErrLimit, "weekly credits"},
 	{adapter.ErrLimit, "too many requests"},
 	// The CLI's login (§8).
 	{adapter.ErrAuth, "invalid api key"},
@@ -518,7 +558,9 @@ var errorPhrases = []errorPhrase{
 }
 
 // phraseEvent sorts one piece of text. Text that names nothing is not an
-// event; callers that know the text is a failure fall back to ErrOther.
+// event; callers that know the text is a failure fall back to ErrOther. A
+// quota error carries its reset whether it arrived in a result's errors[] or
+// as a plain error line.
 func phraseEvent(text string) (adapter.Event, bool) {
 	if adapter.IsModelRejectedText(text) {
 		return adapter.Event{Kind: adapter.EvError, ErrorKind: adapter.ErrModel, Text: text}, true
@@ -526,7 +568,22 @@ func phraseEvent(text string) (adapter.Event, bool) {
 	lower := strings.ToLower(text)
 	for _, m := range errorPhrases {
 		if strings.Contains(lower, m.phrase) {
-			return adapter.Event{Kind: adapter.EvError, ErrorKind: m.kind, Text: text}, true
+			ev := adapter.Event{Kind: adapter.EvError, ErrorKind: m.kind, Text: text}
+			switch ev.ErrorKind {
+			case adapter.ErrBalance:
+				if until := resetAt([]string{text}); until != "" {
+					if t, err := time.Parse(time.RFC3339, until); err == nil && t.After(now()) {
+						ev.ErrorKind = adapter.ErrLimit
+						ev.LimitUntil = until
+					}
+				}
+			case adapter.ErrLimit:
+				ev.LimitUntil = resetAt([]string{text})
+				if ev.LimitUntil == "" {
+					ev.LimitUntil = resetIn(text, now())
+				}
+			}
+			return ev, true
 		}
 	}
 	if adapter.IsInfraText(text) {
