@@ -676,15 +676,17 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 
 	// Write. Cancels first: a cancelled task's live jobs stop with it, and
 	// one task_cancelled_by_amend event carries the plan, the reason
-	// verbatim — "no reason given" when blank — and who asked.
+	// verbatim — "no reason given" when blank — and who asked. A cancel
+	// also settles the task (§13.2): settled_at starts the branch-retention
+	// window, for its branch can never land again.
 	res := AmendPlanResult{PlanID: plan, State: newState}
 	nowStr := fmtTime(now)
 	for _, i := range cancelled {
 		if err := e.cancelTaskJobsTx(tx, nodes[i].id, "task cancelled by plan_amend", now); err != nil {
 			return AmendPlanResult{}, err
 		}
-		if _, err := tx.Exec(`UPDATE tasks SET state = ?, skip_approved = ?, updated_at = ? WHERE id = ?`,
-			taskCancelled, nodes[i].skipApproved, nowStr, nodes[i].id); err != nil {
+		if _, err := tx.Exec(`UPDATE tasks SET state = ?, skip_approved = ?, updated_at = ?, settled_at = ? WHERE id = ?`,
+			taskCancelled, nodes[i].skipApproved, nowStr, nowStr, nodes[i].id); err != nil {
 			return AmendPlanResult{}, fmt.Errorf("cancel task %d: %w", nodes[i].id, err)
 		}
 		if _, err := appendEventTx(tx, evTaskCancelledByAmend, proj, nodes[i].id, 0,

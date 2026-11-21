@@ -127,14 +127,15 @@ var yamlKeyRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 // may carry (§13.1): the approval rules (the task count, the plan budget,
 // the classes and protected paths), the gates and land rules (§6.3),
 // the default check, the worker tool policy, the environment step (§5.7),
-// the extra repositories (§5.8) and the foreman session's rotation
-// threshold (§4.2), and nothing else. It is its own
+// the extra repositories (§5.8), the foreman session's rotation
+// threshold (§4.2) and the branch-retention window (§13.2), and nothing
+// else. It is its own
 // list, never SettingKeys: a setting added for the local store (the wake
 // budget, for one) does not become shared-file policy by being editable.
 var configSettingKeys = []string{SettingApprovalMaxTasks, SettingApprovalBudget, SettingApprovalClasses, SettingApprovalProtectedPaths,
 	SettingGatePlan, SettingGateLand, SettingGatePush, SettingApprovalTiers, SettingApprovalRestarted, SettingLandTarget, SettingAfterLand, SettingLandReady,
 	SettingDefaultCheck, SettingWorkerTools, SettingSetup, SettingSetupCacheKeyFiles, SettingSetupTimeout,
-	SettingExtraRepos, SettingForemanRotateTokens, SettingPlanFiles, SettingPlanFileBranch}
+	SettingExtraRepos, SettingForemanRotateTokens, SettingPlanFiles, SettingPlanFileBranch, SettingBranchRetentionDays}
 
 // ParseProjectConfig parses and validates a project.yaml. Anything but
 // schema 1's keys is refused with the key named: an unknown key, an
@@ -319,7 +320,7 @@ func settingText(key string, v yamlValue) (string, error) {
 		return "", configErr("%s (line %d) has no value; omit the key to leave it at its default", key, v.line)
 	}
 	switch key {
-	case SettingApprovalMaxTasks, SettingSetupTimeout, SettingForemanRotateTokens:
+	case SettingApprovalMaxTasks, SettingSetupTimeout, SettingForemanRotateTokens, SettingBranchRetentionDays:
 		if v.isList || v.quoted {
 			return "", configErr("%s (line %d) must be an integer", key, v.line)
 		}

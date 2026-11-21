@@ -645,6 +645,7 @@ The file is flat: `key: value` lines, no nesting except the `instructions` map o
 | `foreman_rotate_tokens` | non-negative integer | `400000` | Input tokens on one foreman turn past which the next turn starts a fresh session; `0` never rotates ([section 11](#session-size-and-rotation)). |
 | `plan_files` | `on` or `off` | `on` | `off` stops the plan-file mirror: no plan file is written or pushed ([The plan file](#the-plan-file)). |
 | `plan_file_branch` | branch name | `brigada/plans` | The branch the plan files are pushed to; `main`, or the repository's default branch name, commits them to the default branch ([The plan file](#the-plan-file)). |
+| `branch_retention_days` | whole number of days, `0` or more | `7` | How long a cancelled or retired task's branches are kept after it settled, before the engine's start-up sweep deletes them; `0` deletes them at once. A landed task's branches are deleted by its landing, not by this window. |
 | `instructions_file` | repo-relative path | none | Alias for `instructions.worker`; setting both is refused. |
 | `instructions` | map of role names to repo-relative files | none | Roles: `foreman`, `plan_review`, `worker`, `reviewer`. An empty path uses `.brigada/instructions/<role>.md`; each text is at most 8192 bytes. |
 | `skills_dir` | repo-relative directory | `.brigada/skills` | Skills to read at import; a file that names no `skills_dir` reads `.brigada/skills` when that directory exists (see [Skills](#skills)). |
@@ -1474,6 +1475,7 @@ Every key that `brigada project set` and `project show` know, with each default 
 | `foreman_wakes_per_day` | `20`, or the config file's value | no, local only |
 | `plan_files` | `on` | yes |
 | `plan_file_branch` | `brigada/plans` | yes |
+| `branch_retention_days` | `7` | yes |
 | `instructions` | `none` | local worker-text override; the file uses an `instructions` role map or the `instructions_file` alias |
 | `skills_dir` | `.brigada/skills` | yes; `project show` only, `project set` refuses it |
 

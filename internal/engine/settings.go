@@ -75,7 +75,15 @@ const (
 	// default; the literal main, or the repo's default branch name,
 	// commits to the default branch instead.
 	SettingPlanFileBranch = "plan_file_branch"
+	// The branch-retention window (§13.2): whole days a cancelled or
+	// retired task's branches are kept after it settled, before the
+	// reconcile sweep deletes them; 0 deletes them at once.
+	SettingBranchRetentionDays = "branch_retention_days"
 )
+
+// defaultBranchRetentionDays is branch_retention_days' default (§13.2):
+// the window the design note records.
+const defaultBranchRetentionDays = 7
 
 // The values plan_files takes.
 const (
@@ -100,7 +108,8 @@ var SettingKeys = []string{SettingApprovalMaxTasks, SettingApprovalBudget, Setti
 	SettingGatePlan, SettingGateLand, SettingGatePush, SettingPlanReview, SettingPlanReviewTier, SettingPlanReviewEffort,
 	SettingApprovalTiers, SettingApprovalRestarted, SettingLandTarget, SettingAfterLand, SettingLandReady,
 	SettingDefaultCheck, SettingWorkerTools, SettingSetup, SettingSetupCacheKeyFiles, SettingSetupTimeout,
-	SettingExtraRepos, SettingForemanRotateTokens, SettingForemanWakesPerDay, SettingPlanFiles, SettingPlanFileBranch, SettingInstructions}
+	SettingExtraRepos, SettingForemanRotateTokens, SettingForemanWakesPerDay, SettingPlanFiles, SettingPlanFileBranch,
+	SettingBranchRetentionDays, SettingInstructions}
 
 // MaxInstructionsBytes bounds the project instruction text (§5.9): a
 // starting value, open in §16 item 11. Above it a set or an import is
@@ -212,7 +221,8 @@ func parseSettingValue(key, value string) (json.RawMessage, error) {
 		SettingGatePlan, SettingGateLand, SettingGatePush, SettingPlanReview, SettingPlanReviewTier, SettingPlanReviewEffort,
 		SettingApprovalTiers, SettingApprovalRestarted, SettingLandTarget, SettingAfterLand, SettingLandReady,
 		SettingDefaultCheck, SettingWorkerTools,
-		SettingSetup, SettingSetupCacheKeyFiles, SettingSetupTimeout, SettingExtraRepos, SettingForemanRotateTokens, SettingForemanWakesPerDay, SettingPlanFiles, SettingPlanFileBranch, SettingInstructions:
+		SettingSetup, SettingSetupCacheKeyFiles, SettingSetupTimeout, SettingExtraRepos, SettingForemanRotateTokens, SettingForemanWakesPerDay, SettingPlanFiles, SettingPlanFileBranch,
+		SettingBranchRetentionDays, SettingInstructions:
 	default:
 		return nil, fmt.Errorf("%w: unknown key %q; valid keys: %s", ErrInvalidSetting, key, strings.Join(SettingKeys, ", "))
 	}
@@ -340,6 +350,14 @@ func parseKnownValue(key, value string) (json.RawMessage, error) {
 		n, err := strconv.Atoi(strings.TrimSpace(value))
 		if err != nil || n < 0 {
 			return nil, fmt.Errorf("%w: %s takes a whole number of input tokens (0 = never rotate), got %q",
+				ErrInvalidSetting, key, value)
+		}
+		return json.RawMessage(strconv.Itoa(n)), nil
+	}
+	if key == SettingBranchRetentionDays {
+		n, err := strconv.Atoi(strings.TrimSpace(value))
+		if err != nil || n < 0 {
+			return nil, fmt.Errorf("%w: %s takes a whole number of days (0 = delete at once), got %q",
 				ErrInvalidSetting, key, value)
 		}
 		return json.RawMessage(strconv.Itoa(n)), nil
@@ -566,6 +584,12 @@ func settingsViewTx(tx *sql.Tx, project int64, repo string, wakeBudgetDefault in
 		case SettingForemanRotateTokens:
 			// 0 is a value of its own (never rotate), not the default.
 			sv.Value = strconv.Itoa(defaultForemanRotateTokens)
+			if n, ok := rawInt(cur); has && ok {
+				sv.Value = strconv.Itoa(n)
+			}
+		case SettingBranchRetentionDays:
+			// 0 is a value of its own (delete at once), not the default.
+			sv.Value = strconv.Itoa(defaultBranchRetentionDays)
 			if n, ok := rawInt(cur); has && ok {
 				sv.Value = strconv.Itoa(n)
 			}

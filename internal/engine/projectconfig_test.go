@@ -22,6 +22,7 @@ approval_classes: [implement, "review"]
 approval_protected_paths:
   - infra/**
   - 'db/*.sql'
+branch_retention_days: 0
 `
 	cases := []struct {
 		name    string
@@ -54,6 +55,11 @@ approval_protected_paths:
 		{"max tasks not an integer", string(cfgFile("approval_max_tasks: many\n")), "approval_max_tasks takes an integer"},
 		{"max tasks quoted", string(cfgFile("approval_max_tasks: \"3\"\n")), "approval_max_tasks (line 3) must be an integer"},
 		{"max tasks list", string(cfgFile("approval_max_tasks: [3]\n")), "must be an integer"},
+		{"retention zero", string(cfgFile("branch_retention_days: 0\n")), ""},
+		{"retention negative", string(cfgFile("branch_retention_days: -1\n")), "branch_retention_days takes a whole number of days"},
+		{"retention junk", string(cfgFile("branch_retention_days: soon\n")), "branch_retention_days takes a whole number of days"},
+		{"retention quoted", string(cfgFile("branch_retention_days: \"7\"\n")), "branch_retention_days (line 3) must be an integer"},
+		{"retention list", string(cfgFile("branch_retention_days: [7]\n")), "must be an integer"},
 		{"budget accepted", string(cfgFile("approval_budget: $5+2000000\n")), ""},
 		{"budget junk", string(cfgFile("approval_budget: cheap\n")), "approval_budget takes a whole number of tokens"},
 		{"budget zero", string(cfgFile("approval_budget: 0\n")), "approval_budget takes a whole number of tokens"},
@@ -102,11 +108,12 @@ approval_protected_paths:
 			t.Fatal(err)
 		}
 		want := map[string]string{
-			SettingDefaultCheck:           "\"go vet ./... \\u0026\\u0026 go test ./...\"",
+			SettingDefaultCheck:           `"go vet ./... \u0026\u0026 go test ./..."`,
 			SettingWorkerTools:            `"Bash(go test:*)+Bash(go vet:*)"`,
 			SettingApprovalMaxTasks:       `3`,
 			SettingApprovalClasses:        `["implement","review"]`,
 			SettingApprovalProtectedPaths: `["infra/**","db/*.sql"]`,
+			SettingBranchRetentionDays:    `0`,
 		}
 		for k, w := range want {
 			if got := string(cfg.Values[k]); got != w {

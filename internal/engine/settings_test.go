@@ -112,6 +112,7 @@ func TestProjectSettingsView(t *testing.T) {
 		{Key: SettingForemanWakesPerDay, Value: "20", Default: true, Source: SourceDefault},
 		{Key: SettingPlanFiles, Value: "on", Default: true, Source: SourceDefault},
 		{Key: SettingPlanFileBranch, Value: defaultPlanFileBranch, Default: true, Source: SourceDefault},
+		{Key: SettingBranchRetentionDays, Value: "7", Default: true, Source: SourceDefault},
 		{Key: SettingInstructions, Value: "none", Default: true, Source: SourceDefault},
 		{Key: configKeySkillsDir, Value: DefaultSkillsDir, Default: true, Source: SourceDefault},
 	}
@@ -162,6 +163,8 @@ func TestSetProjectSettingsRefusals(t *testing.T) {
 		{SettingLandTarget: "feature/x.lock"},
 		{SettingForemanWakesPerDay: "0"},
 		{SettingForemanWakesPerDay: strconv.Itoa(MaxForemanWakesPerDay + 1)},
+		{SettingBranchRetentionDays: "-1"},
+		{SettingBranchRetentionDays: "soon"},
 	} {
 		_, err := e.eng.SetProjectSettings(e.ctx, envRepo, values)
 		if !errors.Is(err, ErrInvalidSetting) {
@@ -225,6 +228,28 @@ func TestGateLandSettingsRoundTrip(t *testing.T) {
 	got = e.set(map[string]string{SettingLandReady: ""})
 	if s := settingOf(t, got, SettingLandReady); s.Value != "none" || !s.Default {
 		t.Errorf("land_ready after unset = %+v, want none at the default", s)
+	}
+}
+
+// branch_retention_days (§13.2) round-trips like the other numeric
+// settings: 0 is a value of its own (delete at once), not the default,
+// and a reset returns the 7 the design note records.
+func TestBranchRetentionDaysRoundTrip(t *testing.T) {
+	e := newEnv(t)
+	got := e.set(map[string]string{SettingBranchRetentionDays: "0"})
+	if s := settingOf(t, got, SettingBranchRetentionDays); s.Value != "0" || s.Default || s.Source != SourceLocal {
+		t.Errorf("branch_retention_days 0 = %+v, want a local 0", s)
+	}
+	got = e.set(map[string]string{SettingBranchRetentionDays: "30"})
+	if s := settingOf(t, got, SettingBranchRetentionDays); s.Value != "30" {
+		t.Errorf("branch_retention_days 30 = %+v, want 30", s)
+	}
+	if raw := e.str("SELECT settings FROM projects WHERE id = ?", e.project); !strings.Contains(raw, `"branch_retention_days":30`) {
+		t.Errorf("stored settings %s lack branch_retention_days 30", raw)
+	}
+	got = e.set(map[string]string{SettingBranchRetentionDays: ""})
+	if s := settingOf(t, got, SettingBranchRetentionDays); s.Value != "7" || !s.Default {
+		t.Errorf("branch_retention_days after reset = %+v, want the 7 default", s)
 	}
 }
 
