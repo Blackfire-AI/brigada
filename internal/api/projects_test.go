@@ -45,9 +45,29 @@ func TestProjectForemanRoundTrip(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("choose again: %d %s, want 200", code, data)
 	}
+	if strings.Contains(string(data), "moved_turns") {
+		t.Fatalf("a switch with no queued turn answered %s, want no moved_turns key", data)
+	}
 
-	// Every reading role sees the newest choice. foreman3 rides the
-	// literal header: the shared secrets map knows only the stock tokens.
+	turn, err := e.eng.SubmitForemanTurn(e.ctx, set.ProjectID, nil)
+	if err != nil {
+		t.Fatalf("queue a foreman turn: %v", err)
+	}
+	switchBack := []byte(`{"repo_url":"` + repo + `","harness":"claude","model":"opus"}`)
+	code, _, data = e.do(http.MethodPut, "/v1/projects/foreman", "alice", "choose-foreman-3", switchBack)
+	if code != http.StatusOK {
+		t.Fatalf("switch the pair with a queued turn: %d %s, want 200", code, data)
+	}
+	moved := decode[struct {
+		MovedTurns []int64 `json:"moved_turns"`
+	}](t, data)
+	if len(moved.MovedTurns) != 1 || moved.MovedTurns[0] != turn.JobID {
+		t.Fatalf("the switch answered moved_turns %v, want [%d]", moved.MovedTurns, turn.JobID)
+	}
+
+	// Every reading role sees the newest choice, without the answer-only
+	// moved_turns field. foreman3 rides the literal header: the shared
+	// secrets map knows only the stock tokens.
 	for _, tc := range []struct{ name, authz string }{
 		{"alice", e.bearer("alice")},
 		{"root", e.bearer("root")},
@@ -64,8 +84,11 @@ func TestProjectForemanRoundTrip(t *testing.T) {
 			Harness string `json:"harness"`
 			Model   string `json:"model"`
 		}](t, data)
-		if got.Harness != "claude" || got.Model != "sonnet" {
-			t.Errorf("the choice as %s = %+v, want claude on sonnet", tc.name, got)
+		if got.Harness != "claude" || got.Model != "opus" {
+			t.Errorf("the choice as %s = %+v, want claude on opus", tc.name, got)
+		}
+		if strings.Contains(string(data), "moved_turns") {
+			t.Errorf("the read-back as %s = %s, want no moved_turns key", tc.name, data)
 		}
 	}
 }

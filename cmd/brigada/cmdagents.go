@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/Blackfire-AI/brigada/internal/adapter"
+	"github.com/Blackfire-AI/brigada/internal/api"
 	"github.com/Blackfire-AI/brigada/internal/runnerstate"
 )
 
@@ -540,7 +541,9 @@ func runAgentsAdd(ctx context.Context, args []string, stdout, stderr io.Writer) 
 // that would leave the runner nothing to serve — both with the file
 // untouched — then hands the running runner a restart request it honours
 // between jobs, so the fresh runner no longer serves the agent, or notes
-// the next start when none runs.
+// the next start when none runs. Foremen are the engine's knowledge, so
+// it also asks the engine which projects have their foremen on the pair
+// and names each, with the switch to a pair an agent still offers.
 func runAgentsRemove(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := newFlagSet("agents remove",
 		"brigada agents remove [--now] <harness>/<model>",
@@ -588,13 +591,14 @@ func runAgentsRemove(ctx context.Context, args []string, stdout, stderr io.Write
 	}
 	// The pair matches every line that registers it, each read the way the
 	// runner reads the file at startup; a comment or a line of a newer
-	// format stays in the file and registers nothing here. serveable counts
-	// the parsable lines the removal would leave, so the runner is never
-	// left with nothing to serve.
+	// format stays in the file and registers nothing here. left holds the
+	// agents the removal would leave, so the runner is never left with
+	// nothing to serve, and is the roster a foreman on the pair can be
+	// switched to.
 	pair := harness + "/" + model
 	var matching []string
 	var saved []string
-	serveable := 0
+	var left []agentSpec
 	for _, line := range lines {
 		var one agentSpecs
 		if one.Set(line) != nil {
@@ -608,12 +612,12 @@ func runAgentsRemove(ctx context.Context, args []string, stdout, stderr io.Write
 			}
 			continue
 		}
-		serveable++
+		left = append(left, one.specs[0])
 	}
 	if len(matching) == 0 {
 		return fail(stderr, fmt.Errorf("agent %s is not registered; %s", pair, notRegisteredHint(pair, saved)))
 	}
-	if serveable == 0 {
+	if len(left) == 0 {
 		return fail(stderr, fmt.Errorf("removing %s would leave no agent for the runner to serve; add another agent first with brigada agents add <harness>/<model>", pair))
 	}
 	// Every line is out of the file before anything says so; a failure
@@ -635,8 +639,152 @@ func runAgentsRemove(ctx context.Context, args []string, stdout, stderr io.Write
 		}
 		fmt.Fprintf(stdout, "removed from %s: %s\n", path, line)
 	}
-	fmt.Fprintln(stdout, "If this agent was a project's foreman, its turns wait until another registered agent offers the pair (brigada project list shows them).")
+	printRemovedForemen(ctx, rt, stdout, stderr, pair, harness, left)
 	return restartRunnerForAgents(ctx, rt, *now, stdout, stderr)
+}
+
+// connectAgents is how agents remove and agents update reach the engine;
+// tests replace it.
+var connectAgents = connect
+
+// agentsForeman is a project whose foreman is on a pair a removal takes
+// from the roster or a rewrite moves: the repo URL as the engine lists it,
+// the form --repo takes back, and the foreman's saved effort — "" when
+// none is set or none could be read.
+type agentsForeman struct {
+	repo, effort string
+}
+
+// engineForemen is the engine's answer to the foremen question: the client
+// that gave it, for the switches --foremen makes, and, per pair, the
+// projects whose foreman is on it, in the engine's order.
+type engineForemen struct {
+	client *api.Client
+	byPair map[string][]agentsForeman
+}
+
+// askForemen asks the engine — started on demand, as brigada project list
+// starts it — which projects have their foremen on one of pairs, harness
+// and model both, since one model name can sit on more than one harness.
+// An engine that cannot be asked answers ok=false, its reason on stderr;
+// the command then points at brigada project list rather than name anyone.
+func askForemen(ctx context.Context, rt *runtime, stderr io.Writer, pairs ...string) (*engineForemen, bool) {
+	client, code := connectAgents(ctx, rt, "client", false, stderr)
+	if code != 0 {
+		return nil, false
+	}
+	projects, err := client.Projects(ctx)
+	if err != nil {
+		fail(stderr, err)
+		return nil, false
+	}
+	answer := engineForemen{client: client, byPair: map[string][]agentsForeman{}}
+	for _, pair := range pairs {
+		answer.byPair[pair] = nil
+	}
+	for _, p := range projects {
+		pair := p.Harness + "/" + p.Model
+		if _, asked := answer.byPair[pair]; !asked {
+			continue
+		}
+		f := agentsForeman{repo: p.RepoURL}
+		// The list carries the pair alone; the effort is read back per
+		// project, and a read that fails leaves it unknown.
+		if setting, err := client.ProjectForeman(ctx, p.RepoURL); err == nil {
+			f.effort = setting.Effort
+		}
+		answer.byPair[pair] = append(answer.byPair[pair], f)
+	}
+	return &answer, true
+}
+
+// keptEffort is the effort a switch of a foreman to the pair passes on:
+// the saved one when the target harness accepts it — the engine validates
+// an effort per harness — and "" otherwise, which leaves the effort to the
+// CLI's own default.
+func keptEffort(pair, effort string) string {
+	harness, _, _ := strings.Cut(pair, "/")
+	if adapter.ValidateEffort(harness, effort) == nil {
+		return effort
+	}
+	return ""
+}
+
+// foremanSwitch is the brigada project foreman command that switches repo's
+// foreman to the pair. It carries --effort exactly when the foreman has an
+// effort the target accepts: a switch typed without it clears the effort.
+func foremanSwitch(repo, pair, effort string) string {
+	harness, model, _ := strings.Cut(pair, "/")
+	command := fmt.Sprintf("brigada project foreman --repo %s --harness %s --model %s", repo, harness, model)
+	if kept := keptEffort(pair, effort); kept != "" {
+		command += " --effort " + kept
+	}
+	return command
+}
+
+// effortOutcome says what a switch did, or would do, with the foreman's
+// saved effort: nothing when none is set, it keeps one the pair accepts,
+// and one it refuses is left to the CLI's own default.
+func effortOutcome(pair, effort string) string {
+	switch {
+	case effort == "":
+		return ""
+	case keptEffort(pair, effort) != "":
+		return ", keeping effort=" + effort
+	}
+	return "; effort=" + effort + " is not accepted for " + pair + ", so the CLI's own default applies"
+}
+
+// foremanTarget is the registered pair a foreman on the harness is switched
+// to, from the roster a removal leaves: one on that harness first — a model
+// change there keeps the project's session — else the first on another
+// harness a foreman can run on. "" when the roster holds none.
+func foremanTarget(left []agentSpec, harness string) string {
+	var other string
+	for _, spec := range left {
+		if !adapter.ResumeCapable(spec.harness) {
+			continue
+		}
+		if spec.harness == harness {
+			return agentPair(spec)
+		}
+		if other == "" {
+			other = agentPair(spec)
+		}
+	}
+	return other
+}
+
+// printRemovedForemen names the projects whose foreman is the pair just
+// removed, as the engine lists them: that foreman's turns wait until
+// another registered agent offers the pair or the foreman is switched to a
+// pair an agent offers, so each name comes with the switch to one. An
+// engine that cannot be asked leaves it pointing at brigada project list.
+func printRemovedForemen(ctx context.Context, rt *runtime, stdout, stderr io.Writer, pair, harness string, left []agentSpec) {
+	answer, ok := askForemen(ctx, rt, stderr, pair)
+	if !ok {
+		fmt.Fprintln(stdout, "If this agent was a project's foreman, its turns wait until another registered agent offers the pair (brigada project list shows them).")
+		return
+	}
+	named := answer.byPair[pair]
+	if len(named) == 0 {
+		fmt.Fprintf(stdout, "No project has %s as its foreman.\n", pair)
+		return
+	}
+	if len(named) == 1 {
+		fmt.Fprintf(stdout, "1 project has %s as its foreman; its turns wait until another registered agent offers the pair, however long that takes, or the foreman is switched to a pair an agent offers:\n", pair)
+	} else {
+		fmt.Fprintf(stdout, "%d projects have %s as their foremen; their turns wait until another registered agent offers the pair, however long that takes, or each foreman is switched to a pair an agent offers:\n", len(named), pair)
+	}
+	target := foremanTarget(left, harness)
+	for _, f := range named {
+		fmt.Fprintf(stdout, "  %s\n", f.repo)
+		if target == "" {
+			fmt.Fprintln(stdout, "    no registered agent offers a pair a foreman can run on; brigada agents add <harness>/<model> registers one")
+			continue
+		}
+		fmt.Fprintf(stdout, "    %s\n", foremanSwitch(f.repo, target, f.effort))
+	}
 }
 
 // notRegisteredHint is the second half of a not-registered refusal. Top and
@@ -712,26 +860,33 @@ func restartRunnerForAgents(ctx context.Context, rt *runtime, now bool, stdout, 
 }
 
 // agentsUpdateCandidate is one superseded pair's rewrite: the raw line it
-// replaces, the line replacing it, and the saved effort the rewrite had to
-// drop when the new model refused it.
+// replaces, the line replacing it, the saved effort the rewrite had to
+// drop when the new model refused it, and — once the engine answered —
+// the projects whose foreman is on the old pair, with whether another line
+// of the file keeps registering the pair once the rewrite lands.
 type agentsUpdateCandidate struct {
 	oldPair, newPair string
 	oldLine, newLine string
 	effortDropped    string
+	foremen          []agentsForeman
+	served           bool
 }
 
 // runAgentsUpdate is `brigada agents update`: every registered agent whose
 // model a newer version of the same line replaces is rewritten to the newer
-// model in place, each rewrite accepted interactively or by --yes, and a
-// running runner restarts to serve the new lines.
+// model in place, each rewrite accepted interactively or by --yes; each
+// rewrite's lines name the projects whose foreman is on the moved pair,
+// which --foremen also switches, and a running runner restarts to serve
+// the new lines.
 func runAgentsUpdate(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := newFlagSet("agents update",
-		"brigada agents update [--yes] [--dry-run] [--now]",
-		"Move registered agents to the newer model of their line the CLIs list: rewrite each superseded line of the agents file in place, keeping every other line, and restart the runner to serve the new models.")
+		"brigada agents update [--yes] [--dry-run] [--foremen] [--now]",
+		"Move registered agents to the newer model of their line the CLIs list: rewrite each superseded line of the agents file in place, keeping every other line, name the projects whose foreman is on a moved pair, and restart the runner to serve the new models.")
 	stderr = commandStderr(stderr, fs.Name())
 	common := addCommon(fs)
 	yes := fs.Bool("yes", false, "apply every update without prompting")
 	dryRun := fs.Bool("dry-run", false, "print the rewrites and exit: nothing is written and the runner is not restarted")
+	foremen := fs.Bool("foremen", false, "with every applied rewrite, switch the projects whose foreman is on the moved pair to the newer model, keeping an effort it accepts; --dry-run lists the switches")
 	now := fs.Bool("now", false, "restart the runner at once, cutting its running jobs; without it the restart waits out running jobs")
 	if code, stop := common.parse(stdout, stderr, args); stop {
 		return code
@@ -775,14 +930,20 @@ func runAgentsUpdate(ctx context.Context, args []string, stdout, stderr io.Write
 	for _, oldPair := range slices.Sorted(maps.Keys(d.superseded)) {
 		newPair := d.superseded[oldPair]
 		// A line the runner can no longer parse registers nothing here and
-		// is left alone.
+		// is left alone. onPair counts the lines that register the old
+		// pair: the rewrite replaces the first, and any other keeps
+		// offering the pair once the rewrite lands.
 		var oldLine string
 		var spec agentSpec
+		onPair := 0
 		for _, line := range lines {
 			var one agentSpecs
-			if one.Set(line) == nil && agentPair(one.specs[0]) == oldPair {
+			if one.Set(line) != nil || agentPair(one.specs[0]) != oldPair {
+				continue
+			}
+			onPair++
+			if oldLine == "" {
 				oldLine, spec = line, one.specs[0]
-				break
 			}
 		}
 		if oldLine == "" {
@@ -812,7 +973,7 @@ func runAgentsUpdate(ctx context.Context, args []string, stdout, stderr io.Write
 			}
 			return nil
 		}
-		c := agentsUpdateCandidate{oldPair: oldPair, newPair: newPair, oldLine: oldLine, newLine: spec.String()}
+		c := agentsUpdateCandidate{oldPair: oldPair, newPair: newPair, oldLine: oldLine, newLine: spec.String(), served: onPair > 1}
 		if err := validate(c.newLine); err != nil {
 			if spec.effort == "" {
 				return fail(stderr, err)
@@ -832,10 +993,53 @@ func runAgentsUpdate(ctx context.Context, args []string, stdout, stderr io.Write
 		claimed[newPair] = oldPair
 		candidates = append(candidates, c)
 	}
+	// Foremen are the engine's knowledge, so the command asks it once for
+	// every moved pair before any rewrite is printed, and each rewrite's
+	// lines name what it answered. The engine never picks a pair on its
+	// own: it lists, and the switch is the rewrite's newer model.
+	moved := make([]string, len(candidates))
+	for i, c := range candidates {
+		moved[i] = c.oldPair
+	}
+	var named *engineForemen
+	asked := false
+	if len(moved) > 0 {
+		if named, asked = askForemen(ctx, rt, stderr, moved...); asked {
+			for i := range candidates {
+				candidates[i].foremen = named.byPair[candidates[i].oldPair]
+			}
+		}
+	}
 	printCandidate := func(c agentsUpdateCandidate) {
 		fmt.Fprintf(stdout, "%s → %s\n  %s\n", c.oldPair, c.newPair, c.newLine)
 		if c.effortDropped != "" {
 			fmt.Fprintf(stdout, "  note: effort=%s is not accepted for %s; the line leaves the effort to the CLI's default\n", c.effortDropped, c.newPair)
+		}
+		if !asked {
+			fmt.Fprintf(stdout, "  projects whose foreman is on %s: brigada project list shows them (the engine could not be asked)\n", c.oldPair)
+			return
+		}
+		n := len(c.foremen)
+		if n == 0 {
+			return
+		}
+		// The switch is typed out per project with --effort exactly where
+		// --foremen leaves the effort, so both end the same way.
+		whose, switched, head := "their", "each foreman is switched", fmt.Sprintf("  %d projects have %s as their foremen", n, c.oldPair)
+		if n == 1 {
+			whose, switched, head = "its", "the foreman is switched", fmt.Sprintf("  1 project has %s as its foreman", c.oldPair)
+		}
+		if c.served {
+			head += "; another line still offers the pair, so " + whose + " turns do not wait"
+		} else {
+			head += "; no other line offers the pair once the rewrite lands, so " + whose + " turns wait until " + switched
+		}
+		fmt.Fprintln(stdout, head+":")
+		for _, f := range c.foremen {
+			fmt.Fprintf(stdout, "    %s\n      %s\n", f.repo, foremanSwitch(f.repo, c.newPair, f.effort))
+			if *dryRun && *foremen {
+				fmt.Fprintf(stdout, "      with --foremen: switches the foreman to %s%s\n", c.newPair, effortOutcome(c.newPair, f.effort))
+			}
 		}
 	}
 	if *dryRun {
@@ -871,6 +1075,9 @@ func runAgentsUpdate(ctx context.Context, args []string, stdout, stderr io.Write
 		fmt.Fprintln(stdout, "Nothing updated.")
 		return 0
 	}
+	// A switch that fails is reported and leaves the rewrite standing, so
+	// the rewrites all land and the command fails at the end instead.
+	failed := 0
 	for _, c := range accepted {
 		if err := runnerstate.ReplaceAgent(dir, c.oldLine, c.newLine); err != nil {
 			return fail(stderr, err)
@@ -880,7 +1087,40 @@ func runAgentsUpdate(ctx context.Context, args []string, stdout, stderr io.Write
 			fmt.Fprintf(stdout, " (effort=%s refused; the CLI's default applies)", c.effortDropped)
 		}
 		fmt.Fprintln(stdout)
+		if *foremen && asked {
+			failed += switchForemen(ctx, named.client, c, stdout, stderr)
+		}
+	}
+	if *foremen && !asked {
+		fmt.Fprintln(stderr, "brigada: agents update: no foreman was switched: the engine could not be asked which projects have their foremen on a moved pair; brigada project list shows them, and brigada project foreman switches one")
+		failed++
 	}
 	fmt.Fprintf(stdout, "rewritten in %s\n", initHomePath(filepath.Join(dir, "agents")))
-	return restartRunnerForAgents(ctx, rt, *now, stdout, stderr)
+	if code := restartRunnerForAgents(ctx, rt, *now, stdout, stderr); code != 0 {
+		return code
+	}
+	if failed > 0 {
+		return 1
+	}
+	return 0
+}
+
+// switchForemen switches the foremen an applied rewrite named to the newer
+// model, as brigada project foreman does, and says so per project: each
+// keeps an effort the newer model accepts and otherwise leaves the effort
+// to the CLI's own default. A switch that fails is reported, with the
+// command that makes it, and the rewrite stands; the return is how many
+// failed.
+func switchForemen(ctx context.Context, client *api.Client, c agentsUpdateCandidate, stdout, stderr io.Writer) int {
+	harness, model, _ := strings.Cut(c.newPair, "/")
+	failed := 0
+	for _, f := range c.foremen {
+		if _, err := client.SetProjectForeman(ctx, f.repo, harness, model, keptEffort(c.newPair, f.effort)); err != nil {
+			fmt.Fprintf(stderr, "brigada: agents update: the foreman of %s was not switched to %s (%v); the rewrite stands, and %s switches it\n", f.repo, c.newPair, err, foremanSwitch(f.repo, c.newPair, f.effort))
+			failed++
+			continue
+		}
+		fmt.Fprintf(stdout, "foreman of %s switched to %s%s\n", f.repo, c.newPair, effortOutcome(c.newPair, f.effort))
+	}
+	return failed
 }

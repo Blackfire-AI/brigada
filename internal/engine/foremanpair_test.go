@@ -3,6 +3,7 @@ package engine
 import (
 	"database/sql"
 	"fmt"
+	"reflect"
 	"testing"
 	"time"
 
@@ -204,7 +205,7 @@ func TestForemanChoiceWarnsOnlyWhenNoAgentIsRegistered(t *testing.T) {
 	}
 	readBack := *read
 	readBack.RepoURL = readCanon
-	if readBack != got {
+	if !reflect.DeepEqual(readBack, got) {
 		t.Fatalf("the setting read back = %+v; want %+v", readBack, got)
 	}
 

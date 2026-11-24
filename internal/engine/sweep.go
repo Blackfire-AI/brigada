@@ -300,7 +300,7 @@ func (e *Engine) sweepPolledTx(tx *sql.Tx, now time.Time, polling int64) (rep Sw
 		return rep, nil
 	}
 
-	rows, err := tx.Query(`SELECT id, project_id, COALESCE(task_id, 0), COALESCE(lease_id, ''),
+	rows, err := tx.Query(`SELECT id, project_id, COALESCE(task_id, 0), kind, COALESCE(lease_id, ''),
 		COALESCE(last_leased, ''), COALESCE(lease_expires_at, '')
 		FROM jobs
 		WHERE status IN ('leased', 'running') AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?`, nowStr)
@@ -310,13 +310,14 @@ func (e *Engine) sweepPolledTx(tx *sql.Tx, now time.Time, polling int64) (rep Sw
 	type lapsed struct {
 		id            int64
 		project, task int64
+		kind          Kind
 		lease         string
 		last, expires string
 	}
 	var lapsedAll []lapsed
 	for rows.Next() {
 		var x lapsed
-		if err := rows.Scan(&x.id, &x.project, &x.task, &x.lease, &x.last, &x.expires); err != nil {
+		if err := rows.Scan(&x.id, &x.project, &x.task, &x.kind, &x.lease, &x.last, &x.expires); err != nil {
 			rows.Close()
 			return rep, fmt.Errorf("sweep expired leases: %w", err)
 		}
@@ -327,6 +328,15 @@ func (e *Engine) sweepPolledTx(tx *sql.Tx, now time.Time, polling int64) (rep Sw
 	}
 	rows.Close()
 	for _, x := range lapsedAll {
+		if x.kind == KindForeman {
+			job, err := loadJobTx(tx, x.id)
+			if err != nil {
+				return rep, err
+			}
+			if err := requeueForemanTurnTx(tx, job, now); err != nil {
+				return rep, err
+			}
+		}
 		var accrue int64
 		if expired, err := parseTime(x.expires); err == nil {
 			accrue = accrualFrom(x.last, expired)

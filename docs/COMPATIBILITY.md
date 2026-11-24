@@ -34,7 +34,7 @@ What brigada 1.0 promises until 2.0.
 - `top`: `--interval`, `--project`, `--no-start`.
 - `cancel`: `--no-start`.
 - `agent reset`: `--no-start`.
-- `agents add`: `--classes`, `--effort`, `--now`; `agents update`: `--yes`, `--dry-run`, `--now`; `agents remove`: `--now`.
+- `agents add`: `--classes`, `--effort`, `--now`; `agents update`: `--yes`, `--dry-run`, `--foremen`, `--now`; `agents remove`: `--now`.
 - `plan approve`: `--and-stop-asking`, `--no-start`; `plan reject`: `--no-start`.
 - `budget`: `--repo`, `--wakes`, `--no-start`.
 - `recover`: `--repo` (repeatable), `--snapshot-dir`.

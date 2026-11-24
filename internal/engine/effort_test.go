@@ -113,12 +113,12 @@ func TestForemanTurnGrantCarriesTheProjectEffort(t *testing.T) {
 	}
 }
 
-// A turn queued on one harness and leased after the project switched to
-// another must not take the new harness's effort: the grant keeps the
-// effort of the harness that runs the turn (here none, so the agent's own).
-func TestQueuedTurnIgnoresEffortOfALaterHarness(t *testing.T) {
+// A queued turn follows a switch to another harness and takes the effort
+// chosen with that harness when its new agent leases it.
+func TestQueuedTurnTakesEffortOfSwitchedHarness(t *testing.T) {
 	e := newEnv(t)
-	e.offerForeman(e.runner1) // the queued turn's own pair, claude/sonnet
+	e.offerForeman(e.runner1)
+	e.seedAgent(e.runner1, "codex", "codex", "gpt-5", "other")
 	if _, err := e.eng.SetProjectForemanEffort(e.ctx, effortRepo, "claude", "sonnet", "high"); err != nil {
 		t.Fatalf("set the foreman: %v", err)
 	}
@@ -126,16 +126,15 @@ func TestQueuedTurnIgnoresEffortOfALaterHarness(t *testing.T) {
 	if err != nil {
 		t.Fatalf("submit the turn: %v", err)
 	}
-	// The switch cancels nothing: the queued turn stays on its claude constraint.
 	if _, err := e.eng.SetProjectForemanEffort(e.ctx, effortRepo, "codex", "gpt-5", "ultra"); err != nil {
 		t.Fatalf("switch the foreman: %v", err)
 	}
-	g := e.lease(e.runner1, []string{"claude"}, nil)
+	g := e.lease(e.runner1, []string{"codex"}, nil)
 	if g == nil || g.JobID != res.JobID {
-		t.Fatalf("the lease did not take the queued turn: %+v", g)
+		t.Fatalf("the lease did not take the moved turn: %+v", g)
 	}
-	if g.ForemanEffort != "" {
-		t.Errorf("grant ForemanEffort = %q on a claude turn after a switch to codex, want none", g.ForemanEffort)
+	if g.ForemanEffort != "ultra" {
+		t.Errorf("grant ForemanEffort = %q on the moved codex turn, want ultra", g.ForemanEffort)
 	}
 }
 

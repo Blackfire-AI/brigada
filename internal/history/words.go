@@ -7,14 +7,16 @@ import (
 
 // wordsPayload is the part of an event's payload the plain words use.
 type wordsPayload struct {
-	Plan    int64  `json:"plan"`
-	Status  string `json:"status"`
-	Branch  string `json:"branch"`
-	Pushed  string `json:"pushed"`
-	Harness string `json:"harness"`
-	Model   string `json:"model"`
-	Account string `json:"account"`
-	Until   string `json:"until"`
+	Plan        int64  `json:"plan"`
+	Status      string `json:"status"`
+	Branch      string `json:"branch"`
+	Pushed      string `json:"pushed"`
+	Harness     string `json:"harness"`
+	Model       string `json:"model"`
+	FromHarness string `json:"from_harness"`
+	FromModel   string `json:"from_model"`
+	Account     string `json:"account"`
+	Until       string `json:"until"`
 }
 
 // EventWords is an event in plain words, or false when its kind is not on
@@ -84,6 +86,9 @@ func EventWords(it Item, clock func(stamp string) string) (string, bool) {
 		return words, true
 	case "foreman_report":
 		return "report #" + strconv.FormatInt(it.JobID, 10), true
+	case "foreman_turn_moved":
+		return "foreman turn #" + strconv.FormatInt(it.JobID, 10) + " moved " +
+			p.FromHarness + "/" + p.FromModel + " to " + p.Harness + "/" + p.Model, true
 	}
 	return "", false
 }
@@ -161,6 +166,9 @@ func EventColumns(it Item, clock func(stamp string) string) (EventCols, bool) {
 		return EventCols{Kind: "agent", What: "cooling", Subject: subject}, true
 	case "foreman_report":
 		return EventCols{Kind: "report", What: "#" + strconv.FormatInt(it.JobID, 10)}, true
+	case "foreman_turn_moved":
+		return EventCols{Kind: "foreman", What: "turn moved",
+			Subject: p.FromHarness + "/" + p.FromModel + " to " + p.Harness + "/" + p.Model}, true
 	}
 	return EventCols{}, false
 }

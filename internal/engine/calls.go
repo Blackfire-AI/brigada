@@ -545,6 +545,9 @@ func (e *Engine) releaseTx(tx *sql.Tx, owner, jobID int64, leaseID, reason strin
 	if job.LeaseEpoch < epoch {
 		return AnsStaleEpoch, nil
 	}
+	if err := requeueForemanTurnTx(tx, job, now); err != nil {
+		return "", err
+	}
 	accrue := accrualFrom(job.LastLeased, now)
 	if _, err := tx.Exec(`UPDATE jobs SET status = 'queued', lease_id = NULL, lease_owner = NULL,
 		lease_expires_at = NULL, lease_epoch = NULL, attempts = max(attempts - 1, 0),
