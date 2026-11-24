@@ -44,6 +44,7 @@ func TestEventWords(t *testing.T) {
 		{"agent_cooling", readableEvent("agent_cooling", 3, 5, `{"account":"work","until":"U"}`), "work cooling until <U>"},
 		{"agent_cooling without a deadline", readableEvent("agent_cooling", 3, 5, `{"account":"work"}`), "work cooling"},
 		{"foreman_report", readableEvent("foreman_report", 0, 41, `{"report":"all landed"}`), "report #41"},
+		{"foreman_turn_moved", readableEvent("foreman_turn_moved", 0, 41, `{"harness":"codex","model":"default","from_harness":"claude","from_model":"opus"}`), "foreman turn #41 moved claude/opus to codex/default"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -183,6 +184,8 @@ func TestEventColumns(t *testing.T) {
 		{readableEvent("agent_cooling", 3, 5, `{"account":"work","until":"U"}`), EventCols{Kind: "agent", What: "cooling", Subject: "work until <U>"}},
 		{readableEvent("agent_cooling", 3, 5, `{"account":"work"}`), EventCols{Kind: "agent", What: "cooling", Subject: "work"}},
 		{readableEvent("foreman_report", 0, 41, `{}`), EventCols{Kind: "report", What: "#41"}},
+		{readableEvent("foreman_turn_moved", 0, 41, `{"harness":"codex","model":"default","from_harness":"claude","from_model":"opus"}`),
+			EventCols{Kind: "foreman", What: "turn moved", Subject: "claude/opus to codex/default"}},
 	}
 	for _, tt := range tests {
 		got, ok := EventColumns(tt.item, testClock)
@@ -192,7 +195,7 @@ func TestEventColumns(t *testing.T) {
 	}
 	for _, kind := range []string{"plan_done", "plan_approved", "plan_awaiting_approval", "task_done", "task_landed",
 		"task_pushed", "task_failed", "task_land_failed", "review_verdict", "agent_broken", "agent_recovered",
-		"agent_cooling", "foreman_report", "job_created", "job_leased", "task_running", "review_changes", "nonsense", ""} {
+		"agent_cooling", "foreman_report", "foreman_turn_moved", "job_created", "job_leased", "task_running", "review_changes", "nonsense", ""} {
 		for _, typ := range []string{TypeEvent, TypeMessage} {
 			it := Item{Type: typ, Kind: kind, CreatedAt: readableStamp}
 			_, wordsOK := EventWords(it, testClock)
@@ -232,6 +235,9 @@ func TestRenderReadablePinsEveryKind(t *testing.T) {
 		{readableEvent("agent_recovered", 0, 0, `{"harness":"codex","model":"gpt-5"}`), "10-20 15:02  agent  recovered  codex/gpt-5", "10-20 15:02 codex/gpt-5 recovered"},
 		{readableEvent("agent_cooling", 3, 5, `{"account":"work","until":"2026-10-20T16:04:00.000000000Z"}`), "10-20 15:02  agent  cooling  work until 10-20 16:04", "10-20 15:02 work cooling until 10-20 16:04"},
 		{readableEvent("foreman_report", 0, 41, `{"report":"all landed"}`), "10-20 15:02  report  #41", "10-20 15:02 report #41: report=all landed"},
+		{readableEvent("foreman_turn_moved", 0, 41, `{"harness":"codex","model":"default","from_harness":"claude","from_model":"opus"}`),
+			"10-20 15:02  foreman  turn moved  claude/opus to codex/default",
+			"10-20 15:02 foreman turn #41 moved claude/opus to codex/default"},
 	}
 	for _, tt := range tests {
 		var b bytes.Buffer

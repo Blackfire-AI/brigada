@@ -164,4 +164,20 @@ func TestProjectForemanGolden(t *testing.T) {
 	if code != 0 || stdout.String() != "foreman set: harness=codex model=opus effort=xhigh\n" {
 		t.Fatalf("codex effort exit = %d, stdout=%q, stderr=%q", code, stdout.String(), stderr.String())
 	}
+
+	// A switch names each queued turn it carries to the new pair.
+	stdout.Reset()
+	stderr.Reset()
+	code = run(ctx, []string{"ask", "--repo", repo, "--state-dir", state, "queue a turn"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("queue a turn exit = %d, stdout=%q, stderr=%q", code, stdout.String(), stderr.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	code = run(ctx, []string{"project", "foreman", "--repo", repo, "--harness", "claude", "--model", "opus", "--state-dir", state},
+		&stdout, &stderr)
+	want := "foreman set: harness=claude model=opus\nqueued turns moved to claude/opus: job 1\n"
+	if code != 0 || stdout.String() != want {
+		t.Fatalf("moving switch exit = %d, stdout=%q, stderr=%q; want stdout %q", code, stdout.String(), stderr.String(), want)
+	}
 }

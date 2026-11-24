@@ -93,7 +93,7 @@ Never while a foreman turn is live or a hold is attached, and never on unknown u
 
 The first turn or attach of the rotated generation — until one of them writes a session id back — carries an engine-written digest in the wake template, between `<digest>` delimiters as data (§1.4): the plans active or awaiting approval with their tasks' states, the needs-you entries with reasons, the last 10 history events, each list bounded with the omitted count and the whole cut at about 10 KB.
 
-A model or effort change on the same harness keeps the session.
+A model or effort change on the same harness keeps the session. A queued turn that records a model moves to the new pair when the foreman is switched, and waits there when no agent offers it (§8.1).
 
 ## 4.3 Budget
 

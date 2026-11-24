@@ -1336,10 +1336,10 @@ These are current limits of the CLIs or of brigada's adapters, not design choice
 
 **The model.** A headless turn runs on the harness and model you chose. The engine leases it only to a runner agent that offers exactly that `--harness`/`--model` pair, and the turn runs on that agent's adapter and model (without `--effort`, at that agent's own effort).
 
-- If no registered agent offers the pair, the turn is not handed to another model. It waits, `brigada status` shows `foreman turn waiting: no runner offers <harness>/<model>`, and it does not expire in the queue while it waits.
+- If no registered agent offers the pair, the turn is not handed to another model. It waits, `brigada status` shows `foreman turn waiting: no runner offers <harness>/<model>`, and it does not expire in the queue while it waits. Switching the foreman carries the queued turn and its wait to the new pair; the hold lifts when an agent offering that pair registers.
 - `brigada project foreman` warns when you choose a pair no registered agent currently offers, and prints the runner flag that would serve it (`--agent harness=<harness>,model=<model>`). Registering the pair releases the waiting turn.
 - An agent that offers the pair but is busy, cooling or broken is a different wait, and does not trigger the warning.
-- A turn already queued when you switch keeps the pair it was queued with.
+- A turn already queued when you switch moves to the new pair when it records a model, keeping its prompt, events and place in the queue; `brigada project foreman` names each turn it moved. A leased turn finishes on the pair it was leased with, but if its lease lapses or its runner releases it, it returns to the queue on the pair the project holds then. A turn submitted on another harness with no model recorded stays unresolved.
 
 ### Reading the code
 

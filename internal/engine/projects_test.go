@@ -2,6 +2,7 @@ package engine
 
 import (
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -33,7 +34,7 @@ func TestSetProjectForemanCreatesProject(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read the foreman back: %v", err)
 	}
-	if got == nil || *got != set {
+	if got == nil || !reflect.DeepEqual(*got, set) {
 		t.Fatalf("the setting read back = %+v, want %+v", got, set)
 	}
 

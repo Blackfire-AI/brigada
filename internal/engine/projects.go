@@ -28,6 +28,9 @@ type ForemanSetting struct {
 	// foreman's turns will wait until one does. It says nothing of a
 	// registered agent that is only busy, cooling or broken.
 	Unserved bool `json:"unserved,omitempty"`
+	// MovedTurns is set on the answer to a choice that switched the pair:
+	// the queued foreman turns it carried to the new pair, in job id order.
+	MovedTurns []int64 `json:"moved_turns,omitempty"`
 }
 
 // ErrInvalidForeman marks a refusal the caller caused: a foreman setting
@@ -90,12 +93,19 @@ func (e *Engine) SetProjectForemanEffort(ctx context.Context, repoURL, harness, 
 		}
 		var project int64
 		var oldHarness, oldModel string
+		var moves []foremanTurnMove
 		cleared := false
 		err := lookupProjectTx(tx, repoURL, "id, foreman_harness, foreman_model", &project, &oldHarness, &oldModel)
 		switch {
 		case err == nil:
 			// An effort change alone is no switch: the session and any
 			// limit stay, and only the next turn runs at the new level.
+			if harness != oldHarness || model != oldModel {
+				moves, err = queuedForemanTurnMovesTx(tx, project)
+				if err != nil {
+					return err
+				}
+			}
 			if _, err := tx.Exec("UPDATE projects SET archived_at = NULL, foreman_harness = ?, foreman_model = ?, foreman_effort = ?, updated_at = ? WHERE id = ?",
 				harness, model, effort, fmtTime(now), project); err != nil {
 				return fmt.Errorf("set the foreman of the project of %s: %w", shown, err)
@@ -140,6 +150,22 @@ func (e *Engine) SetProjectForemanEffort(ctx context.Context, repoURL, harness, 
 		if _, err := appendEventTx(tx, evProjectForemanSet, project, 0, 0,
 			eventPayload{Harness: harness, Model: model, Effort: effort}, now); err != nil {
 			return err
+		}
+		for _, move := range moves {
+			moved, err := moveForemanTurnTx(tx, move.job, move.from, foremanPair{harness: harness, model: model}, now)
+			if err != nil {
+				return err
+			}
+			if moved {
+				setting.MovedTurns = append(setting.MovedTurns, move.job.ID)
+			}
+		}
+		if len(setting.MovedTurns) > 0 {
+			// The sweep before the switch stamped the old pair. Reconcile the
+			// moved turns now so their holds name and follow the new one.
+			if err := e.holdNoPairTx(tx, now); err != nil {
+				return err
+			}
 		}
 		setting.ProjectID = project
 		offered, err := pairRegisteredTx(tx, harness, model)

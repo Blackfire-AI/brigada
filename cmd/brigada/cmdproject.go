@@ -736,6 +736,13 @@ func runProjectForeman(ctx context.Context, args []string, stdout, stderr io.Wri
 		return fail(stderr, err)
 	}
 	fmt.Fprintf(stdout, "foreman set: harness=%s model=%s%s\n", setting.Harness, setting.Model, effortField(setting.Effort))
+	if len(setting.MovedTurns) > 0 {
+		ids := make([]string, len(setting.MovedTurns))
+		for i, id := range setting.MovedTurns {
+			ids[i] = "job " + fmt.Sprint(id)
+		}
+		fmt.Fprintf(stdout, "queued turns moved to %s/%s: %s\n", setting.Harness, setting.Model, strings.Join(ids, ", "))
+	}
 	if setting.Unserved {
 		// The choice stands, but a foreman turn runs only on an agent that
 		// offers exactly this pair: until one is registered the turns wait.

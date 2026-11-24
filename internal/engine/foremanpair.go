@@ -80,6 +80,90 @@ func pairRegisteredTx(tx *sql.Tx, harness, model string) (bool, error) {
 	return registered, nil
 }
 
+// foremanTurnMove is a queued turn and the pair it resolved to before the
+// project's foreman changed.
+type foremanTurnMove struct {
+	job  *jobRow
+	from foremanPair
+}
+
+// queuedForemanTurnMovesTx lists the turns a foreman switch carries. A
+// queued turn without a recorded model keeps its own resolution: notably,
+// one on another harness stays unresolved.
+func queuedForemanTurnMovesTx(tx *sql.Tx, project int64) ([]foremanTurnMove, error) {
+	rows, err := tx.Query(`SELECT `+jobColumns+` FROM jobs
+		WHERE project_id = ? AND status = 'queued' AND kind = ? AND model <> '' ORDER BY id`, project, string(KindForeman))
+	if err != nil {
+		return nil, fmt.Errorf("list queued foreman turns to move: %w", err)
+	}
+	var moves []foremanTurnMove
+	for rows.Next() {
+		j, err := scanJob(rows)
+		if err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("list queued foreman turns to move: %w", err)
+		}
+		from, err := foremanPairTx(tx, j)
+		if err != nil {
+			rows.Close()
+			return nil, err
+		}
+		moves = append(moves, foremanTurnMove{job: j, from: from})
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, fmt.Errorf("list queued foreman turns to move: %w", err)
+	}
+	rows.Close()
+	return moves, nil
+}
+
+// moveForemanTurnTx puts a turn on its new pair without touching its prompt,
+// events or queue position, and records both pairs when they differ.
+func moveForemanTurnTx(tx *sql.Tx, job *jobRow, from, to foremanPair, now time.Time) (bool, error) {
+	if from == to {
+		return false, nil
+	}
+	if _, err := tx.Exec("UPDATE jobs SET harness = ?, model = ?, updated_at = ? WHERE id = ?",
+		to.harness, to.model, fmtTime(now), job.ID); err != nil {
+		return false, fmt.Errorf("move foreman turn %d to %s: %w", job.ID, to, err)
+	}
+	if _, err := appendEventTx(tx, evForemanTurnMoved, job.ProjectID, job.TaskID, job.ID,
+		eventPayload{Harness: to.harness, Model: to.model, FromHarness: from.harness, FromModel: from.model}, now); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// requeueForemanTurnTx gives a returning leased turn the pair the project
+// holds now. Its old pair is the one recorded on the job, or the leased
+// agent's for an older turn that did not record a complete pair.
+func requeueForemanTurnTx(tx *sql.Tx, job *jobRow, now time.Time) error {
+	if job.Kind != KindForeman {
+		return nil
+	}
+	from := foremanPair{harness: job.Harness, model: job.Model}
+	if !from.ok() && job.AgentID != 0 {
+		err := tx.QueryRow("SELECT harness, model FROM agents WHERE id = ?", job.AgentID).Scan(&from.harness, &from.model)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("read the pair foreman turn %d leased: %w", job.ID, err)
+		}
+	}
+	if !from.ok() {
+		var err error
+		if from, err = foremanPairTx(tx, job); err != nil {
+			return err
+		}
+	}
+	var to foremanPair
+	if err := tx.QueryRow("SELECT foreman_harness, foreman_model FROM projects WHERE id = ?", job.ProjectID).
+		Scan(&to.harness, &to.model); err != nil {
+		return fmt.Errorf("read the current foreman of project %d: %w", job.ProjectID, err)
+	}
+	_, err := moveForemanTurnTx(tx, job, from, to, now)
+	return err
+}
+
 // holdNoPairTx stamps the no-pair hold on every queued foreman turn whose
 // harness/model pair no registered agent offers, renews it on every sweep
 // while that stays so, and lifts it — restarting the TTL clock — once the
