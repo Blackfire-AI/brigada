@@ -3,7 +3,12 @@ package main
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
+	"io"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -11,12 +16,25 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Blackfire-AI/brigada/internal/api"
 	"github.com/Blackfire-AI/brigada/internal/lifecycle"
 	"github.com/Blackfire-AI/brigada/internal/logo"
 	"github.com/Blackfire-AI/brigada/internal/runnerstate"
+	"github.com/Blackfire-AI/brigada/internal/store"
 	"github.com/Blackfire-AI/brigada/internal/term"
 	"github.com/Blackfire-AI/brigada/internal/testsupport"
 )
+
+// noEngine makes the engine unreachable for the test: connectAgents fails
+// as it does when no engine can be started, its reason left out so a test
+// can still demand an empty stderr. The commands answer as they do with no
+// engine to ask.
+func noEngine(t *testing.T) {
+	t.Helper()
+	old := connectAgents
+	connectAgents = func(context.Context, *runtime, string, bool, io.Writer) (*api.Client, int) { return nil, 1 }
+	t.Cleanup(func() { connectAgents = old })
+}
 
 func agentsDo(t *testing.T, args ...string) (int, string, string) {
 	t.Helper()
@@ -342,6 +360,7 @@ func TestAgentsAddRefusals(t *testing.T) {
 
 func TestAgentsRemove(t *testing.T) {
 	fakeInitPATH(t, "opencode")
+	noEngine(t)
 	state := testsupport.ShortStateDir(t)
 	saveAgentLines(t, state,
 		"# mine",
@@ -677,6 +696,7 @@ func stubAgentsStdin(t *testing.T, input string) {
 
 func TestAgentsUpdateAppliesWithYes(t *testing.T) {
 	fakeOpenCodeModels(t, "fixture/gpt-6-sol", "fixture/gpt-6.1-sol")
+	noEngine(t)
 	state := testsupport.ShortStateDir(t)
 	saved := []string{"# mine", "harness=opencode,model=fixture/gpt-6-sol,classes=review,account=work,effort=high", "harness=opencode,model=fixture/glm-5.3", "not an agent line"}
 	saveAgentLines(t, state, saved...)
@@ -707,6 +727,7 @@ func TestAgentsUpdateAppliesWithYes(t *testing.T) {
 // to the listed qwen4-max, the flash line untouched.
 func TestAgentsUpdateAppliesQwenSuperseded(t *testing.T) {
 	fakeInitPATH(t, "qwen")
+	noEngine(t)
 	writeInitQwenScript(t, initQwenListModelsHelp, initQwenListModels)
 	state := testsupport.ShortStateDir(t)
 	saveAgentLines(t, state, "harness=qwen-code,model=qwen-subscription/qwen3.8-max,classes=review,account=work")
@@ -733,6 +754,7 @@ func TestAgentsUpdateDeclines(t *testing.T) {
 	for name, input := range map[string]string{"n": "n\n", "enter": "\n", "eof": ""} {
 		t.Run(name, func(t *testing.T) {
 			fakeOpenCodeModels(t, "fixture/gpt-6-sol", "fixture/gpt-6.1-sol")
+			noEngine(t)
 			state := testsupport.ShortStateDir(t)
 			saved := []string{"harness=opencode,model=fixture/gpt-6-sol"}
 			saveAgentLines(t, state, saved...)
@@ -760,6 +782,7 @@ func TestAgentsUpdateAcceptAllAndPerAnswer(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			fakeOpenCodeModels(t, offered...)
+			noEngine(t)
 			state := testsupport.ShortStateDir(t)
 			saveAgentLines(t, state, "harness=opencode,model=fixture/gpt-6-sol", "harness=opencode,model=fixture/glm-5.3")
 			stubAgentsStdin(t, tc.input)
@@ -776,6 +799,7 @@ func TestAgentsUpdateAcceptAllAndPerAnswer(t *testing.T) {
 
 func TestAgentsUpdateDryRun(t *testing.T) {
 	fakeOpenCodeModels(t, "fixture/gpt-6-sol", "fixture/gpt-6.1-sol")
+	noEngine(t)
 	state := testsupport.ShortStateDir(t)
 	saved := []string{"harness=opencode,model=fixture/gpt-6-sol"}
 	saveAgentLines(t, state, saved...)
@@ -845,6 +869,7 @@ func TestAgentsUpdateRefusesTwoCandidatesUpdatingToTheSameTarget(t *testing.T) {
 
 func TestAgentsUpdateEffortFallsBackToTheCLIDefault(t *testing.T) {
 	fakeOpenCodeModels(t, "fixture/gpt-6-sol", "fixture/gpt-6.1-sol")
+	noEngine(t)
 	state := testsupport.ShortStateDir(t)
 	// HIGH is not a variant opencode accepts; the rewrite drops it.
 	saveAgentLines(t, state, "harness=opencode,model=fixture/gpt-6-sol,effort=HIGH")
@@ -877,5 +902,347 @@ func TestAgentsUpdateRejectsArguments(t *testing.T) {
 		if code, _, errOut := agentsDo(t, append([]string{"agents", "update", "--state-dir", state}, args...)...); code != 2 || errOut == "" {
 			t.Errorf("%q: code=%d stderr=%q", args, code, errOut)
 		}
+	}
+}
+
+// agentsTestForeman is one project's foreman as a test chooses it.
+type agentsTestForeman struct {
+	repo, harness, model, effort string
+}
+
+// startAgentsEngine starts the engine in-process with each foreman chosen
+// in order — the projects list oldest first — and returns the client that
+// chose them.
+func startAgentsEngine(t *testing.T, foremen ...agentsTestForeman) (context.Context, string, *api.Client) {
+	t.Helper()
+	ctx, state := startSettingsEngine(t)
+	_, token, err := lifecycle.TokenForRole(lifecycle.PathsOf(state).Tokens, "client")
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := api.NewClient(lifecycle.PathsOf(state).Socket, token)
+	for _, f := range foremen {
+		if _, err := client.SetProjectForeman(ctx, f.repo, f.harness, f.model, f.effort); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return ctx, state, client
+}
+
+// foremanOf is the model and effort the engine holds for repo.
+func foremanOf(t *testing.T, client *api.Client, repo string) (model, effort string) {
+	t.Helper()
+	setting, err := client.ProjectForeman(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return setting.Model, setting.Effort
+}
+
+// After a removal the command asks the engine which projects have their
+// foreman on the removed pair — the harness and the model both, so a
+// foreman on the same model name under another harness is not one of them
+// — and names each with the switch to a pair the remaining roster offers,
+// that harness first. The switch carries the foreman's effort when the
+// target accepts it and leaves it out when the target refuses it, since a
+// switch typed without it clears the effort.
+func TestAgentsRemoveNamesOrphanedForemen(t *testing.T) {
+	fakeInitPATH(t, "opencode")
+	_, state, _ := startAgentsEngine(t,
+		agentsTestForeman{"https://example.invalid/app.git", "opencode", "fixture/gpt-6-sol", "high"},
+		agentsTestForeman{"https://example.invalid/claude.git", "claude", "fixture/gpt-6-sol", "high"},
+		agentsTestForeman{"https://example.invalid/legacy.git", "opencode", "fixture/glm-5.3", "minimal"},
+	)
+	saveAgentLines(t, state,
+		"harness=opencode,model=fixture/gpt-6-sol",
+		"harness=claude,model=sonnet",
+		"harness=opencode,model=fixture/glm-5.3",
+	)
+
+	code, out, errOut := agentsDo(t, "agents", "remove", "--state-dir", state, "opencode/fixture/gpt-6-sol")
+	if code != 0 || errOut != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+	const waits = "turns wait until another registered agent offers the pair, however long that takes, or the foreman is switched to a pair an agent offers:\n"
+	for _, want := range []string{
+		"removed opencode/fixture/gpt-6-sol\n",
+		"1 project has opencode/fixture/gpt-6-sol as its foreman; its " + waits +
+			"  example.invalid/app\n" +
+			"    brigada project foreman --repo example.invalid/app --harness opencode --model fixture/glm-5.3 --effort high\n",
+		"No runner running; brigada start serves it.\n",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "example.invalid/claude") || strings.Contains(out, "example.invalid/legacy") {
+		t.Errorf("a foreman on another pair is named:\n%s", out)
+	}
+
+	// No pair left on the foreman's harness: the switch goes to another
+	// harness, which refuses the opencode variant, so it carries no effort.
+	code, out, errOut = agentsDo(t, "agents", "remove", "--state-dir", state, "opencode/fixture/glm-5.3")
+	if code != 0 || errOut != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+	want := "1 project has opencode/fixture/glm-5.3 as its foreman; its " + waits +
+		"  example.invalid/legacy\n" +
+		"    brigada project foreman --repo example.invalid/legacy --harness claude --model sonnet\n"
+	if !strings.Contains(out, want) {
+		t.Errorf("output lacks %q:\n%s", want, out)
+	}
+	if strings.Contains(out, "example.invalid/app") || strings.Contains(out, "example.invalid/claude") {
+		t.Errorf("a foreman on another pair is named:\n%s", out)
+	}
+
+	// A pair no project's foreman is on names no one, and says so.
+	saveAgentLines(t, state, "harness=claude,model=sonnet", "harness=claude,model=opus")
+	code, out, errOut = agentsDo(t, "agents", "remove", "--state-dir", state, "claude/opus")
+	if code != 0 || errOut != "" || !strings.Contains(out, "No project has claude/opus as its foreman.\n") {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+}
+
+// A rewrite's lines name the projects whose foreman is on the moved pair —
+// the harness and the model both, so a foreman on the same model name
+// under another harness is not named — with the switch to the newer model,
+// which carries the effort the newer model accepts; --dry-run prints them
+// too and switches nothing, listing the switches --foremen would make.
+func TestAgentsUpdateNamesTheForemenOfAMovedPair(t *testing.T) {
+	fakeOpenCodeModels(t, "fixture/gpt-6-sol", "fixture/gpt-6.1-sol")
+	_, state, client := startAgentsEngine(t,
+		agentsTestForeman{"https://example.invalid/app.git", "opencode", "fixture/gpt-6-sol", "high"},
+		agentsTestForeman{"https://example.invalid/claude.git", "claude", "fixture/gpt-6-sol", "high"},
+	)
+	saved := []string{"harness=opencode,model=fixture/gpt-6-sol", "harness=claude,model=sonnet"}
+	saveAgentLines(t, state, saved...)
+	stubAgentsStdin(t, "") // a dry run reads no answers
+	const tail = "Dry run: nothing written, nothing restarted.\n"
+	named := "opencode/fixture/gpt-6-sol → opencode/fixture/gpt-6.1-sol\n" +
+		"  harness=opencode,model=fixture/gpt-6.1-sol,classes=implement+review+answer\n" +
+		"  1 project has opencode/fixture/gpt-6-sol as its foreman; no other line offers the pair once the rewrite lands, so its turns wait until the foreman is switched:\n" +
+		"    example.invalid/app\n" +
+		"      brigada project foreman --repo example.invalid/app --harness opencode --model fixture/gpt-6.1-sol --effort high\n"
+
+	code, out, errOut := agentsDo(t, "agents", "update", "--state-dir", state, "--dry-run")
+	if code != 0 || errOut != "" || out != named+tail {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+
+	// The dry run of --foremen lists each switch and makes none.
+	code, out, errOut = agentsDo(t, "agents", "update", "--state-dir", state, "--dry-run", "--foremen")
+	withSwitch := named + "      with --foremen: switches the foreman to opencode/fixture/gpt-6.1-sol, keeping effort=high\n"
+	if code != 0 || errOut != "" || out != withSwitch+tail {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+	if model, effort := foremanOf(t, client, "https://example.invalid/app.git"); model != "fixture/gpt-6-sol" || effort != "high" {
+		t.Errorf("a dry run switched the foreman: model=%s effort=%s", model, effort)
+	}
+	if got := loadAgentLines(t, state); !reflect.DeepEqual(got, saved) {
+		t.Errorf("agents file changed: %q", got)
+	}
+
+	// Without --foremen the rewrite lands and the foremen stay where they
+	// were: the lines name, the flag switches.
+	code, out, errOut = agentsDo(t, "agents", "update", "--state-dir", state, "--yes")
+	if code != 0 || errOut != "" || !strings.HasPrefix(out, named) || strings.Contains(out, "switched to") {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+	if model, effort := foremanOf(t, client, "https://example.invalid/app.git"); model != "fixture/gpt-6-sol" || effort != "high" {
+		t.Errorf("the foreman moved without --foremen: model=%s effort=%s", model, effort)
+	}
+
+	// Another line registering the same pair keeps offering it once the
+	// rewrite lands, so the foreman's turns do not wait.
+	saveAgentLines(t, state, "harness=opencode,model=fixture/gpt-6-sol", "harness=opencode,model=fixture/gpt-6-sol,classes=review")
+	code, out, errOut = agentsDo(t, "agents", "update", "--state-dir", state, "--dry-run")
+	if code != 0 || errOut != "" || !strings.Contains(out, "  1 project has opencode/fixture/gpt-6-sol as its foreman; another line still offers the pair, so its turns do not wait:\n") {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+}
+
+// refusedSwitchTransport reaches the engine as the CLI's own client does,
+// but answers every foreman switch with a 500.
+type refusedSwitchTransport struct{ next http.RoundTripper }
+
+func (r refusedSwitchTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.Method == http.MethodPut && req.URL.Path == "/v1/projects/foreman" {
+		return &http.Response{
+			StatusCode: http.StatusInternalServerError,
+			Header:     http.Header{"Content-Type": {"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"error":"the store is away","code":"internal"}`)),
+			Request:    req,
+		}, nil
+	}
+	return r.next.RoundTrip(req)
+}
+
+// --foremen switches the foremen of every applied rewrite to the newer
+// model as brigada project foreman does, keeping an effort the newer model
+// accepts and leaving one it refuses to the CLI's own default, and says so
+// per project. A switch the engine refuses is reported with the command
+// that makes it, the rewrite stands, and the command fails.
+func TestAgentsUpdateForemenSwitchTheForemen(t *testing.T) {
+	fakeOpenCodeModels(t, "fixture/gpt-6-sol", "fixture/gpt-6.1-sol")
+	ctx, state, client := startAgentsEngine(t,
+		agentsTestForeman{"https://example.invalid/kept.git", "opencode", "fixture/gpt-6-sol", "high"},
+		agentsTestForeman{"https://example.invalid/dropped.git", "opencode", "fixture/gpt-6-sol", "low"},
+	)
+	// An effort the harness no longer accepts, as one an older brigada
+	// stored: the engine validates a choice, so it goes straight into the
+	// store.
+	st, err := store.Open(ctx, lifecycle.PathsOf(state).Store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = st.Update(ctx, func(tx *sql.Tx) error {
+		_, err := tx.Exec(`UPDATE projects SET foreman_effort = 'HIGH' WHERE repo_url = 'example.invalid/dropped'`)
+		return err
+	})
+	st.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	saveAgentLines(t, state, "harness=opencode,model=fixture/gpt-6-sol")
+
+	code, out, errOut := agentsDo(t, "agents", "update", "--state-dir", state, "--yes", "--foremen")
+	if code != 0 || errOut != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+	for _, want := range []string{
+		"  2 projects have opencode/fixture/gpt-6-sol as their foremen; no other line offers the pair once the rewrite lands, so their turns wait until each foreman is switched:\n" +
+			"    example.invalid/kept\n" +
+			"      brigada project foreman --repo example.invalid/kept --harness opencode --model fixture/gpt-6.1-sol --effort high\n" +
+			"    example.invalid/dropped\n" +
+			"      brigada project foreman --repo example.invalid/dropped --harness opencode --model fixture/gpt-6.1-sol\n",
+		"updated opencode/fixture/gpt-6-sol → opencode/fixture/gpt-6.1-sol\n" +
+			"foreman of example.invalid/kept switched to opencode/fixture/gpt-6.1-sol, keeping effort=high\n" +
+			"foreman of example.invalid/dropped switched to opencode/fixture/gpt-6.1-sol; effort=HIGH is not accepted for opencode/fixture/gpt-6.1-sol, so the CLI's own default applies\n" +
+			"rewritten in ",
+		"No runner running; brigada start serves it.\n",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+	if got := loadAgentLines(t, state); !reflect.DeepEqual(got, []string{"harness=opencode,model=fixture/gpt-6.1-sol,classes=implement+review+answer"}) {
+		t.Errorf("lines = %q", got)
+	}
+	if model, effort := foremanOf(t, client, "https://example.invalid/kept.git"); model != "fixture/gpt-6.1-sol" || effort != "high" {
+		t.Errorf("kept effort: model=%s effort=%s", model, effort)
+	}
+	if model, effort := foremanOf(t, client, "https://example.invalid/dropped.git"); model != "fixture/gpt-6.1-sol" || effort != "" {
+		t.Errorf("dropped effort: model=%s effort=%s", model, effort)
+	}
+
+	// A switch the engine refuses: reported, the rewrite standing.
+	if _, err := client.SetProjectForeman(ctx, "https://example.invalid/kept.git", "opencode", "fixture/gpt-6-sol", "high"); err != nil {
+		t.Fatal(err)
+	}
+	saveAgentLines(t, state, "harness=opencode,model=fixture/gpt-6-sol")
+	_, token, err := lifecycle.TokenForRole(lifecycle.PathsOf(state).Tokens, "client")
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := connectAgents
+	connectAgents = func(context.Context, *runtime, string, bool, io.Writer) (*api.Client, int) {
+		socket := lifecycle.PathsOf(state).Socket
+		transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, "unix", socket)
+		}}
+		return api.NewClientWithHTTPClient(&http.Client{Transport: refusedSwitchTransport{transport}}, token), 0
+	}
+	t.Cleanup(func() { connectAgents = old })
+	code, out, errOut = agentsDo(t, "agents", "update", "--state-dir", state, "--yes", "--foremen")
+	if code != 1 {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+	for _, want := range []string{"updated opencode/fixture/gpt-6-sol → opencode/fixture/gpt-6.1-sol\n", "rewritten in ", "No runner running; brigada start serves it.\n"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+	refusal := "brigada: agents update: the foreman of example.invalid/kept was not switched to opencode/fixture/gpt-6.1-sol (PUT /v1/projects/foreman: 500 internal: the store is away); the rewrite stands, and brigada project foreman --repo example.invalid/kept --harness opencode --model fixture/gpt-6.1-sol --effort high switches it\n"
+	if errOut != refusal {
+		t.Errorf("stderr = %q, want %q", errOut, refusal)
+	}
+	if got := loadAgentLines(t, state); !reflect.DeepEqual(got, []string{"harness=opencode,model=fixture/gpt-6.1-sol,classes=implement+review+answer"}) {
+		t.Errorf("the rewrite did not stand: %q", got)
+	}
+	if model, effort := foremanOf(t, client, "https://example.invalid/kept.git"); model != "fixture/gpt-6-sol" || effort != "high" {
+		t.Errorf("the foreman moved: model=%s effort=%s", model, effort)
+	}
+}
+
+// An engine the commands cannot ask leaves them pointing at brigada project
+// list: a removal still says a removed foreman's turns wait, an update's
+// lines name no one, and --foremen, with nothing it can switch, says so
+// and fails while the rewrite stands.
+func TestAgentsForemenNeedTheEngine(t *testing.T) {
+	fakeOpenCodeModels(t, "fixture/gpt-6-sol", "fixture/gpt-6.1-sol")
+	state := testsupport.ShortStateDir(t)
+	old := connectAgents
+	connectAgents = func(_ context.Context, _ *runtime, _ string, _ bool, stderr io.Writer) (*api.Client, int) {
+		return nil, fail(stderr, errors.New("the engine did not answer"))
+	}
+	t.Cleanup(func() { connectAgents = old })
+	const pointer = "brigada project list shows them"
+	saveAgentLines(t, state, "harness=opencode,model=fixture/gpt-6-sol", "harness=claude,model=sonnet")
+
+	code, out, errOut := agentsDo(t, "agents", "update", "--state-dir", state, "--dry-run")
+	if code != 0 || !strings.Contains(errOut, "brigada: the engine did not answer") ||
+		!strings.Contains(out, "  projects whose foreman is on opencode/fixture/gpt-6-sol: "+pointer+" (the engine could not be asked)\n") {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+
+	// --foremen cannot switch: the rewrites land and the command fails.
+	code, out, errOut = agentsDo(t, "agents", "update", "--state-dir", state, "--yes", "--foremen")
+	if code != 1 || !strings.Contains(errOut, "brigada: agents update: no foreman was switched: the engine could not be asked which projects have their foremen on a moved pair; "+pointer+", and brigada project foreman switches one\n") {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+	if got := loadAgentLines(t, state); !reflect.DeepEqual(got, []string{"harness=opencode,model=fixture/gpt-6.1-sol,classes=implement+review+answer", "harness=claude,model=sonnet"}) {
+		t.Errorf("lines = %q", got)
+	}
+
+	code, out, errOut = agentsDo(t, "agents", "remove", "--state-dir", state, "claude/sonnet")
+	if code != 0 || !strings.Contains(errOut, "brigada: the engine did not answer") ||
+		!strings.Contains(out, "If this agent was a project's foreman, its turns wait until another registered agent offers the pair ("+pointer+").\n") {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+}
+
+// --foremen is a boolean flag: a misspelling and a value that is not a
+// boolean are usage errors that leave the file as it was, and the help
+// shows it beside --yes, --dry-run and --now.
+func TestAgentsUpdateForemenFlag(t *testing.T) {
+	fakeInitPATH(t, "opencode")
+	state := testsupport.ShortStateDir(t)
+	saved := []string{"harness=claude,model=sonnet"}
+	saveAgentLines(t, state, saved...)
+	code, out, errOut := agentsDo(t, "agents", "update", "--help")
+	if code != 0 || errOut != "" || !strings.HasPrefix(out, "Usage: brigada agents update [--yes] [--dry-run] [--foremen] [--now]\n") {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+	for _, want := range []string{"  -yes\n", "  -dry-run\n", "  -foremen\n", "  -now\n"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("help lacks %q:\n%s", want, out)
+		}
+	}
+	for name, tc := range map[string]struct {
+		args     []string
+		contains string
+	}{
+		"misspelled":    {[]string{"--foreman"}, "flag provided but not defined: -foreman\n"},
+		"not a boolean": {[]string{"--foremen=sure"}, `invalid boolean value "sure" for -foremen`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			code, out, errOut := agentsDo(t, append([]string{"agents", "update", "--state-dir", state}, tc.args...)...)
+			if code != 2 || out != "" || !strings.Contains(errOut, tc.contains) {
+				t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errOut)
+			}
+			if got := loadAgentLines(t, state); !reflect.DeepEqual(got, saved) {
+				t.Fatalf("agents file changed: %q", got)
+			}
+		})
 	}
 }
