@@ -41,6 +41,6 @@ tasks:
     base: ""
     effort: medium
     skills: ["cli-flag", "surface-parity"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-1154"
     rounds: 0
