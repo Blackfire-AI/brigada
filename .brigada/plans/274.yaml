@@ -53,9 +53,9 @@ tasks:
     tier: light
     effort: low
     skills: ["docs-change"]
-    state: reviewing
+    state: running
     branch: "brigada/task-1168"
-    rounds: 0
+    rounds: 1
   - id: 1169
     name: "acceptance"
     title: "live acceptance: real npx skills install and a fresh harness run (#255)"
