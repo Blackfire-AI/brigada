@@ -192,6 +192,8 @@ func printRemovalPlan(w io.Writer, repo string, files []wireFile, live int, canc
 			action = "left alone: " + f.err.Error()
 		case f.rel == engine.ProjectConfigPath && !f.changed():
 			action = "keep (yours; delete it yourself or pass --delete-config)"
+		case f.purpose == installedSkillPurpose:
+			action = "keep (" + installedSkillPurpose + ")"
 		case !f.changed():
 			continue
 		case f.rel == operatorFile, f.rel == operatorSkillFile, f.purpose == generatedPurpose:

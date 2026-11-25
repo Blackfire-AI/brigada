@@ -296,3 +296,43 @@ func TestIdleShutdown(t *testing.T) {
 	waitHealthy(t, state)
 	next.stop(t)
 }
+
+func TestRunAlreadyCancelledContext(t *testing.T) {
+	state := testsupport.ShortStateDir(t)
+	cfg := lifecycle.Config{StateDir: state, Notify: "none", Idle: time.Minute}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := lifecycle.Run(ctx, cfg); err != nil {
+		t.Fatalf("Run with an already-cancelled context: %v", err)
+	}
+	socket := lifecycle.PathsOf(state).Socket
+	if _, err := os.Stat(socket); !os.IsNotExist(err) {
+		t.Errorf("the cancelled engine left its socket behind: %v", err)
+	}
+
+	runCtx, stop := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- lifecycle.Run(runCtx, cfg) }()
+	stopped := false
+	defer func() {
+		if stopped {
+			return
+		}
+		stop()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+		}
+	}()
+	waitHealthy(t, state)
+	stop()
+	select {
+	case err := <-done:
+		stopped = true
+		if err != nil {
+			t.Fatalf("the second Run on the same state directory: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the second Run did not stop after its context was cancelled")
+	}
+}

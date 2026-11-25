@@ -126,14 +126,14 @@ The `Plan` block then shows:
 - `At once:`, with the machine limit and each usable account's cap.
 - `Check:`, which names the check and reminds you that init does not run it and that you can edit `.brigada/project.yaml`, or shows `none (work goes straight to review)`.
 - `What workers may do:`, with a row for each harness that implements. Claude gets `edit files and run commands under permission <mode>`, or `edit files; no commands` for `none`; an agent that still carries a deprecated `tools=` scope keeps `edit files; run only: …`. Codex can edit and run commands inside its sandbox. Kimi, if allowed to implement, can edit and run any command without asking. qwen-code edits files and runs any command without asking. Opencode gets `edit files and run commands under OpenCode's rules for the agent's permission=`.
-- `Files in this repository`, which lists each file's state first (`new`, `changes`, `unchanged`, or `left alone`, with its reason after the path), then its path and its purpose. On a first run the list is `.brigada/project.yaml`, the operator guide and its skill, the four role files and the eight default skills; on a rerun over an older init's wiring it also names the files it strips (below). Changes to existing files show diffs and keep other settings and comments; new files show full contents only with `--verbose`. Init never commits these files.
+- `Files in this repository`, which lists each file's state first (`new`, `changes`, `unchanged`, or `left alone`, with its reason after the path), then its path and its purpose. On a first run the list is `.brigada/project.yaml`, the four role files and the eight default skills, plus an `unchanged` row for `.git/info/exclude`, whose line hiding the private Claude Code settings goes only when it is there (below); on a rerun over an older init's leftovers it also names the wiring it strips and the marked operator files it removes (below). Changes to existing files show diffs and keep other settings and comments; new files show full contents only with `--verbose`. Init never commits these files.
 - `In the background:`, with the persistent runner, its log, `brigada stop`, and the engine's exit after 30 idle minutes.
-- `Next:`, the closing text: talk to the foreman with `brigada attach`, send `brigada ask "what you want built"` without a conversation, or have your own coding agent read `.brigada/operator.md`, then watch `brigada status`.
+- `Next:`, the closing text: talk to the foreman with `brigada attach`, send `brigada ask "what you want built"` without a conversation, or give your own coding agent the operator skill with the installation command init prints ([the operator flow](#the-operator-flow)), then watch `brigada status`.
 
 Then, after you confirm (`y` at the prompt, or `--yes`), init:
 
 - writes **`.brigada/project.yaml`** ([section 6](#6-configuring-a-project)). The file is yours to commit; brigada never commits or pushes anything. The write is refused if the file is a symlink or names another repository, and a file that changed after the plan was shown is not overwritten;
-- writes the operator guide `.brigada/operator.md` and its skill `.claude/skills/brigada-operator/SKILL.md`, the four role files under `.brigada/instructions/` and the default skills under `.brigada/skills/` ([the operator flow](#the-operator-flow)). These are yours to commit as well: the import reads your working copy, the foreman's checkout what is pushed;
+- writes the four role files under `.brigada/instructions/` and the default skills under `.brigada/skills/` ([the operator flow](#the-operator-flow)). These are yours to commit as well: the import reads your working copy, the foreman's checkout what is pushed. The operator skill is not among them: init prints the command that installs it and runs nothing ([the operator flow](#the-operator-flow));
 - strips brigada's wiring from the repository, unless `--no-wiring`: the `brigada` server in `.mcp.json`, the hooks in private `.claude/settings.local.json` and the legacy brigada hooks in shared `.claude/settings.json`, the `brigada` table in `.codex/config.toml`, `.brigada/foreman.md` and its block in `AGENTS.md` with `CLAUDE.md`'s import section, the old foreman skill, and the `/.claude/settings.local.json` line in git's `info/exclude`. Init writes no harness wiring; only brigada's own entries change, and a file you have not edited comes back byte for byte;
 - starts the engine on demand, imports the project file (recording where each value came from, [section 6](#6-configuring-a-project)), registers the foreman, saves the agent and concurrency choices and starts one detached runner. The answers replace what they cover — an interactive run's questions replace every saved line of each CLI asked about, so declining a CLI removes its lines, while `--agent` replaces the harness and model pairs it names — and every other saved agent line stays in the agents file and the runner serves it, unless `--overwrite-config` is passed. If its agents or concurrency changed, init restarts the runner with the new choices; otherwise it keeps the running one. The restart waits out the runner's running jobs — no job is cut — and `--now` restarts at once instead, cutting them. The runner's log is `runner.log` in the state directory.
 
@@ -155,7 +155,7 @@ Then, after you confirm (`y` at the prompt, or `--yes`), init:
 | `--check CMD` | The default check; answers step 4 without a question. |
 | `--tools SCOPE` | Deprecated (use `permission=`). Worker tools in runner `tools=` syntax (`Bash(npm test:*)+Bash(npx jest:*)`, or `none`). An explicit agent `tools=` wins; a `tools.claude/<model>` line in your config file is kept unless you pass `--tools`. |
 | `--accept-limited` | Acknowledge fewer than two review families. It matters only under `review.family = require` (reviews then wait for another family); under the default `prefer` init warns and goes on without it. |
-| `--no-wiring` | In a repository, a no-op with a note: init writes no harness wiring and, on a rerun, strips nothing; it still writes `.brigada/operator.md` and the operator skill, which are not wiring. In a parent folder, skip the coordinator's wiring. |
+| `--no-wiring` | In a repository, a no-op with a note: init writes no harness wiring and, on a rerun, strips no wiring; the legacy operator cleanup ([removing brigada](#removing-brigada-from-a-repository)) still runs. In a parent folder, skip the coordinator's wiring. |
 | `--all` | Only in a folder that is not a repository ([section 3](#3-several-repositories)). |
 | `--take-default NAME` | Reset one generated file to the new default under a fresh header, whatever it holds now: `NAME` is a role (`foreman`, `plan_review`, `worker`, `reviewer`) or a default skill name. A role whose key the `instructions:` map does not carry gets the key back at its default path, so the restored file is configured again; the worker on `instructions_file` keeps that alias. It touches that file (and that one map line), needs no engine and asks nothing; run `brigada project import` to apply it. An unknown name is a usage error listing the valid ones. |
 | `--state-dir DIR`, `--config PATH` | As for every command. |
@@ -211,7 +211,8 @@ report what you did.
      --check 'go test ./...' --parallel 4
 5. Report the agents and the files written, which are mine to commit.
    Tell me I can talk to the foreman through you or with
-   `brigada attach`. From then on, follow `.brigada/operator.md`.
+   `brigada attach`. Then install your operator skill with
+   `npx skills add Blackfire-AI/brigada --skill brigada-operator`.
 
 brigada's repository is https://github.com/Blackfire-AI/brigada; its
 README and docs/GUIDE.md answer most questions — consult them when a
@@ -219,7 +220,7 @@ step is unclear. Stop and ask me if a step fails or a choice remains
 open. Never commit or push what init writes.
 ```
 
-The steps are this section's own: step 2 is the sign-in probe above (an opencode that runs on environment keys needs `--signed-in opencode` in step 4's list, for the probe cannot confirm it), step 3 is the probe plan of [without a terminal](#without-a-terminal), and step 4 is the `--yes` apply, whose answers come from the flags of [flags](#flags) because `--yes` asks nothing. The guardrails are init's own rules: it never runs a login command or a model, reads status in memory and never prints or stores it, and writes nothing until the plan is confirmed — by you, through the agent. Once init has written `.brigada/operator.md` and the operator skill beside it, the same agent works brigada through that guide ([section 2](#2-talking-to-the-foreman-brigada-attach)): the prompt is only the door. A repository that already carries an operator guide — a rerun — needs none of this; the agent follows the guide it has.
+The steps are this section's own: step 2 is the sign-in probe above (an opencode that runs on environment keys needs `--signed-in opencode` in step 4's list, for the probe cannot confirm it), step 3 is the probe plan of [without a terminal](#without-a-terminal), and step 4 is the `--yes` apply, whose answers come from the flags of [flags](#flags) because `--yes` asks nothing. The guardrails are init's own rules: it never runs a login command or a model, reads status in memory and never prints or stores it, and writes nothing until the plan is confirmed — by you, through the agent. Once the agent has installed the brigada-operator skill, it works brigada through that skill ([section 2](#2-talking-to-the-foreman-brigada-attach)): the prompt is only the door. An agent that already carries the skill — a rerun, or an install made with `-g` — needs none of this.
 
 ### Changing your setup later
 
@@ -251,8 +252,8 @@ The repository cleanup covers brigada's wiring:
 - `.brigada/foreman.md`, and any `.claude/skills/brigada-foreman/SKILL.md` an older init left, each only when it has brigada's marker;
 - brigada's managed block in `AGENTS.md` and its import section in `CLAUDE.md`: only the bytes between the markers go, with the separators init itself added, so a file you have not edited comes back byte for byte and a file init created is deleted;
 - the `/.claude/settings.local.json` line in git's `info/exclude`;
-- `.brigada/operator.md`, the operator guide init writes, when it still has init's generated header.
-- `.claude/skills/brigada-operator/SKILL.md`, the same guide as a Claude Code skill, when it still has init's generated header; an emptied `brigada-operator` directory goes with it.
+- `.brigada/operator.md`, the operator guide an older init generated, when it still opens with init's generated header; any other file at the path stays.
+- `.claude/skills/brigada-operator/SKILL.md`, the same guide as a Claude Code skill, when it carries init's generated header; an emptied `brigada-operator` directory goes with it. The skill the `skills` CLI installs at that path — a link into its own store — is not brigada's and stays.
 - The four role files and eight default skills init wrote (`.brigada/instructions/<role>.md`, `.brigada/skills/<name>/SKILL.md`), only while they are unedited: a file you changed stays and the plan lists it as left alone. Skills you added yourself are never touched.
 
 Other settings and hooks stay. A JSON file is deleted only if removing brigada's entries leaves nothing else in it. `.brigada/project.yaml` stays unless you pass `--delete-config`.
@@ -319,7 +320,17 @@ With `claude`, an attached foreman is the same session the headless turns resume
 
 ### The operator flow
 
-The usual way in is through your own coding agent, the operator. `brigada init` writes `.brigada/operator.md`, a generated, harness-agnostic guide (init overwrites it on a rerun, `--no-wiring` does not skip it, `brigada remove` deletes it). For Claude Code, init also writes the same text as the skill `.claude/skills/brigada-operator/SKILL.md`. Open your agent in the repository, have it read that file, and tell it, for example, "ask brigada to fix #12". The operator:
+The usual way in is through your own coding agent, the operator. Its procedure is the brigada-operator skill, and brigada never installs it: `brigada init` prints the command, and you run it yourself with the `skills` CLI —
+
+```sh
+npx skills add Blackfire-AI/brigada --skill brigada-operator
+```
+
+`--skill` picks the one skill to install from the repository. The install is project-local by default: the skill is linked into the agent directories of this repository. Add `-g` (`--global`) to install it at user level instead, for use across projects; `-a` (`--agent`, `*` for all) names the agents to link it into when you pick them yourself. To hold the skill at the brigada release you run, name the matching ref: append `@<ref>` to the repository, as in `npx skills add Blackfire-AI/brigada@<ref> --skill brigada-operator`, where `<ref>` is the tag of your brigada release. `npx skills update` moves an installation forward to the skill's latest version (`-g` updates global skills only, `-p` project skills only).
+
+Init prints the command and never runs it: brigada gains no Node.js dependency and writes no harness configuration. Brigada never manages an installed copy of the skill, either: nothing of brigada's reads it, updates it or removes it. The copies an older init generated are different: `.brigada/operator.md` and `.claude/skills/brigada-operator/SKILL.md` files carrying init's generated header go on a rerun of init and on `brigada remove`, and any other file at those paths stays.
+
+Open your agent in the repository and tell it, for example, "ask brigada to fix #12". The operator:
 
 - **asks** with `brigada ask -`, naming files and document sections, the build order, tier hints and cooling accounts. The foreman and its workers read what is pushed, not the working tree, so what an ask cites is pushed first or put in the ask. The foreman reads the project's own repository's issues itself with its `issue_read` tool, so a bare issue number of that repository is often enough; the issue text goes into the ask when the issue is elsewhere — another repository, another tracker — or when the repository is not on GitHub or `gh` is not signed in, and issue numbers stay as references for `Closes` and `Refs` trailers;
 - **hears back** from the `foreman report:` line of `brigada status`: `brigada ask` returns at once, and each headless turn ends with a report. The operator relays it to you, questions included, and sends your answer or veto with another `brigada ask`;

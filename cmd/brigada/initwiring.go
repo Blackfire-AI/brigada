@@ -70,10 +70,11 @@ func (w wireFile) changed() bool {
 		(w.exists && w.next == nil && w.state == "removed"))
 }
 
-// planLegacyWiring plans what a rerun of init strips from a repository an
-// older init wired: everything brigada remove removes, the git exclude
-// line that hid the private settings included. It reads files and writes
-// nothing.
+// planLegacyWiring plans the wiring a rerun of init strips from a repository
+// an older init wired: the steps brigada remove takes too, the git exclude
+// line that hid the private settings included. --no-wiring holds it back,
+// and not planLegacyOperator's operator artifacts. It reads files and
+// writes nothing.
 func planLegacyWiring(root string) []wireFile {
 	return append([]wireFile{planExcludeRemoval(root)}, planSteps(root, legacyWiringSteps(root))...)
 }
@@ -163,9 +164,9 @@ func printInitFiles(w io.Writer, files []wireFile, verbose bool) {
 		case f.rel == engine.ProjectConfigPath:
 			purpose = "the settings above"
 		case f.rel == operatorFile:
-			purpose = "tells your own coding agent how to work with brigada"
+			purpose = "removes the operator guide an older init generated"
 		case f.rel == operatorSkillFile:
-			purpose = "the same guide as a Claude Code skill"
+			purpose = "removes the operator skill an older init generated"
 		case f.rel == wiringMCPFile:
 			purpose = "removes the brigada server an older init added"
 		case f.rel == wiringCodexFile:

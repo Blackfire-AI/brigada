@@ -151,7 +151,10 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 
 	started := cfg.Now()
-	st, err := store.Open(ctx, p.Store)
+	// Start-up finishes its transactions even when the caller has cancelled;
+	// the main loop below observes that cancellation and stops normally.
+	startupCtx := context.WithoutCancel(ctx)
+	st, err := store.Open(startupCtx, p.Store)
 	if err != nil {
 		return fmt.Errorf("engine: %w", err)
 	}
@@ -162,18 +165,18 @@ func Run(ctx context.Context, cfg Config) error {
 	// written in an older form are rewritten once, before anything reads
 	// them. Rows that cannot be, or that name one repository twice, stay
 	// as they are and are said so here and in the status.
-	canon, err := eng.CanonicalizeProjects(ctx)
+	canon, err := eng.CanonicalizeProjects(startupCtx)
 	if err != nil {
 		return fmt.Errorf("engine: %w", err)
 	}
 	if canon.Rewritten > 0 {
-		log.InfoContext(ctx, "project identities rewritten to canonical repo URLs", "projects", canon.Rewritten)
+		log.InfoContext(startupCtx, "project identities rewritten to canonical repo URLs", "projects", canon.Rewritten)
 	}
 	for repo, ids := range canon.Collisions {
-		log.WarnContext(ctx, "projects name the same repository and were left as they are", "repo", repo, "projects", ids)
+		log.WarnContext(startupCtx, "projects name the same repository and were left as they are", "repo", repo, "projects", ids)
 	}
 	for id, why := range canon.Failed {
-		log.WarnContext(ctx, "a project's repo URL cannot be canonicalized and was left as it is", "project", id, "why", why)
+		log.WarnContext(startupCtx, "a project's repo URL cannot be canonicalized and was left as it is", "project", id, "why", why)
 	}
 	// A push still running when the engine stops finishes before the
 	// store closes (defers run last-in first); what it misses stays marked
@@ -182,12 +185,12 @@ func Run(ctx context.Context, cfg Config) error {
 	eng.SyncPlanFiles()
 	// A snapshot due since the last run is taken now, before the API
 	// serves; the tick below keeps the daily pace.
-	if path, err := eng.SnapshotIfDue(ctx); err != nil {
-		log.WarnContext(ctx, "store snapshot failed", "err", err)
+	if path, err := eng.SnapshotIfDue(startupCtx); err != nil {
+		log.WarnContext(startupCtx, "store snapshot failed", "err", err)
 	} else if path != "" {
-		log.InfoContext(ctx, "store snapshot taken", "path", path)
+		log.InfoContext(startupCtx, "store snapshot taken", "path", path)
 	}
-	if err := eng.RecordInstance(ctx, int64(os.Getpid()), started); err != nil {
+	if err := eng.RecordInstance(startupCtx, int64(os.Getpid()), started); err != nil {
 		return fmt.Errorf("engine: %w", err)
 	}
 	// The #137 reopen pass, before the wake recovery and before the API
@@ -195,30 +198,30 @@ func Run(ctx context.Context, cfg Config) error {
 	// live-work rule, still holding parked tasks and their dependents,
 	// return to active once here, so the tools read them again — the
 	// guards that refuse a finished plan stay as they are.
-	reopened, err := eng.ReopenStrandedPlans(ctx)
+	reopened, err := eng.ReopenStrandedPlans(startupCtx)
 	if err != nil {
 		return fmt.Errorf("engine: %w", err)
 	}
 	if len(reopened) > 0 {
-		log.InfoContext(ctx, "reopened plans that closed done while still holding live work", "plans", reopened)
+		log.InfoContext(startupCtx, "reopened plans that closed done while still holding live work", "plans", reopened)
 	}
 	// Recovery (§13): judgment events that parked a task while no engine
 	// ran get their foreman turn now — after the sweep, as every engine
 	// call does it, and before the API serves a soul.
-	if err := eng.RecoverForemanWakes(ctx); err != nil {
+	if err := eng.RecoverForemanWakes(startupCtx); err != nil {
 		return fmt.Errorf("engine: %w", err)
 	}
 	// The remote deletions belong to a runner, whose git holds the push
 	// credentials (§13.2). Start-up computes the deletable tasks and queues
 	// the work only; no remote is contacted in this process.
-	queuedSweeps, err := eng.QueueTaskBranchSweeps(ctx)
+	queuedSweeps, err := eng.QueueTaskBranchSweeps(startupCtx)
 	if err != nil {
 		return fmt.Errorf("engine: %w", err)
 	}
 	if queuedSweeps > 0 {
-		log.InfoContext(ctx, "queued task-branch reconcile sweeps", "projects", queuedSweeps)
+		log.InfoContext(startupCtx, "queued task-branch reconcile sweeps", "projects", queuedSweeps)
 	}
-	srv, err := api.New(ctx, st, eng, log, p.Tokens)
+	srv, err := api.New(startupCtx, st, eng, log, p.Tokens)
 	if err != nil {
 		return fmt.Errorf("engine: %w", err)
 	}

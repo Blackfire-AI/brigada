@@ -30,7 +30,7 @@ The project's `default_check` runs CI's build-job steps before the tests (gofmt,
 
 ## Layout
 
-`cmd/brigada` is the single binary: client, engine, runner, foreman and MCP bridge. Everything else is under `internal/`:
+`cmd/brigada` is the single binary: client, engine, runner, foreman and MCP bridge. The rest of the code is under `internal/`:
 
 - `adapter`: one adapter per agent CLI (claude, codex, kimi, opencode, dsh, qwen-code, and a fake for tests)
 - `api`: the engine's JSON HTTP API on a Unix socket, its client, and the status and capacity renderers the CLI and the MCP bridge share
@@ -55,6 +55,8 @@ The project's `default_check` runs CI's build-job steps before the tests (gofmt,
 - `testsupport`: helpers shared by tests
 - `tools`: repository tooling, such as `guard`
 - `version`: the binary's version
+
+`skills/` holds the cross-harness Agent Skills that users install for their own coding agents with the `skills` CLI: one directory per skill, with `skills/brigada-operator/SKILL.md` there now. These are distinct from the task skills in `.brigada/skills/`, which carry task procedures into brigada's worker and reviewer prompts.
 
 For the design, read `docs/design.md` (an index of the section files under `docs/design/`), `docs/product.md` and `docs/glossary.md`.
 

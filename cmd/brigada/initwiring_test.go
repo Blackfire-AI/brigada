@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -430,18 +429,10 @@ func TestInitRerunNoWiringKeepsOldWiring(t *testing.T) {
 		want[k] = v
 	}
 	want[engine.ProjectConfigPath] = after[engine.ProjectConfigPath]
-	// The operator guide is not harness wiring: --no-wiring still writes it.
-	if after[operatorFile] != operatorGuide {
-		t.Errorf("init --no-wiring did not write %s", operatorFile)
-	}
-	want[operatorFile] = after[operatorFile]
-	if after[operatorSkillFile] != operatorSkill {
-		t.Errorf("init --no-wiring did not write %s", operatorSkillFile)
-	}
-	want[operatorSkillFile] = after[operatorSkillFile]
-	for dir := path.Dir(operatorSkillFile); dir != "."; dir = path.Dir(dir) {
-		if _, ok := before[dir+"/"]; !ok {
-			want[dir+"/"] = ""
+	// The operator skill is no longer init's to write, under either legacy path.
+	for _, rel := range []string{operatorFile, operatorSkillFile} {
+		if _, ok := after[rel]; ok {
+			t.Errorf("init --no-wiring wrote %s", rel)
 		}
 	}
 	// The default role files and skills are init's own, not harness wiring.
