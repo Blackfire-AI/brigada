@@ -41,8 +41,8 @@ tasks:
     continue: "skill"
     effort: medium
     review_tier: standard
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-1167-r1"
     rounds: 0
   - id: 1168
     name: "docs"
