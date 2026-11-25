@@ -1005,20 +1005,22 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		printInitWrapped(stdout, prefix, strings.Repeat(" ", term.VisibleWidth(prefix)), permissions)
 	}
 	// Init writes no harness wiring; a rerun strips the wiring an older
-	// init left behind, unless --no-wiring holds it back.
-	var wiring []wireFile
+	// init left behind, unless --no-wiring holds it back. The operator
+	// artifacts an older init generated are not wiring: a rerun removes
+	// the marked ones under --no-wiring too.
+	wiring := planLegacyOperator(root)
 	if !*noWiring {
-		wiring = planLegacyWiring(root)
+		wiring = append(wiring, planLegacyWiring(root)...)
 	}
-	// The operator guide and the generated role files and skills are
-	// written whole, under the same plan, confirmation and recheck.
-	operator := append(planOperatorFiles(root), planGuidance(root, proposedCfg)...)
-	files := append(append([]wireFile{{rel: engine.ProjectConfigPath, old: old, next: proposed, exists: exists}}, operator...), wiring...)
+	// The generated role files and skills are written whole, under the
+	// same plan, confirmation and recheck.
+	generated := planGuidance(root, proposedCfg)
+	files := append(append([]wireFile{{rel: engine.ProjectConfigPath, old: old, next: proposed, exists: exists}}, generated...), wiring...)
 	printInitFiles(stdout, files, *verbose)
 	for _, note := range guidanceNotes(proposedCfg) {
 		printInitWrapped(stdout, "  ", "    ", note)
 	}
-	printInitOperatorNote(stdout)
+	printInitOperatorSkill(stdout)
 	if *noWiring {
 		printInitWrapped(stdout, "", "  ", initDim(stdout, "--no-wiring: init in a repository no longer wires or unwires the harness; the flag matters only in a parent folder"))
 	}
@@ -1033,7 +1035,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		if !exists || !bytes.Equal(old, proposed) {
 			files++
 		}
-		files += countChanged(operator)
+		files += countChanged(generated)
 		for _, f := range wiring {
 			if f.changed() {
 				files++
@@ -1082,7 +1084,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	if err := runnerstate.SaveParallel(runnerStateDir(rt), *parallel); err != nil {
 		return partial(fmt.Errorf("save tasks at once: %w", err))
 	}
-	if err := applyWiring(append(slices.Clone(operator), wiring...)); err != nil {
+	if err := applyWiring(append(slices.Clone(generated), wiring...)); err != nil {
 		return partial(err)
 	}
 	savedSpecs := append(runnerSpecStrings(usable), keptAgents...)
@@ -1097,7 +1099,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	if !exists || !bytes.Equal(old, proposed) {
 		written++
 	}
-	written += countChanged(operator)
+	written += countChanged(generated)
 	for _, f := range wiring {
 		if f.changed() {
 			written++
@@ -1198,7 +1200,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	fmt.Fprintln(stdout, style.Bold("Next:"))
 	fmt.Fprintf(stdout, "  1. Talk to the foreman: %s\n", style.Accent("brigada attach"))
 	fmt.Fprintf(stdout, "  2. Or, without a conversation: %s\n", style.Accent("brigada ask \"what you want built\""))
-	fmt.Fprintf(stdout, "  3. Or through your own coding agent: have it read %s\n", operatorFile)
+	printInitWords(stdout, "  3. ", "     ", operatorSkillWords(stdout, "Or through your own coding agent: give it the operator skill with"))
 	fmt.Fprintln(stdout, "  Watch progress: "+style.Accent("brigada status")+"    Stop the runner: "+style.Accent("brigada stop"))
 	return 0
 }
