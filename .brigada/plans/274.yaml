@@ -73,8 +73,8 @@ tasks:
     deps: ["live"]
     base: "live"
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-1170"
     rounds: 0
   - id: 1171
     name: "changelog"
