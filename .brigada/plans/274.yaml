@@ -5,9 +5,9 @@
 plan: 274
 title: "operator Agent Skill (#255)"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: reviewing
 created: 2026-11-25T08:33:38.278237Z
-updated: 2026-11-25T09:02:51.093638Z
+updated: 2026-11-25T12:05:24.152043Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -72,7 +72,6 @@ tasks:
     class: "implement"
     deps: ["live"]
     base: "live"
-    continue: "live"
     effort: medium
     state: pending
     branch: ""
@@ -110,5 +109,16 @@ tasks:
     continue: "acceptance"
     effort: medium
     state: running
+    branch: ""
+    rounds: 0
+  - id: 1178
+    name: "ci-look"
+    title: "ci: why run 45607936996 on brigada/landed did not succeed (#255)"
+    class: "review"
+    deps: []
+    base: ""
+    tier: light
+    effort: low
+    state: pending
     branch: ""
     rounds: 0
