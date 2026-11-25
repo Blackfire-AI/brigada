@@ -98,8 +98,8 @@ tasks:
     tier: light
     effort: low
     skills: ["docs-change"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-1173"
     rounds: 0
   - id: 1174
     name: "live"
