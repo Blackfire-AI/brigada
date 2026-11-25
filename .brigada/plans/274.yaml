@@ -41,7 +41,7 @@ tasks:
     continue: "skill"
     effort: medium
     review_tier: standard
-    state: ready
+    state: running
     branch: ""
     rounds: 0
   - id: 1168
