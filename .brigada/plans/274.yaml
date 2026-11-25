@@ -119,6 +119,6 @@ tasks:
     base: ""
     tier: light
     effort: low
-    state: running
-    branch: ""
+    state: needs_foreman
+    branch: "brigada/task-1178"
     rounds: 0
