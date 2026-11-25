@@ -53,7 +53,8 @@ report what you did.
      --check 'go test ./...' --parallel 4
 5. Report the agents and the files written, which are mine to commit.
    Tell me I can talk to the foreman through you or with
-   `brigada attach`. From then on, follow `.brigada/operator.md`.
+   `brigada attach`. Then install your operator skill with
+   `npx skills add Blackfire-AI/brigada --skill brigada-operator`.
 
 brigada's repository is https://github.com/Blackfire-AI/brigada; its
 README and docs/GUIDE.md answer most questions — consult them when a
@@ -61,7 +62,7 @@ step is unclear. Stop and ask me if a step fails or a choice remains
 open. Never commit or push what init writes.
 ```
 
-The prompt is only the door. Init also writes `.brigada/operator.md` into your repository, the guide your agent follows from then on, so you can tell it, for example, "ask brigada to fix #12". After setup:
+The prompt is only the door. Init prints the command that installs the brigada-operator skill into your agent, the procedure it follows from then on, so you can tell it, for example, "ask brigada to fix #12". After setup:
 
 - [The first five minutes](#the-first-five-minutes): your first ask, and what to approve.
 - [The operator flow](docs/GUIDE.md#the-operator-flow): what your agent does for you with the foreman, and what stays yours.
@@ -155,19 +156,19 @@ Init then lists the agents, permissions and files, and shows a diff for every ex
 
 After you confirm, init:
 
-- writes `.brigada/project.yaml`, which is yours to commit (brigada never commits or pushes it), `.brigada/operator.md`, a generated guide that tells your own coding agent how to work with brigada, and the same guide as a Claude Code skill, `.claude/skills/brigada-operator/SKILL.md` (init overwrites both on a rerun, `--no-wiring` does not skip them, and `brigada remove` deletes them), and the role files and default skills under `.brigada/`, which you can edit. Commit these too: the foreman's checkout reads what is pushed. Unless `--no-wiring`, it also strips brigada's repository wiring (MCP and hook entries, the foreman files and the git exclude line); it does not touch `AGENTS.md` or `CLAUDE.md` except to remove an older init's marked block;
+- writes `.brigada/project.yaml`, which is yours to commit (brigada never commits or pushes it), and the role files and default skills under `.brigada/`, which you can edit. Commit these too: the foreman's checkout reads what is pushed. For your own coding agent it prints the command that installs the operator skill, `npx skills add Blackfire-AI/brigada --skill brigada-operator`; it never runs the installer, adds no Node.js requirement and writes no harness configuration. Unless `--no-wiring`, it also strips brigada's repository wiring (MCP and hook entries, the foreman files and the git exclude line); it does not touch `AGENTS.md` or `CLAUDE.md` except to remove an older init's marked block, and a rerun also removes that init's generated `.brigada/operator.md` and `.claude/skills/brigada-operator/SKILL.md` when they carry its marker;
 - starts the engine and a detached runner.
 
 `brigada init --probe` shows the plan and writes nothing. Stop the runner with `brigada stop`; add `--engine` to stop the engine too. Every step and flag is in [the guide, section 1](docs/GUIDE.md#1-install-and-brigada-init).
 
 Rerun `brigada init` to change agents, the foreman model and effort, or tasks at once; use `brigada start` after a reboot and `brigada config` to see every setting and how to change it.
 
-`brigada remove` removes brigada's repository wiring, `.brigada/operator.md` and the operator skill, and archives the project, keeping its history; see [the guide](docs/GUIDE.md#removing-brigada-from-a-repository).
+`brigada remove` removes brigada's repository wiring and the files it generated, including an older init's marked operator guide and skill, and archives the project, keeping its history; see [the guide](docs/GUIDE.md#removing-brigada-from-a-repository).
 
 ## The first five minutes
 
 1. Install brigada (above) and run `brigada init` in your repository (above).
-2. Open your coding agent in the repository and tell it to read `.brigada/operator.md`. Then tell it, for example, "ask brigada to fix #12". Your agent is the operator: it passes the request to the foreman through the CLI and reports back; approvals stay yours.
+2. Install the operator skill into your coding agent with the command init printed, `npx skills add Blackfire-AI/brigada --skill brigada-operator` (add `-g` to install it for every project). Then tell your agent, for example, "ask brigada to fix #12". Your agent is the operator: it passes the request to the foreman through the CLI and reports back; approvals stay yours.
 3. Watch `brigada top`: your live view of the meters, what needs you, plans, agents and events.
 4. Approve what the needs-you queue holds. A plan over your size limit, a landing a rule holds, and a push wait for you, with `brigada plan approve`, `brigada land approve` and `brigada push approve`. The operator tells you when something waits, and the decision is yours.
 
