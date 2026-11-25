@@ -29,7 +29,7 @@ tasks:
     base: "design"
     effort: medium
     review_tier: standard
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 1167
@@ -98,7 +98,7 @@ tasks:
     tier: light
     effort: low
     skills: ["docs-change"]
-    state: reviewing
+    state: done
     branch: "brigada/task-1173"
     rounds: 0
   - id: 1174
