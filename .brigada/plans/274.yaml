@@ -5,9 +5,9 @@
 plan: 274
 title: "operator Agent Skill (#255)"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: reviewing
 created: 2026-11-25T08:33:38.278237Z
-updated: 2026-11-25T12:13:39.548029Z
+updated: 2026-11-25T12:41:54.254709Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -80,8 +80,8 @@ tasks:
     name: "changelog"
     title: "changelog entry for the operator skill; Closes #255"
     class: "implement"
-    deps: ["verify"]
-    base: "verify"
+    deps: ["verify", "agents-layout"]
+    base: "agents-layout"
     tier: light
     effort: low
     skills: ["docs-change"]
@@ -121,4 +121,16 @@ tasks:
     effort: low
     state: retired
     branch: "brigada/task-1178"
+    rounds: 0
+  - id: 1182
+    name: "agents-layout"
+    title: "AGENTS.md Layout: document the top-level skills/ directory (#255)"
+    class: "implement"
+    deps: []
+    base: ""
+    tier: light
+    effort: low
+    skills: ["docs-change"]
+    state: pending
+    branch: ""
     rounds: 0
