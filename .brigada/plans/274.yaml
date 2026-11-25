@@ -119,6 +119,6 @@ tasks:
     base: ""
     tier: light
     effort: low
-    state: needs_foreman
+    state: retired
     branch: "brigada/task-1178"
     rounds: 0
