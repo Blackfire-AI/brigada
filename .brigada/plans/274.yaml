@@ -63,7 +63,7 @@ tasks:
     deps: ["docs"]
     base: "docs"
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-1169-r1"
     rounds: 0
   - id: 1170
@@ -109,6 +109,6 @@ tasks:
     base: "acceptance"
     continue: "acceptance"
     effort: medium
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
