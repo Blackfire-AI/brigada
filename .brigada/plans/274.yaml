@@ -73,7 +73,7 @@ tasks:
     deps: ["live"]
     base: "live"
     effort: medium
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 1171
@@ -108,8 +108,8 @@ tasks:
     base: "acceptance"
     continue: "acceptance"
     effort: medium
-    state: running
-    branch: ""
+    state: done
+    branch: "brigada/task-1174-r2"
     rounds: 0
   - id: 1178
     name: "ci-look"
