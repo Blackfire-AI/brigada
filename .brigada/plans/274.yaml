@@ -73,7 +73,7 @@ tasks:
     deps: ["live"]
     base: "live"
     effort: medium
-    state: reviewing
+    state: needs_foreman
     branch: "brigada/task-1170"
     rounds: 0
   - id: 1171
