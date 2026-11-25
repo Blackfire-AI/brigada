@@ -86,8 +86,8 @@ tasks:
     tier: light
     effort: low
     skills: ["docs-change"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-1171"
     rounds: 0
   - id: 1173
     name: "design"
