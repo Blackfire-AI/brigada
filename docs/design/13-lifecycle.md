@@ -4,6 +4,8 @@ Single instance (a lock on the store); started by any `brigada` command when not
 
 Start-up runs the reopen pass of §6.2 first: a plan closed `done` while it still held live work — tasks parked at `needs_foreman`, their dependents waiting to land — returns to active once, its ids logged at info level, so the tools the guards gate read it again; a failure of the pass fails start-up as the neighbouring recovery calls do.
 
+Start-up runs on a context the caller's cancellation does not reach. A cancel during start-up is observed by the main loop, so it ends as a normal stop: no start-up transaction is rolled back by the caller, and the socket, store and single-instance lock are released without an error.
+
 The main loop never waits on a notifier: the tick's delivery runs off the loop (§10), and the shutdown flush — and the wait on a delivery still in flight — is bounded by a short grace (ten seconds), past which the engine leaves without it and says so in the log.
 
 **Suspension.** The engine and its runners sleep together: a laptop's sleep looks, to the sweep, like minutes or hours of wall clock in a single gap. The sweep therefore measures the wall-clock gap between its own ticks — the engine sweeps on the idle tick and before every call — and when the gap is far past the sweep interval (a few intervals, `suspensionFactor` in the code) it knows the engine itself was suspended.
