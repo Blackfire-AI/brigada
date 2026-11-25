@@ -7,7 +7,7 @@ title: "operator Agent Skill (#255)"
 repo: "github.com/Blackfire-AI/brigada"
 state: active
 created: 2026-11-25T08:33:38.278237Z
-updated: 2026-11-25T12:43:50.722548Z
+updated: 2026-11-25T12:53:03.423714Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -73,6 +73,7 @@ tasks:
     deps: ["live"]
     base: "live"
     effort: medium
+    review_tier: standard
     state: needs_foreman
     branch: "brigada/task-1170"
     rounds: 0
