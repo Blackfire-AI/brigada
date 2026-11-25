@@ -109,6 +109,6 @@ tasks:
     base: "acceptance"
     continue: "acceptance"
     effort: medium
-    state: ready
+    state: running
     branch: ""
     rounds: 0
