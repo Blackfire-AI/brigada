@@ -86,10 +86,9 @@ tasks:
     tier: light
     effort: low
     skills: ["docs-change"]
-    state: needs_foreman
+    state: ready
     branch: ""
     rounds: 0
-    question: "Has the operator's evidence for issue #255 arrived, and what did it find? Please answer both: I need confirmation that the evidence is in and the findings the entry must agree with."
   - id: 1173
     name: "design"
     title: "design: carry PR #256's design onto the land target (#255)"
