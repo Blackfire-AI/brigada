@@ -5,9 +5,9 @@
 plan: 274
 title: "operator Agent Skill (#255)"
 repo: "github.com/Blackfire-AI/brigada"
-state: needs_foreman
+state: reviewing
 created: 2026-11-25T08:33:38.278237Z
-updated: 2026-11-25T08:35:15.146052Z
+updated: 2026-11-25T08:59:57.722246Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -25,8 +25,8 @@ tasks:
     name: "skill"
     title: "canonical skills/brigada-operator/SKILL.md (#255)"
     class: "implement"
-    deps: []
-    base: ""
+    deps: ["design"]
+    base: "design"
     effort: medium
     review_tier: standard
     state: pending
@@ -62,7 +62,7 @@ tasks:
     class: "implement"
     deps: ["docs"]
     base: "docs"
-    effort: high
+    effort: medium
     state: pending
     branch: ""
     rounds: 0
@@ -70,9 +70,9 @@ tasks:
     name: "verify"
     title: "verification: criteria map, complete diff, default check (#255)"
     class: "implement"
-    deps: ["acceptance"]
-    base: "acceptance"
-    continue: "acceptance"
+    deps: ["live"]
+    base: "live"
+    continue: "live"
     effort: medium
     state: pending
     branch: ""
@@ -86,6 +86,29 @@ tasks:
     tier: light
     effort: low
     skills: ["docs-change"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 1173
+    name: "design"
+    title: "design: carry PR #256's design onto the land target (#255)"
+    class: "implement"
+    deps: []
+    base: ""
+    tier: light
+    effort: low
+    skills: ["docs-change"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 1174
+    name: "live"
+    title: "live acceptance: criterion 4, one request in a fresh harness session (#255)"
+    class: "review"
+    deps: ["acceptance"]
+    base: "acceptance"
+    continue: "acceptance"
+    effort: medium
     state: pending
     branch: ""
     rounds: 0
