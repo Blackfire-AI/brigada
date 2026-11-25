@@ -63,8 +63,8 @@ tasks:
     deps: ["docs"]
     base: "docs"
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-1169-r1"
     rounds: 0
   - id: 1170
     name: "verify"
