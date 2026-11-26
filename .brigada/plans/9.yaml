@@ -5,9 +5,9 @@
 plan: 9
 title: "#51 part 1: configurable job time caps"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: reviewing
 created: 2026-11-26T20:42:36.078777566Z
-updated: 2026-11-26T21:44:24.440989051Z
+updated: 2026-11-26T21:49:55.889554156Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -31,19 +31,30 @@ tasks:
     review_tier: standard
     review_effort: medium
     skills: ["config-setting", "surface-parity"]
-    state: ready
+    state: cancelled
     branch: ""
     rounds: 0
   - id: 21
     name: "t51p2"
     title: "Continue-from-capped restart: seed the next attempt from the stopped branch (Refs #51)"
     class: "implement"
-    deps: ["t51"]
-    base: "t51"
-    continue: "t51"
+    deps: ["t51-caps"]
+    base: "t51-caps"
+    continue: "t51-caps"
     effort: medium
     review_tier: standard
     review_effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 48
+    name: "t51-caps"
+    title: "Wire time_cap_minutes.* config keys into runner caps, derived engine hard caps and the lease grant (Refs #51)"
+    class: "implement"
+    deps: []
+    base: ""
+    effort: medium
+    skills: ["config-setting", "surface-parity"]
     state: pending
     branch: ""
     rounds: 0
