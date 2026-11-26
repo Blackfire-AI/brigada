@@ -59,9 +59,10 @@ tasks:
     tier: heavy
     effort: medium
     skills: ["schema-migration"]
-    state: running
+    state: needs_foreman
     branch: ""
     rounds: 0
+    question: "The spec requires updating 'the foreman wake template's kind list (internal/foreman/foreman.go:6)', but no job-kind list exists in internal/foreman/foreman.go or anywhere in the foreman wake path on base brigada/landed@bf1604f04173d3539f3113875c97a8bce4c879c2 (the only such list is docs/design/11-data-model.md:6). Where is the foreman kind list this item means, or should the sub-item be retargeted to the §11 list (and the migrate.go CHECK constants) alone?"
   - id: 58
     name: "sync-runner"
     title: "Land-target sync: runner merge and auto push (Refs #127)"
