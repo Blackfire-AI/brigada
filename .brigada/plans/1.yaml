@@ -30,7 +30,7 @@ tasks:
     tier: heavy
     effort: high
     skills: ["schema-migration"]
-    state: running
+    state: needs_foreman
     branch: ""
     rounds: 0
   - id: 2
