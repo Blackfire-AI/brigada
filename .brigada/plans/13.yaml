@@ -106,6 +106,6 @@ tasks:
     tier: heavy
     effort: medium
     skills: ["schema-migration"]
-    state: ready
+    state: needs_foreman
     branch: ""
     rounds: 0
