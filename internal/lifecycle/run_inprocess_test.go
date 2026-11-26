@@ -115,7 +115,7 @@ func TestRunReopensStrandedPlansAtStartup(t *testing.T) {
 	err = st.Update(ctx, func(tx *sql.Tx) error {
 		const ts = "2026-10-13T00:00:00.000000000Z"
 		if _, err := tx.Exec(`INSERT INTO projects (repo_url, default_branch, settings, foreman_harness, foreman_model, created_at, updated_at)
-			VALUES ('https://example.com/r.git', 'main', '{}', 'claude', 'sonnet', ?, ?)`, ts, ts); err != nil {
+			VALUES ('https://example.invalid/r.git', 'main', '{}', 'claude', 'sonnet', ?, ?)`, ts, ts); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(`INSERT INTO plans (id, project_id, title, state, created_at, updated_at)
@@ -188,7 +188,7 @@ func TestRunIdlesOutWhilePausedWithHeldWakes(t *testing.T) {
 		const ts = "2026-10-13T00:00:00.000000000Z"
 		for _, q := range []string{
 			`INSERT INTO projects (id, repo_url, default_branch, settings, foreman_harness, foreman_model, created_at, updated_at)
-				VALUES (1, 'https://example.com/r.git', 'main', '{}', 'claude', 'sonnet', ?1, ?1)`,
+				VALUES (1, 'https://example.invalid/r.git', 'main', '{}', 'claude', 'sonnet', ?1, ?1)`,
 			`INSERT INTO plans (id, project_id, title, state, created_at, updated_at) VALUES (1, 1, 'Ship it', 'active', ?1, ?1)`,
 			`INSERT INTO tasks (id, plan_id, title, spec, class, state, base_ref, created_at, updated_at)
 				VALUES (1, 1, 'First', 'spec', 'implement', 'needs_foreman', 'main', ?1, ?1)`,
@@ -258,7 +258,7 @@ func seedNotifyEvent(t *testing.T, ctx context.Context, st *store.Store) {
 	t.Helper()
 	err := st.Update(ctx, func(tx *sql.Tx) error {
 		if _, err := tx.Exec(`INSERT INTO projects (repo_url, default_branch, settings, foreman_harness, foreman_model, created_at, updated_at)
-			VALUES ('https://example.com/r.git', 'main', '{}', 'claude', 'sonnet', '2026-10-13T00:00:00Z', '2026-10-13T00:00:00Z')`); err != nil {
+			VALUES ('https://example.invalid/r.git', 'main', '{}', 'claude', 'sonnet', '2026-10-13T00:00:00Z', '2026-10-13T00:00:00Z')`); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(`INSERT INTO plans (id, project_id, title, state, created_at, updated_at)
