@@ -188,11 +188,6 @@ type eventPayload struct {
 	Agent   int64       `json:"agent,omitempty"`
 	Score   float64     `json:"score,omitempty"`
 	Pick    string      `json:"pick,omitempty"`
-	// ExclusionLifted marks an agent pick of the very agent a review
-	// retry's exclusion named (§7, decided 2026-10-20): no other
-	// qualifying reviewer was available, so the preference was lifted
-	// and the excluded agent took the job again.
-	ExclusionLifted bool `json:"exclusion_lifted,omitempty"`
 	// Placement is how a review job's picked reviewer relates to its
 	// author (issue #126): cross_family, same_family, same_agent — or
 	// unknown when the author's family is not known. Computed at the

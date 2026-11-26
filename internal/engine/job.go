@@ -23,8 +23,8 @@ type jobRow struct {
 	Status         string
 	AgentID        int64 // the agent the lease recorded; 0 until then
 	ExcludeFamily  string
-	ExcludeAgent   int64 // one agent the family rule's job must not run on (§7); 0 = none
-	RequireAgent   int64 // the one agent this job must run on (§3); 0 = any
+	ExcludeAgents  []int64 // the agents the job must not run on (§7): the ones that failed its logical attempt, appended on each retry; empty = none
+	RequireAgent   int64   // the one agent this job must run on (§3); 0 = any
 	LeaseID        string
 	LeaseOwner     int64
 	LeaseExpiresAt string
@@ -74,7 +74,7 @@ type jobRow struct {
 // jobColumns reads a job whole; COALESCE turns NULL into the zero value
 // so every scan is into plain fields.
 const jobColumns = `id, project_id, COALESCE(task_id, 0), kind, key, mode, prompt, status,
-	COALESCE(agent_id, 0), exclude_family, COALESCE(exclude_agent, 0), COALESCE(require_agent, 0),
+	COALESCE(agent_id, 0), exclude_family, exclude_agents, COALESCE(require_agent, 0),
 	COALESCE(lease_id, ''), COALESCE(lease_owner, 0), COALESCE(lease_expires_at, ''), COALESCE(lease_epoch, 0),
 	COALESCE(fence_token, 0), followup, attempts, COALESCE(branch, ''), COALESCE(result, ''),
 	COALESCE(first_leased, ''), COALESCE(last_leased, ''), COALESCE(queued_at, ''),
@@ -87,8 +87,9 @@ const jobColumns = `id, project_id, COALESCE(task_id, 0), kind, key, mode, promp
 // scanJob scans one job from a *sql.Row or *sql.Rows.
 func scanJob(row interface{ Scan(dest ...any) error }) (*jobRow, error) {
 	j := &jobRow{}
+	var excludeAgents string
 	err := row.Scan(&j.ID, &j.ProjectID, &j.TaskID, &j.Kind, &j.Key, &j.Mode, &j.Prompt, &j.Status,
-		&j.AgentID, &j.ExcludeFamily, &j.ExcludeAgent, &j.RequireAgent,
+		&j.AgentID, &j.ExcludeFamily, &excludeAgents, &j.RequireAgent,
 		&j.LeaseID, &j.LeaseOwner, &j.LeaseExpiresAt, &j.LeaseEpoch,
 		&j.FenceToken, &j.Followup, &j.Attempts, &j.Branch, &j.Result,
 		&j.FirstLeased, &j.LastLeased, &j.QueuedAt,
@@ -99,6 +100,9 @@ func scanJob(row interface{ Scan(dest ...any) error }) (*jobRow, error) {
 	if err != nil {
 		return nil, err
 	}
+	// A set that will not parse excludes nothing, as a labels column
+	// that will not parse requires nothing.
+	_ = json.Unmarshal([]byte(excludeAgents), &j.ExcludeAgents)
 	return j, nil
 }
 

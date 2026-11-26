@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -203,8 +204,11 @@ func TestPreferRetryExclusionHoldsOverTheAuthorsFamily(t *testing.T) {
 	if g == nil || g.JobID != retry {
 		t.Fatalf("the author's family's agent leased %+v, want the retry %d", g, retry)
 	}
-	if evs := e.pickEvents(retry); len(evs) != 1 || evs[0].ExclusionLifted {
-		t.Errorf("pick events = %+v, want one without the lift", evs)
+	if evs := e.pickEvents(retry); len(evs) != 1 || evs[0].Agent != e.agentOf(sibling) {
+		t.Errorf("pick events = %+v, want one pick of the author's family's agent, never the excluded reviewer", evs)
+	}
+	if got, want := e.str("SELECT exclude_agents FROM jobs WHERE id = ?", retry), fmt.Sprintf("[%d]", e.agentOf(first)); got != want {
+		t.Errorf("retry exclude_agents = %s, want the first reviewer %s", got, want)
 	}
 	if got := e.pickPlacement(retry); got != placeSameFamily {
 		t.Errorf("placement = %q, want %q", got, placeSameFamily)

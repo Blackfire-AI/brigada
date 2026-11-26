@@ -49,7 +49,7 @@ func TestReviewWithoutFamilyAllowsUnknownAgent(t *testing.T) {
 			params.TaskID = 0 // standalone review with no author-family exclusion
 			params.Branch = "feature"
 			if excludeAgent {
-				params.ExcludeAgent = e.agentOf(first)
+				params.ExcludeAgents = []int64{e.agentOf(first)}
 			}
 			job := e.submit(params)
 			got := e.leaseAny(first)

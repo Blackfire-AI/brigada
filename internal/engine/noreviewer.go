@@ -11,8 +11,10 @@ import (
 // taken by any registered agent, even one ready and out of cooling.
 // Under review.family=require (issue #126) that is today's rule: no
 // agent other than the author passes ExcludeFamily and offers the
-// review class — and, on a retry whose exclusion lifts nowhere (the
-// excluded agent gone or of the author's family), ExcludeAgent too.
+// review class — and, on a retry, none of the attempt's excluded agents
+// (ExcludeAgents) either: an exclusion holds for the whole logical
+// attempt, so a retry whose only reviewers are the excluded ones is
+// unservable.
 // Under prefer a review is unservable only when no review-class agent
 // at all could take it: the family ladder always has a step for a
 // known family, and an unknown one keeps any agent but the author. A
@@ -29,7 +31,7 @@ func reviewUnservableTx(tx *sql.Tx, reviewFamily string, j *jobRow) (bool, error
 	if err != nil {
 		return false, err
 	}
-	if j.ExcludeFamily == "" && j.ExcludeAgent == 0 && author == 0 {
+	if j.ExcludeFamily == "" && len(j.ExcludeAgents) == 0 && author == 0 {
 		return false, nil
 	}
 	return noReviewAgentTx(tx, reviewFamily, j)
@@ -64,9 +66,9 @@ func reviewAuthorTx(tx *sql.Tx, j *jobRow) (int64, error) {
 // noReviewAgentTx applies lease eligibility without temporary health and
 // cooling limits. In particular, the author remains excluded on retries
 // whose family is unknown, alongside the family rule require keeps. A
-// retry's agent exclusion lifts when no other reviewer exists
-// structurally (decided 2026-10-20): the excluded reviewer then takes
-// the retry, so it alone is never a missing reviewer.
+// retry's excluded agents stay excluded: with no other reviewer
+// structurally, the retry is unservable and the task parks — an agent
+// that failed the attempt never takes it again.
 func noReviewAgentTx(tx *sql.Tx, reviewFamily string, j *jobRow) (bool, error) {
 	agents, err := qualifyingAgentRowsTx(tx, reviewFamily, 0, j, string(KindReview), "")
 	return len(agents) == 0, err
@@ -95,7 +97,7 @@ func onlyAuthorReviewerTx(tx *sql.Tx, j *jobRow) (bool, error) {
 		if err := rows.Scan(&id, &family, &classes); err != nil {
 			return false, fmt.Errorf("list the reviewers: %w", err)
 		}
-		if !reviewAgentQualifies(id, family, classes, "", j.ExcludeAgent, 0) {
+		if !reviewAgentQualifies(id, family, classes, "", j.ExcludeAgents, 0) {
 			continue
 		}
 		if id != author {

@@ -950,8 +950,8 @@ func TestPlanReviewFailedRetriesThenHolds(t *testing.T) {
 	if got := e.int("SELECT COUNT(*) FROM jobs WHERE kind = 'plan_review' AND status = 'queued'"); got != 1 {
 		t.Fatalf("queued plan_review jobs = %d, want the retry", got)
 	}
-	if got := e.int("SELECT exclude_agent FROM jobs WHERE kind = 'plan_review' AND status = 'queued'"); got != first {
-		t.Errorf("retry excludes agent %d, want the first reviewer %d", got, first)
+	if got, want := e.str("SELECT exclude_agents FROM jobs WHERE kind = 'plan_review' AND status = 'queued'"), fmt.Sprintf("[%d]", first); got != want {
+		t.Errorf("retry exclude_agents = %s, want the first reviewer %s", got, want)
 	}
 	if got := e.int("SELECT COUNT(*) FROM events WHERE kind = ? AND payload LIKE '%retried on another reviewer%'", evPlanReviewQueued); got != 1 {
 		t.Errorf("retry events = %d, want one", got)
@@ -995,7 +995,7 @@ func TestPlanReviewFailedRetriesThenHolds(t *testing.T) {
 	if got := e.int("SELECT review_round FROM plans WHERE id = ?", res.PlanID); got != 2 {
 		t.Errorf("review round = %d, want 2", got)
 	}
-	if got := e.int("SELECT COUNT(*) FROM jobs WHERE kind = 'plan_review' AND status = 'queued' AND exclude_agent IS NULL"); got != 1 {
+	if got := e.int("SELECT COUNT(*) FROM jobs WHERE kind = 'plan_review' AND status = 'queued' AND exclude_agents = '[]'"); got != 1 {
 		t.Errorf("round 2 plan_review jobs = %d, want one, no agent excluded", got)
 	}
 }

@@ -107,15 +107,29 @@ func TestSetupFailureReviewIsRequeued(t *testing.T) {
 	}
 }
 
-func TestTwoNoVerdictReviewsStillPark(t *testing.T) {
+// TestNoVerdictRetriesBoundedByTheAgentSet: a review cycle tries up to
+// maxStageAgents distinct agents (§7): two unusable verdicts with a
+// third reviewer still eligible retry again, and the third unusable
+// verdict exhausts the set and parks the task.
+func TestNoVerdictRetriesBoundedByTheAgentSet(t *testing.T) {
 	e, rev := reviewStack(t)
 	e.complete(e.leaseAny(rev[0]), Completion{Result: "{}"})
 	e.complete(e.leaseAny(rev[1]), Completion{Result: "{}"})
+	if state := e.str("SELECT state FROM tasks WHERE id = ?", e.task); state != taskReviewing {
+		t.Fatalf("task state after two unusable reviews = %s, want reviewing behind the third agent's retry", state)
+	}
+	if n := e.countEvents(evReviewNoVerdict); n != 0 {
+		t.Errorf("review_no_verdict events = %d, want none while a reviewer remains", n)
+	}
+	e.complete(e.leaseAny(rev[2]), Completion{Result: "{}"})
 	if state := e.str("SELECT state FROM tasks WHERE id = ?", e.task); state != taskNeedsForeman {
 		t.Errorf("task state = %s, want needs_foreman", state)
 	}
 	if n := e.countEvents(evReviewNoVerdict); n != 1 {
 		t.Errorf("review_no_verdict events = %d, want 1", n)
+	}
+	if n := e.int("SELECT COUNT(*) FROM jobs WHERE task_id = ? AND kind = 'review'", e.task); n != 3 {
+		t.Errorf("review jobs = %d, want the bound of three", n)
 	}
 }
 

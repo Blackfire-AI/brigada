@@ -338,8 +338,8 @@ func TestReReviewRetryStaysFresh(t *testing.T) {
 	if retry.ID == re.ID {
 		t.Fatal("no retry queued")
 	}
-	if retry.Mode != ModeFresh || retry.RequireAgent != 0 || retry.ExcludeAgent != e.agentOf(f.reviewer) {
-		t.Errorf("retry mode/require/exclude = %s/%d/%d, want fresh, unpinned, off the first reviewer", retry.Mode, retry.RequireAgent, retry.ExcludeAgent)
+	if retry.Mode != ModeFresh || retry.RequireAgent != 0 || len(retry.ExcludeAgents) != 1 || retry.ExcludeAgents[0] != e.agentOf(f.reviewer) {
+		t.Errorf("retry mode/require/exclude = %s/%d/%v, want fresh, unpinned, off the first reviewer", retry.Mode, retry.RequireAgent, retry.ExcludeAgents)
 	}
 	if strings.Contains(retry.Prompt, "re-review") || !strings.Contains(retry.Prompt, "<task-spec>") || !strings.Contains(retry.Prompt, "git diff main...brigada/task-1") {
 		t.Errorf("retry prompt is not the full review prompt:\n%s", retry.Prompt)

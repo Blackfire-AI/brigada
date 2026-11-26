@@ -145,7 +145,7 @@ func (e *Engine) resumedReviewTx(tx *sql.Tx, job *jobRow, excludeFamily string, 
 	// the family steps admit it, whatever its family — the author's own
 	// agent included: the reviewer keeps its own session, never the
 	// author's. Under require the family rule stands as before.
-	qualifies := reviewAgentQualifies(prior.agent, family, classes, excludeFamily, 0, job.AgentID)
+	qualifies := reviewAgentQualifies(prior.agent, family, classes, excludeFamily, nil, job.AgentID)
 	if familyPrefer(e.cfg.Review.Family) {
 		qualifies = reviewAgentQualifiesPrefer(prior.agent, family, classes, excludeFamily, job.AgentID)
 	}

@@ -15,6 +15,7 @@ Stats sum known counters per agent and class from every job, including work, fix
 - **Eligible:**
   - the adapter supports the class
   - family rule for reviews (`review.family`, §7: the family groups within the capability floor under `prefer` — cross-family then same-family at the asked tier, then cross-family then same-family at a higher tier, then the author's own agent — each eligible only when no agent of the group before it is available, or only another family under `require`)
+  - the job's agent exclusions (§3, §7): an agent in its `exclude_agents` set — the agents that failed its logical attempt, carried forward and appended on each retry — never takes it, and the exclusion holds for the whole attempt, never lifting
   - agent `ready` (not `broken`, not `cooling`)
   - account not cooling
   - session affinity (a resumed session stays on its agent and runner — a continuing task's first work job (§6.1) is placed the same way a fix round is: session mode, pinned to the dep author's agent, its key's session row seeded with the dep's session id so the affinity holds the runner)
@@ -58,7 +59,7 @@ The config override `tier.<harness>/<model>` (same shape as `cost.`, §8.1) corr
   The task reaches the foreman (`needs_foreman`) only at heavy and high effort, or when its attempts are spent. A stalled worker still always goes to the foreman.
 
   The foreman may change the tier or effort again with `plan_amend`'s `retier`: a new effort sets the effective effort with it, and a tier change resets the effective effort to the task's own.
-- **Review tier and effort.** A review job asks for the review tier and runs at the review effort, not the task's: the task's `review_tier` and `review_effort` if it has them, else the engine default of `review.tier` (`below` the task's effective tier, or `same`) and `review.effort` (default `medium`), as §7 describes. The tier choice, the candidates and the lease's effort resolution read them for every job of kind review, the retries and resumed re-reviews included; the escalation ladder above moves only the task's own effective tier and effort and never a review's. The cooling fallback and the retry exclusion work as for any job, on the review tier asked.
+- **Review tier and effort.** A review job asks for the review tier and runs at the review effort, not the task's: the task's `review_tier` and `review_effort` if it has them, else the engine default of `review.tier` (`below` the task's effective tier, or `same`) and `review.effort` (default `medium`), as §7 describes. The tier choice, the candidates and the lease's effort resolution read them for every job of kind review, the retries and resumed re-reviews included; the escalation ladder above moves only the task's own effective tier and effort and never a review's. The cooling fallback and the retry exclusion work as for any job, on the review tier asked; a review's retries are bounded to three distinct agents per logical attempt (§7), and exhaustion parks the task.
 - **Effort** (§6.1) is per job: the runner passes the task's effort to the adapter, so two jobs on one agent may run at different levels. It is not a cap layer (§8.1).
 
 ## 8.1 Concurrency caps

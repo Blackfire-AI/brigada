@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"time"
 
@@ -116,7 +117,8 @@ func taskRunningTx(tx *sql.Tx, j *jobRow, now time.Time) error {
 //   - needs_help, stopped runs and errors the retry rules declined go
 //     straight to the foreman (§3);
 //   - a review job's verdict finishes the task, asks for a fix round,
-//     or names itself unusable and is retried once (§7).
+//     or names itself unusable and retries on another agent of the
+//     cycle's bounded set (§7).
 //
 // A classified transient work failure can instead spend the first restart
 // on another eligible agent, before any failure judgment is emitted (§3).
@@ -495,7 +497,7 @@ func (e *Engine) retryInfraFailureTx(tx *sql.Tx, job *jobRow, c Completion, now 
 		Harness:       job.Harness,
 		Labels:        jobLabels(job),
 		ExcludeFamily: job.ExcludeFamily,
-		ExcludeAgent:  job.ExcludeAgent,
+		ExcludeAgents: job.ExcludeAgents,
 		RequireAgent:  job.RequireAgent,
 		NotBefore:     now.Add(infraDelayFor(streak)),
 	}
@@ -552,7 +554,7 @@ func (e *Engine) retryReviewInfraTx(tx *sql.Tx, job *jobRow, c Completion, now t
 		Prompt:        reviewPrompt,
 		PromptMeta:    reviewMeta,
 		ExcludeFamily: job.ExcludeFamily,
-		ExcludeAgent:  job.ExcludeAgent,
+		ExcludeAgents: job.ExcludeAgents,
 		NotBefore:     now.Add(infraDelayFor(streak)),
 	}, now)
 	if err != nil {
@@ -625,7 +627,7 @@ func (e *Engine) autoRestartWorkTx(tx *sql.Tx, job *jobRow, kind, text string, n
 	// Use the dispatcher's eligibility and ranking, across runners, without
 	// a family exclusion: a work retry may use the same family.
 	cands, err := eligibleAgentsTx(tx, &e.cfg, e.cfg.Rand, 0, &jobRow{
-		ProjectID: job.ProjectID, TaskID: job.TaskID, Kind: KindWork, ExcludeAgent: job.AgentID,
+		ProjectID: job.ProjectID, TaskID: job.TaskID, Kind: KindWork, ExcludeAgents: []int64{job.AgentID},
 	}, class, fmtTime(now))
 	if err != nil || len(cands) == 0 {
 		return false, err
@@ -690,7 +692,7 @@ func (e *Engine) autoRetryFixTx(tx *sql.Tx, job *jobRow, kind, text string, now 
 		// round's feedback is the job's own prompt, carried verbatim; the
 		// branch stays the task's, named at the retry's lease.
 		cands, err := eligibleAgentsTx(tx, &e.cfg, e.cfg.Rand, 0, &jobRow{
-			ProjectID: job.ProjectID, TaskID: job.TaskID, Kind: KindFix, ExcludeAgent: job.AgentID,
+			ProjectID: job.ProjectID, TaskID: job.TaskID, Kind: KindFix, ExcludeAgents: []int64{job.AgentID},
 		}, classImplement, fmtTime(now))
 		if err != nil || len(cands) == 0 {
 			return false, err
@@ -1159,8 +1161,10 @@ func agentFamilyTx(tx *sql.Tx, agent int64) (string, error) {
 // on the author's session with the findings as the feedback (§3), or
 // parks the task when the review rounds are spent; anything else — no
 // block, a malformed one, an approve without substantive findings, a run
-// that ended in an error — is no verdict and goes to another reviewer
-// once, before the task parks waiting for the foreman.
+// that ended in an error — is no verdict: a stall, a missing result or a
+// malformed one records a reliability failure on the review class, and
+// the review goes to another agent of the cycle, up to the bound of
+// distinct agents, before the task parks waiting for the foreman.
 func (e *Engine) reviewCompletedTx(tx *sql.Tx, job *jobRow, c Completion, now time.Time) error {
 	var v verdictBlock
 	haveVerdict := json.Unmarshal([]byte(c.Result), &v) == nil &&
@@ -1199,6 +1203,14 @@ func (e *Engine) reviewCompletedTx(tx *sql.Tx, job *jobRow, c Completion, now ti
 			reason = c.Error
 		case haveVerdict:
 			reason = "approve without substantive findings"
+		}
+		if !haveVerdict {
+			// A stall, a missing result or a malformed block is a
+			// reliability failure of the review class (§7, §11); a thin
+			// approve answered, and stays off the record.
+			if err := recordReviewFailureTx(tx, job, now); err != nil {
+				return err
+			}
 		}
 		return e.queueReviewRetryTx(tx, job, reason, now)
 	}
@@ -1257,7 +1269,7 @@ func (e *Engine) requeueReviewTx(tx *sql.Tx, job *jobRow, c Completion, now time
 		reason = fmt.Sprintf("re-review could not resume its session (%s): %s/%s", c.ErrorKind, harness, model)
 	}
 	requeue := &jobRow{ProjectID: job.ProjectID, TaskID: job.TaskID, Kind: KindReview,
-		ExcludeFamily: job.ExcludeFamily, ExcludeAgent: job.ExcludeAgent}
+		ExcludeFamily: job.ExcludeFamily, ExcludeAgents: job.ExcludeAgents}
 	noAgent, err := noReviewAgentTx(tx, e.cfg.Review.Family, requeue)
 	if err != nil {
 		return err
@@ -1279,7 +1291,7 @@ func (e *Engine) requeueReviewTx(tx *sql.Tx, job *jobRow, c Completion, now time
 		Prompt:        reviewPrompt,
 		PromptMeta:    reviewMeta,
 		ExcludeFamily: job.ExcludeFamily,
-		ExcludeAgent:  job.ExcludeAgent,
+		ExcludeAgents: job.ExcludeAgents,
 	}, now)
 	if err != nil {
 		return err
@@ -1292,55 +1304,59 @@ func (e *Engine) requeueReviewTx(tx *sql.Tx, job *jobRow, c Completion, now time
 	return err
 }
 
-// reviewOnlyReviewerTwice replaces "its review retry is spent" when the
-// review being judged ran on its own excluded agent (§7, decided
-// 2026-10-20): the exclusion was lifted because no other qualifying
-// reviewer was available, and the only available reviewer has now given
-// no verdict twice.
-const reviewOnlyReviewerTwice = "the only available reviewer twice gave no verdict"
+// maxStageAgents is the bound of distinct agents one logical attempt of
+// a stage may try (§7): a review cycle — the reviews of the change the
+// task's latest author job produced — runs its first review and its
+// retries on agents it has not failed on, three in all. Exhaustion
+// parks the task for the foreman; a new attempt (a restart, a fix
+// round's new cycle) starts the count fresh.
+const maxStageAgents = 3
+
+// appendExcluded adds the agent that just failed to the attempt's
+// exclusion set, keeping the set a set: an agent already in it, and the
+// agent-less 0, add nothing.
+func appendExcluded(set []int64, agent int64) []int64 {
+	if agent == 0 || slices.Contains(set, agent) {
+		return set
+	}
+	return slices.Concat(set, []int64{agent})
+}
 
 // queueReviewRetryTx answers an unusable review with another reviewer
-// (§7): a new review job, once per review cycle — a cycle being the
-// review of the change the task's latest author job produced — placed by
-// the review family policy on another agent, so the same reviewer never
-// reads its own output again. The retry asks the same question: its
-// prompt is the unusable review's own, which the engine composed from
-// the same template and the same verbatim data. The exclusion of the
-// first reviewer is a preference (decided 2026-10-20): when no other
-// qualifying reviewer is available the lease lifts it and the same
-// agent takes the retry — and a retry that ran on the excluded agent
-// and still ends unusable parks the task at once, the lift spent.
-// When the retry is spent or no agent can take it, the task parks at
-// needs_foreman with the no-verdict event, for the foreman's judgment.
+// (§7): a new review job of the same cycle — a cycle being the review of
+// the change the task's latest author job produced — placed by the
+// review family policy on an agent the cycle has not failed on. The
+// retry asks the same question of the unchanged head: its prompt is the
+// unusable review's own, which the engine composed from the same
+// template and the same verbatim data. The cycle's exclusion set holds:
+// every agent that failed it stays excluded for the whole cycle,
+// appended on each retry and never lifted, so a reviewer that stalled
+// or answered unusably never reads its own output again however long
+// the wait. The cycle tries at most maxStageAgents distinct agents;
+// when the bound is reached or no eligible reviewer remains, the task
+// parks at needs_foreman with the no-verdict event, for the foreman's
+// judgment.
 func (e *Engine) queueReviewRetryTx(tx *sql.Tx, job *jobRow, reason string, now time.Time) error {
-	// The lease lifted the exclusion because no other qualifying
-	// reviewer was available, and the same reviewer again gave no
-	// verdict: the lift is once, and no retry is left that anyone can
-	// take. The job's own agent is the witness: it is the excluded one.
-	if job.AgentID != 0 && job.AgentID == job.ExcludeAgent {
-		text, err := reviewParkedText(tx, job, reviewOutcomeWord(reason), reviewOnlyReviewerTwice)
+	excluded := appendExcluded(job.ExcludeAgents, job.AgentID)
+	spent := len(excluded) >= maxStageAgents
+	if !spent {
+		var err error
+		spent, err = reviewRetrySpentTx(tx, job)
 		if err != nil {
 			return err
 		}
-		placement, err := jobPlacementTx(tx, job.ID)
-		if err != nil {
-			return err
-		}
-		return e.needsForemanTx(tx, job, evReviewNoVerdict, eventPayload{Reason: text, Placement: placement}, now)
-	}
-	spent, err := reviewRetrySpentTx(tx, job)
-	if err != nil {
-		return err
 	}
 	retry := &jobRow{ProjectID: job.ProjectID, TaskID: job.TaskID, Kind: KindReview,
-		ExcludeFamily: job.ExcludeFamily, ExcludeAgent: job.AgentID}
+		ExcludeFamily: job.ExcludeFamily, ExcludeAgents: excluded}
 	noAgent, err := noReviewAgentTx(tx, e.cfg.Review.Family, retry)
 	if err != nil {
 		return err
 	}
 	if spent || noAgent {
 		var why string
-		if noAgent && !spent {
+		if noAgent && !spent && len(job.ExcludeAgents) == 0 {
+			// The cycle's first review found no other reviewer ever:
+			// the retry was impossible, not spent.
 			onlyAuthor, err := onlyAuthorReviewerTx(tx, retry)
 			if err != nil {
 				return err
@@ -1377,7 +1393,7 @@ func (e *Engine) queueReviewRetryTx(tx *sql.Tx, job *jobRow, reason string, now 
 		Prompt:        reviewPrompt,
 		PromptMeta:    reviewMeta,
 		ExcludeFamily: job.ExcludeFamily,
-		ExcludeAgent:  job.AgentID,
+		ExcludeAgents: excluded,
 	}, now)
 	if err != nil {
 		return err
@@ -1394,17 +1410,19 @@ func (e *Engine) queueReviewRetryTx(tx *sql.Tx, job *jobRow, reason string, now 
 	return err
 }
 
-// reviewRetrySpentTx reports whether this review is itself the retry of
-// its cycle (§7: up to one retry): the reviews of one cycle are the
-// review jobs queued after the task's latest author job, so a second
-// one means the cycle's retry already ran. A restarted review — one a
-// restart round replaced, §5.6 — is the same review asked again, not
-// another reviewer's word, so it does not count. Author jobs — work or
-// fix, including restarts — begin a new cycle with a fresh first
-// review. A review whose reviewer could not run (error kind limit,
-// auth, model, setup or infra) never gave an answer, so it is not counted
-// either; the job being judged is the unusable answer itself, the one
-// the count adds.
+// reviewRetrySpentTx reports whether this review's cycle has tried the
+// bound of agents (§7): the reviews of one cycle are the review jobs
+// queued after the task's latest author job, so maxStageAgents of them
+// means the bound is reached. It is the backstop the exclusion set
+// cannot be: a review that ran with no agent records no exclusion, and
+// the count bounds its retries too. A restarted review — one a restart
+// round replaced, §5.6 — is the same review asked again, not another
+// reviewer's word, so it does not count. Author jobs — work or fix,
+// including restarts — begin a new cycle with a fresh first review. A
+// review whose reviewer could not run (error kind limit, auth, model,
+// setup or infra) never gave an answer, so it is not counted either;
+// the job being judged is the unusable answer itself, the one the count
+// adds.
 func reviewRetrySpentTx(tx *sql.Tx, job *jobRow) (bool, error) {
 	var reviews int64
 	err := tx.QueryRow(`SELECT COUNT(*) FROM jobs
@@ -1416,7 +1434,7 @@ func reviewRetrySpentTx(tx *sql.Tx, job *jobRow) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("count the reviews of task %d: %w", job.TaskID, err)
 	}
-	return reviews > 1, nil
+	return reviews >= maxStageAgents, nil
 }
 
 // verdictBlock is the review's answer (§7): what the reviewer's final
@@ -1447,6 +1465,32 @@ func recordOutcomeTx(tx *sql.Tx, job *jobRow, now time.Time) error {
 		job.ProjectID, job.AgentID, string(KindReview), skills, fmtTime(now))
 	if err != nil {
 		return fmt.Errorf("record the outcome of job %d: %w", job.ID, err)
+	}
+	return nil
+}
+
+// recordReviewFailureTx counts an unusable review on the outcome record
+// (§7, §11): the reviewer's agent, on the review class, one attempt and
+// no success — a stall, a missing result or a malformed verdict is a
+// reliability failure of the review, not a judgment of the change. A
+// thin approve is none of those: it parsed and answered, and §7 keeps
+// it off the record. A review that ran with no agent — an agent-less
+// runner — has nobody to score and records nothing.
+func recordReviewFailureTx(tx *sql.Tx, job *jobRow, now time.Time) error {
+	if job.AgentID == 0 {
+		return nil
+	}
+	skills, err := taskSkillCountTx(tx, job.TaskID)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(`INSERT INTO outcomes (project_id, agent_id, class, skills, attempts, successes, updated_at)
+		VALUES (?, ?, ?, ?, 1, 0, ?)
+		ON CONFLICT(project_id, agent_id, class, skills) DO UPDATE SET
+			attempts = attempts + 1, updated_at = excluded.updated_at`,
+		job.ProjectID, job.AgentID, string(KindReview), skills, fmtTime(now))
+	if err != nil {
+		return fmt.Errorf("record the failure of job %d: %w", job.ID, err)
 	}
 	return nil
 }
