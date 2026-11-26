@@ -5,9 +5,9 @@
 plan: 5
 title: "Issue #259 first slice (re-created): landing barrier, plan monitoring, amendment envelope, guidance"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: reviewing
 created: 2026-11-26T20:28:37.793635647Z
-updated: 2026-11-26T21:50:06.375229506Z
+updated: 2026-11-26T21:55:38.505893912Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -31,7 +31,7 @@ tasks:
     review_tier: standard
     review_effort: medium
     skills: ["schema-migration"]
-    state: running
+    state: cancelled
     branch: ""
     rounds: 0
   - id: 10
@@ -44,7 +44,7 @@ tasks:
     review_tier: standard
     review_effort: medium
     skills: ["cli-flag", "surface-parity"]
-    state: ready
+    state: cancelled
     branch: ""
     rounds: 0
   - id: 11
@@ -57,18 +57,65 @@ tasks:
     review_tier: standard
     review_effort: medium
     skills: ["config-setting"]
-    state: ready
+    state: cancelled
     branch: ""
     rounds: 0
   - id: 12
     name: "guidance"
     title: "Anti-fragmentation guidance and early-verification skill"
     class: "implement"
-    deps: ["barrier"]
-    base: "barrier"
+    deps: ["amend-envelope"]
+    base: "amend-envelope"
     effort: medium
     review_tier: standard
     review_effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 50
+    name: "wl-field"
+    title: "wait_landed task field: migration and every read/write surface (Refs #259)"
+    class: "implement"
+    deps: []
+    base: ""
+    tier: heavy
+    effort: medium
+    skills: ["schema-migration", "surface-parity"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 51
+    name: "wl-release"
+    title: "wait_landed release rule, re-evaluation wiring and frozen-head prompt (Refs #259)"
+    class: "implement"
+    deps: ["wl-field"]
+    base: "wl-field"
+    continue: "wl-field"
+    tier: heavy
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 52
+    name: "plan-monitoring"
+    title: "Plan-scoped history/status monitoring with --plan and --json (Refs #259)"
+    class: "implement"
+    deps: ["wl-release"]
+    base: "wl-release"
+    continue: "wl-release"
+    effort: medium
+    skills: ["cli-flag", "surface-parity"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 53
+    name: "amend-envelope"
+    title: "Amendment task-count envelope and structural preflight summary (Refs #259)"
+    class: "implement"
+    deps: ["plan-monitoring"]
+    base: "plan-monitoring"
+    continue: "plan-monitoring"
+    effort: medium
     state: pending
     branch: ""
     rounds: 0
