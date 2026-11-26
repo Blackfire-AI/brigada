@@ -63,6 +63,7 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: running
+    state: needs_foreman
     branch: ""
     rounds: 0
+    question: "Item 5's README targets (Install section, :74 no-Go-toolchain list, :120-123 attestation paragraph, Releasing section) were removed by f423161d and are absent at base efe2d630 of brigada/landed — should the docs work be redirected to the content's current homes (README 'Get started' install step, docs/GUIDE.md §1 install list at :23-45, CONTRIBUTING.md:76 'Releasing'), including recreating an attestation paragraph somewhere or dropping that requirement?"
