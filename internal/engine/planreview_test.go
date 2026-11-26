@@ -33,6 +33,19 @@ func (e *env) reviewVerdict(g *LeaseGrant, verdict, findings string) Answer {
 	return e.complete(g, Completion{Result: fmt.Sprintf(`{"verdict":%q,"findings":%q}`, verdict, findings)})
 }
 
+// planReviewTaskLine is the header line the input renders for a task of
+// the plan: its state named when it is not one that has yet to run, and
+// no state at all on a pending task's unchanged line.
+func (e *env) planReviewTaskLine(plan int64, name, state string) string {
+	e.t.Helper()
+	id := e.int("SELECT id FROM tasks WHERE plan_id = ? AND name = ?", plan, name)
+	line := fmt.Sprintf("task %d %s: class implement, tier standard, effort default", id, name)
+	if state != "" {
+		line += ", state " + state
+	}
+	return line + "."
+}
+
 // theFindings is long enough to read as a verdict's real findings.
 const theFindings = "The second task duplicates the first one's work; split the storage layer out before any of this runs."
 
@@ -467,15 +480,16 @@ func TestPlanReviewStatusShowsRoundAndVerdict(t *testing.T) {
 }
 
 // TestComposePlanReviewInput: the input is a pure function of its views —
-// every spec verbatim, the graph by name, the other active plans
-// summarized with their branches, and the previous round's verdict and
-// findings on a round past the first.
+// every spec verbatim, the graph by name, a task's state named whenever
+// it is not pending or ready, the other active plans summarized with
+// their branches, and the previous round's verdict and findings on a
+// round past the first.
 func TestComposePlanReviewInput(t *testing.T) {
 	plan := planReviewPlanView{
 		ID: 12, Title: "ship it",
 		Tasks: []planReviewTaskView{
-			{ID: 1, Name: "base", Title: "base", Spec: "do\nthe base\nwork", Class: "", Tier: "", Effort: "high", Check: "go test ./..."},
-			{ID: 2, Name: "top", Title: "top", Spec: "do the top", Class: "deploy", Deps: []string{"base"}, Base: "base", Continue: "base"},
+			{ID: 1, Name: "base", Title: "base", Spec: "do\nthe base\nwork", State: taskPending, Class: "", Tier: "", Effort: "high", Check: "go test ./..."},
+			{ID: 2, Name: "top", Title: "top", Spec: "do the top", State: taskCancelled, Class: "deploy", Deps: []string{"base"}, Base: "base", Continue: "base"},
 		},
 	}
 	others := []otherPlanView{{
@@ -488,7 +502,8 @@ func TestComposePlanReviewInput(t *testing.T) {
 		`plan 12 "ship it", 2 tasks`,
 		"spec, verbatim:\ndo\nthe base\nwork",
 		"check: go test ./...",
-		"task 2 top: class deploy, tier standard, effort default.",
+		"task 1 base: class implement, tier standard, effort high.",
+		"task 2 top: class deploy, tier standard, effort default, state cancelled.",
 		"it waits on base; its work starts from base; it continues base.",
 		`plan 7 "other plan", 1 tasks`,
 		"task 3 running one: running, branch brigada/task-3.",
@@ -507,6 +522,87 @@ func TestComposePlanReviewInput(t *testing.T) {
 	}
 	if composePlanReviewInput(1, plan, others, "", "") != got {
 		t.Error("the input is not a pure function of its views")
+	}
+}
+
+// TestPlanReviewInputMarksCancelledTask: a task cancelled under a live
+// round is marked cancelled in the round the amendment work composes
+// (#249), so a reviewer cannot read it as pending parallel work, while a
+// pending task's line carries no state at all — a creation round, whose
+// tasks are all pending, renders exactly as it did.
+func TestPlanReviewInputMarksCancelledTask(t *testing.T) {
+	e := newPlanReviewEnv(t)
+	e.offerForeman(e.runner1)
+	e.offerReviewer()
+	res := e.createPlan([]PlanTask{{Name: "a", Spec: "do a"}, {Name: "b", Spec: "do b"}})
+	g := e.lease(e.runner2, nil, nil)
+	if g == nil || g.Kind != KindPlanReview {
+		t.Fatalf("lease = %+v, want the running round", g)
+	}
+	first := e.str("SELECT prompt FROM jobs WHERE key = ?", planReviewKey(res.PlanID))
+	for _, name := range []string{"a", "b"} {
+		if want := e.planReviewTaskLine(res.PlanID, name, ""); !strings.Contains(first, want) {
+			t.Errorf("round 1's input lacks %q:\n%s", want, first)
+		}
+	}
+	if strings.Contains(first, ", state ") {
+		t.Errorf("round 1 names a state, and every task of a creation is pending:\n%s", first)
+	}
+	if _, err := e.eng.AmendPlan(e.ctx, e.project, res.PlanID, PlanAmendment{
+		Add:    []PlanTask{{Name: "c", Spec: "do c"}},
+		Cancel: cancels("b"),
+	}); err != nil {
+		t.Fatalf("amend under a live round: %v", err)
+	}
+	e.reviewVerdict(g, verdictChanges, theFindings)
+	second := e.str("SELECT prompt FROM jobs WHERE kind = 'plan_review' ORDER BY id DESC")
+	if !strings.Contains(second, "round 2 of 2") {
+		t.Fatalf("the changes verdict queued no round over the waiting amendment:\n%s", second)
+	}
+	for _, want := range []string{
+		e.planReviewTaskLine(res.PlanID, "b", taskCancelled),
+		e.planReviewTaskLine(res.PlanID, "a", ""),
+		e.planReviewTaskLine(res.PlanID, "c", ""),
+	} {
+		if !strings.Contains(second, want) {
+			t.Errorf("round 2's input lacks %q:\n%s", want, second)
+		}
+	}
+}
+
+// TestPlanReviewInputMarksDoneAndRetiredTasks: an amendment of an active
+// plan composes a round over every task of it (§6.2), so a done and a
+// retired task render the state they are in (#249) and the reviewer reads
+// neither as work still to run.
+func TestPlanReviewInputMarksDoneAndRetiredTasks(t *testing.T) {
+	e := newPlanReviewEnv(t)
+	e.offerForeman(e.runner1)
+	e.offerReviewer()
+	res := e.createPlan([]PlanTask{{Name: "a", Spec: "do a"}, {Name: "b", Spec: "do b"}, {Name: "c", Spec: "do c"}})
+	e.reviewVerdict(e.lease(e.runner2, nil, nil), verdictApprove, theFindings)
+	if got := e.str("SELECT state FROM plans WHERE id = ?", res.PlanID); got != "active" {
+		t.Fatalf("plan state = %q, want active", got)
+	}
+	e.exec("UPDATE tasks SET state = ? WHERE plan_id = ? AND name = 'a'", taskDone, res.PlanID)
+	retired := e.int("SELECT id FROM tasks WHERE plan_id = ? AND name = 'b'", res.PlanID)
+	if _, err := e.eng.Retire(e.ctx, e.project, []int64{retired}, "landed by hand on main", "foreman"); err != nil {
+		t.Fatalf("retire b: %v", err)
+	}
+	if _, err := e.eng.AmendPlan(e.ctx, e.project, res.PlanID, PlanAmendment{
+		Add: []PlanTask{{Name: "d", Spec: "do d"}},
+	}); err != nil {
+		t.Fatalf("amend the active plan: %v", err)
+	}
+	in := e.str("SELECT prompt FROM jobs WHERE kind = 'plan_review' ORDER BY id DESC")
+	for _, want := range []string{
+		e.planReviewTaskLine(res.PlanID, "a", taskDone),
+		e.planReviewTaskLine(res.PlanID, "b", taskRetired),
+		e.planReviewTaskLine(res.PlanID, "c", ""),
+		e.planReviewTaskLine(res.PlanID, "d", ""),
+	} {
+		if !strings.Contains(in, want) {
+			t.Errorf("the amendment round's input lacks %q:\n%s", want, in)
+		}
 	}
 }
 

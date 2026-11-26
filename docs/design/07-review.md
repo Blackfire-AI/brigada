@@ -257,7 +257,7 @@ It runs at the project's `plan_review.tier` (default `standard`) and `plan_revie
 
 The reviewer runs read-only in a worktree at the head of the land target (§6.3), the default branch when none is set or when the remote does not hold the target yet; its grant carries the land target as its base ref and the default branch beside it, and a note after the plan in its prompt names the ref actually read. A standalone branch review (§7) is unchanged: its diff base is the default branch.
 
-Its input is the plan, every task with its spec verbatim, check, class, tier, effort, skills by name (§5.10) and place in the graph, a summary of the project's other active plans' tasks and branches, and the project's foreman instructions as data, the planning guidance the plan was to follow (§5.9). The contract is the template's; the checks are the project's `plan_review.md` (§5.9), whose default asks eight, each finding citing evidence from the checkout:
+Its input is the plan, every task with its spec verbatim, check, class, tier, effort, skills by name (§5.10), place in the graph and state — the state named whenever it is not `pending` or `ready`, so a done, running, cancelled or retired task never reads as work still to run — a summary of the project's other active plans' tasks and branches, and the project's foreman instructions as data, the planning guidance the plan was to follow (§5.9). The contract is the template's; the checks are the project's `plan_review.md` (§5.9), whose default asks eight, each finding citing evidence from the checkout:
 
 - (a) work already on the default branch or in another active plan;
 - (b) specs that contradict the code or docs/design.md;
