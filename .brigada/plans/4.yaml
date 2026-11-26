@@ -5,9 +5,9 @@
 plan: 4
 title: "Fix #262: headroom-zeroed account counts as cap-0 for task jobs (held until #261 is live)"
 repo: "github.com/Blackfire-AI/brigada"
-state: needs_foreman
+state: reviewing
 created: 2026-11-26T19:37:47.592978568Z
-updated: 2026-11-26T22:31:01.59300838Z
+updated: 2026-11-26T22:33:24.29068175Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -74,7 +74,7 @@ tasks:
     continue: "placement-pipeline"
     tier: heavy
     effort: medium
-    skills: ["schema-migration", "bugfix"]
+    skills: ["schema-migration"]
     state: pending
     branch: ""
     rounds: 0
@@ -87,7 +87,7 @@ tasks:
     continue: "attempt-exclusions"
     tier: heavy
     effort: medium
-    skills: ["schema-migration", "bugfix"]
+    skills: ["schema-migration"]
     state: pending
     branch: ""
     rounds: 0
@@ -100,6 +100,7 @@ tasks:
     continue: "outcome-accounting"
     tier: heavy
     effort: medium
+    skills: ["refactor"]
     state: pending
     branch: ""
     rounds: 0
