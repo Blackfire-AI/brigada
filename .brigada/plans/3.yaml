@@ -7,7 +7,7 @@ title: "Fix #261: validate trailer landings against the task's work, repair fals
 repo: "github.com/Blackfire-AI/brigada"
 state: active
 created: 2026-11-26T17:10:01.073843317Z
-updated: 2026-11-26T18:59:29.60429221Z
+updated: 2026-11-26T19:01:30.773609882Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -28,7 +28,7 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    review_tier: heavy
+    review_tier: standard
     review_effort: medium
     caps: {restart: 7}
     skills: ["bugfix"]
