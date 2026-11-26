@@ -66,8 +66,8 @@ tasks:
     base: ""
     effort: medium
     caps: {restart: 6}
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-4-r4"
     rounds: 0
   - id: 5
     name: "guidance"
