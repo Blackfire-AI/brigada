@@ -47,7 +47,7 @@ tasks:
     review_tier: standard
     review_effort: medium
     skills: ["bugfix"]
-    state: reviewing
+    state: done
     branch: "brigada/task-19-r1"
     rounds: 0
   - id: 20
@@ -75,7 +75,7 @@ tasks:
     tier: heavy
     effort: medium
     skills: ["schema-migration"]
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 31
