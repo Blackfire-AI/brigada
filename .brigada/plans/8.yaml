@@ -3,11 +3,11 @@
 # here are overwritten. It holds the graph, the task states, the branches
 # and the open questions — never transcripts.
 plan: 8
-title: "1.0 docs and review robustness: drop Alpha, CHANGELOG, product brief v3, review-retry fallback (#21, #23, #8, #33)"
+title: "Fix #249: plan review renders cancelled tasks as live"
 repo: "github.com/Blackfire-AI/brigada"
-state: done
-created: 2026-10-20T08:01:57.940787Z
-updated: 2026-10-20T08:35:15.181978Z
+state: reviewing
+created: 2026-11-26T20:42:36.058715453Z
+updated: 2026-11-26T20:42:36.058715453Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -21,65 +21,16 @@ updated: 2026-10-20T08:35:15.181978Z
 # override the task's fix_rounds, review_rounds and restart budgets (§6.1);
 # skills name the project's skills the task carries, in order (§5.10).
 tasks:
-  - id: 30
-    name: "review-fallback"
-    title: "Review retry falls back to the excluded reviewer when no other is available (#33)"
+  - id: 15
+    name: "t249"
+    title: "Carry task state into the plan-review input (Closes #249)"
     class: "implement"
     deps: []
     base: ""
     effort: medium
-    state: done
-    branch: "brigada/task-30"
-    rounds: 0
-  - id: 31
-    name: "alpha"
-    title: "Drop the Alpha label for 1.0 (#21)"
-    class: "implement"
-    deps: []
-    base: ""
-    tier: light
-    effort: low
-    state: done
-    branch: "brigada/task-31"
-    rounds: 0
-  - id: 32
-    name: "changelog"
-    title: "CHANGELOG.md with the 1.0.0 entry (#23)"
-    class: "implement"
-    deps: []
-    base: ""
-    tier: light
-    effort: medium
-    state: done
-    branch: "brigada/task-32"
-    rounds: 0
-  - id: 33
-    name: "brief"
-    title: "Product brief v3 (#8)"
-    class: "implement"
-    deps: []
-    base: ""
-    effort: medium
-    state: done
-    branch: "brigada/task-33"
-    rounds: 0
-  - id: 34
-    name: "restart-cap"
-    title: "Default restart cap 3, and round caps in the config file"
-    class: "implement"
-    deps: []
-    base: ""
-    effort: medium
-    state: done
-    branch: "brigada/task-34"
-    rounds: 1
-  - id: 35
-    name: "task-caps"
-    title: "Per-task round caps in plan_create and plan_amend"
-    class: "implement"
-    deps: []
-    base: ""
-    effort: medium
-    state: done
-    branch: "brigada/task-35"
+    review_tier: standard
+    review_effort: medium
+    skills: ["bugfix"]
+    state: pending
+    branch: ""
     rounds: 0
