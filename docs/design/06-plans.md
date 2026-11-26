@@ -52,12 +52,12 @@ The continuation is a saving, never a requirement: the task starts fresh when th
   The runner maps it to the agent's CLI through the adapter's typed effort control (§5.2):
 
   - claude and codex take the same word
-  - opencode takes `minimal` for `low`, no variant for `medium`, and `high` and `max` as given
+  - opencode takes `minimal` for `low`, no variant for `medium`, and `high` and `max` as given, carried as a `#variant` suffix on `-m` (`-m provider/model#variant`)
   - kimi has no effort control and ignores it.
 
   The job record stores the level actually passed.
 
-  Omitted, the agent's own `effort=` applies, else `medium`, resolved in this vocabulary before the harness maps it, so opencode (`medium` maps to no variant) and kimi (no control) still get nothing; a nonempty mapped task effort overrides the agent's (opencode `medium` still uses the agent's own variant when set), as the foreman effort does (`brigada project foreman --effort`, GUIDE §11: it rides the foreman turn's grant and overrides the serving agent's own level).
+  Omitted, the agent's own `effort=` applies, else `medium`, resolved in this vocabulary before the harness maps it, so opencode (`medium` maps to no variant) and kimi (no control) still get nothing; a nonempty mapped task effort overrides the agent's (opencode `medium` still uses the agent's own variant when set), as the foreman effort does (`brigada project foreman --effort`, GUIDE §11: it rides the foreman turn's grant and overrides the serving agent's own level). An opencode effort rides the model string, so it needs a model to ride: the job's own, else the CLI's configured default model read from its config; with no model nameable the adapter drops the variant and the job runs at the CLI's built-in default, never a launch failure.
 
 **Round caps.** The task's `caps` field overrides the engine's round budgets key by key: `fix_rounds` (the limit on a fix round a failed check asks for), `review_rounds` (the limit on a fix round a review's changes verdict asks for) and `restart` (restarts, §5.6), each an integer from 0 to 10; an absent key keeps the engine default. The two fix-round limits share one count: every fix round of the task's latest attempt (§5.6), whichever asked for it, and a new fix round is refused once that count reaches the limit of the kind that asks. The engine defaults are 2 fix, 2 review and 3 restarts, set by `rounds.fix`, `rounds.review` and `rounds.restart` in the config file.
 

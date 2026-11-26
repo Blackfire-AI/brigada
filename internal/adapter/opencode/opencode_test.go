@@ -160,7 +160,7 @@ func TestAttachCommand(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"opencode", "-s", "ses_9", "-m", "provider/model", "--variant", "high", "--prompt", prompt}
+	want := []string{"opencode", "-s", "ses_9", "-m", "provider/model#high", "--prompt", prompt}
 	if !slices.Equal(cmd.Args, want) {
 		t.Errorf("args = %q, want %q", cmd.Args, want)
 	}

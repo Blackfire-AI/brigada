@@ -1,4 +1,4 @@
-// Package opencode drives OpenCode 1.19.5 headless: one `opencode run`
+// Package opencode drives the OpenCode CLI headless: one `opencode run`
 // per worker job, resumed by session id, and the bare TUI for an attached
 // foreman chat. Credentials remain in the CLI's own store
 // (`opencode auth login`); the adapter supplies none.
@@ -75,13 +75,7 @@ func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*ex
 		binary = "opencode"
 	}
 	args := []string{"run", "--format", "json"}
-	if job.Model != "" && job.Model != DefaultModel {
-		args = append(args, "-m", job.Model)
-	}
-	if job.Effort != "" {
-		// --variant is the CLI's provider-specific reasoning effort.
-		args = append(args, "--variant", job.Effort)
-	}
+	args = appendModelAndEffort(args, job.Model, job.Effort)
 	if resumeSessionID != "" {
 		args = append(args, "-s", resumeSessionID)
 	}
@@ -112,6 +106,138 @@ func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*ex
 	}
 	cmd.Env = env
 	return cmd, nil
+}
+
+// stripVariant removes a model string's own #variant suffix, so a task
+// effort can replace the variant the model carries.
+func stripVariant(model string) string {
+	if i := strings.IndexByte(model, '#'); i >= 0 {
+		return model[:i]
+	}
+	return model
+}
+
+// appendModelAndEffort appends the model and, when effort is non-empty, the
+// CLI's reasoning effort to args. The v2 CLI carries effort on the model
+// string — `-m provider/model#variant` — so a nonempty effort always rides
+// -m: a model the job names (its own #suffix stripped, the task effort
+// overriding it) or, when the job names none ("" or DefaultModel), the
+// CLI's configured default model read from its config. With no model
+// nameable the effort is dropped, never a launch failure: the run's model
+// parser cannot carry a variant without a named model.
+func appendModelAndEffort(args []string, model, effort string) []string {
+	named := model != "" && model != DefaultModel
+	switch {
+	case named && effort != "":
+		return append(args, "-m", stripVariant(model)+"#"+effort)
+	case named:
+		return append(args, "-m", model)
+	case effort == "":
+		return args
+	}
+	def := configuredModel()
+	if def == "" {
+		return args
+	}
+	return append(args, "-m", stripVariant(def)+"#"+effort)
+}
+
+// configFileNames are the config files the CLI reads, in its own order,
+// within each directory configDirs returns.
+var configFileNames = []string{
+	"opencode.json",
+	"opencode.jsonc",
+	filepath.Join(".opencode", "opencode.json"),
+	filepath.Join(".opencode", "opencode.jsonc"),
+}
+
+// configDirs returns the directories the CLI searches for its config, in
+// order: OPENCODE_CONFIG_DIR when set, then the platform config directory
+// (${XDG_CONFIG_HOME:-$HOME/.config}/opencode).
+func configDirs() []string {
+	dirs := make([]string, 0, 2)
+	if dir := os.Getenv("OPENCODE_CONFIG_DIR"); dir != "" {
+		dirs = append(dirs, dir)
+	}
+	base := os.Getenv("XDG_CONFIG_HOME")
+	if base == "" {
+		base = filepath.Join(os.Getenv("HOME"), ".config")
+	}
+	return append(dirs, filepath.Join(base, "opencode"))
+}
+
+// configuredModel returns the model the CLI's own config names — the
+// default `opencode run` uses when no -m is given — read from the first
+// config file, in the CLI's own order, whose top-level "model" key is a
+// non-empty string. An empty result means no config names a model: the
+// caller drops the effort, since the run's model parser cannot carry a
+// variant without a named model.
+func configuredModel() string {
+	for _, dir := range configDirs() {
+		for _, name := range configFileNames {
+			data, err := os.ReadFile(filepath.Join(dir, name))
+			if err != nil {
+				continue
+			}
+			var cfg struct {
+				Model json.RawMessage `json:"model"`
+			}
+			if err := json.Unmarshal(stripJSONCComments(data), &cfg); err != nil {
+				continue
+			}
+			var model string
+			if err := json.Unmarshal(cfg.Model, &model); err != nil || model == "" {
+				continue
+			}
+			return model
+		}
+	}
+	return ""
+}
+
+// stripJSONCComments removes // line and /* block */ comments from a JSONC
+// document, respecting string literals so a URL in a value survives.
+func stripJSONCComments(data []byte) []byte {
+	out := make([]byte, 0, len(data))
+	inString := false
+	for i := 0; i < len(data); {
+		c := data[i]
+		if inString {
+			out = append(out, c)
+			if c == '\\' && i+1 < len(data) {
+				out = append(out, data[i+1])
+				i += 2
+				continue
+			}
+			if c == '"' {
+				inString = false
+			}
+			i++
+			continue
+		}
+		switch {
+		case c == '"':
+			inString = true
+			out = append(out, c)
+			i++
+		case c == '/' && i+1 < len(data) && data[i+1] == '/':
+			for i < len(data) && data[i] != '\n' {
+				i++
+			}
+		case c == '/' && i+1 < len(data) && data[i+1] == '*':
+			i += 2
+			for i+1 < len(data) && !(data[i] == '*' && data[i+1] == '/') {
+				i++
+			}
+			if i+1 < len(data) {
+				i += 2
+			}
+		default:
+			out = append(out, c)
+			i++
+		}
+	}
+	return out
 }
 
 // foremanPermissions sets the foreman's read-only scope (§4.1 item d): no
@@ -225,14 +351,15 @@ func replacePWD(env []string, dir string) []string {
 // session by id. There is no fork onto a caller-minted id (the CLI has no
 // --session-id to take one), so the chat runs on the id it resumed and
 // the release writes that id back (WritebackSessionID); newSessionID is
-// unused. The opening prompt rides --prompt, which the 1.19.5 TUI places
+// unused. The opening prompt rides --prompt, which the CLI's TUI places
 // in its input box rather than sending: the chat's first Enter submits
 // it. The bridge rides OPENCODE_CONFIG_DIR and the foreman scope
 // OPENCODE_PERMISSION, both as a headless turn carries them, and
 // OPENCODE_DISABLE_PROJECT_CONFIG keeps the checkout's own config out;
 // the user's global config still loads, its MCP servers beside the
-// bridge. The model and effort ride -m and --variant as in Command, and
-// StatusLine is ignored: the TUI has no status bar a command feeds.
+// bridge. The model and effort ride -m as in Command (the effort as a
+// #variant suffix on the model), and StatusLine is ignored: the TUI has
+// no status bar a command feeds.
 //
 // PWD is set to workdir, the reading checkout, by replacePWD above: the
 // attach does not run through the runner's exec, which sets PWD for every
@@ -256,12 +383,7 @@ func (a *Adapter) AttachCommand(job adapter.Job, workdir, resumeSessionID, _ str
 	if resumeSessionID != "" {
 		args = append(args, "-s", resumeSessionID)
 	}
-	if job.Model != "" && job.Model != DefaultModel {
-		args = append(args, "-m", job.Model)
-	}
-	if job.Effort != "" {
-		args = append(args, "--variant", job.Effort)
-	}
+	args = appendModelAndEffort(args, job.Model, job.Effort)
 	if job.Prompt != "" {
 		args = append(args, "--prompt", job.Prompt)
 	}
@@ -346,9 +468,9 @@ func workerEnv(env []string) []string {
 }
 
 // resolvePermissionRule maps an agent's permission= onto OpenCode's own
-// per-tool rule vocabulary (opencode v1.19.0, github.com/sst/opencode):
-// "ask", "allow" or "deny", the action a rule names for one tool. Empty
-// defaults to "allow": a headless `opencode run` cannot answer an ask —
+// per-tool rule vocabulary: "ask", "allow" or "deny", the action a rule
+// names for one tool. Empty defaults to "allow": a headless `opencode run`
+// cannot answer an ask —
 // unanswered, it auto-rejects and the call fails back to the model, which
 // is no better than a plain deny but noisier (autoRejectedPermission) —
 // so brigada's own default keeps a worker able to run its own commands,
@@ -427,8 +549,8 @@ func workerPermissions(env []string, readDirs []string, permission string) ([]st
 	return mergePermissionRules(env, rules), nil
 }
 
-// The JSONL envelope is defined by the v1.19.0 CLI's cli/cmd/run.ts;
-// nested parts and errors by sdk/js/src/v2/gen/types.gen.ts. This is
+// The JSONL envelope is defined by the CLI's cli/cmd/run.ts; nested
+// parts and errors by sdk/js/src/v2/gen/types.gen.ts. This is
 // deliberately not the server's message.part.updated/session.error stream.
 // Declare only fields we read; unknown shapes are ignored, not guessed.
 type lineJSON struct {
