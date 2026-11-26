@@ -7,7 +7,7 @@ title: "#51 part 1: configurable job time caps"
 repo: "github.com/Blackfire-AI/brigada"
 state: reviewing
 created: 2026-11-26T20:42:36.078777566Z
-updated: 2026-11-26T20:46:36.962358286Z
+updated: 2026-11-26T21:05:18.013434327Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
