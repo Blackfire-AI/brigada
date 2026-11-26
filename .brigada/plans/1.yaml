@@ -3,11 +3,11 @@
 # here are overwritten. It holds the graph, the task states, the branches
 # and the open questions — never transcripts.
 plan: 1
-title: "Pre-public fixes: contributor instructions, plan-file push, gitleaks, rc prerelease"
+title: "Issue #259 first slice: guidance, plan monitoring, landing barrier, amendment envelope, done-report actuals"
 repo: "github.com/Blackfire-AI/brigada"
-state: done
-created: 2026-10-19T14:30:54.31574Z
-updated: 2026-10-19T15:04:50.243689Z
+state: reviewing
+created: 2026-11-26T16:13:28.485100341Z
+updated: 2026-11-26T16:13:28.485100341Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -22,39 +22,57 @@ updated: 2026-10-19T15:04:50.243689Z
 # skills name the project's skills the task carries, in order (§5.10).
 tasks:
   - id: 1
-    name: "agents-md"
-    title: "Contributor instructions: AGENTS.md and CLAUDE.md (#1)"
+    name: "barrier"
+    title: "Landing-aware wait_landed barrier task field"
     class: "implement"
     deps: []
     base: ""
-    state: done
-    branch: "brigada/task-1"
+    tier: heavy
+    effort: high
+    skills: ["schema-migration"]
+    state: pending
+    branch: ""
     rounds: 0
   - id: 2
-    name: "planfile-remote"
-    title: "Plan-file pushes through a named remote (#10)"
+    name: "monitoring"
+    title: "Plan-scoped history/status monitoring with JSON output"
     class: "implement"
-    deps: ["agents-md"]
-    base: "agents-md"
-    state: done
-    branch: "brigada/task-2"
+    deps: []
+    base: ""
+    effort: medium
+    review_tier: standard
+    skills: ["cli-flag", "surface-parity"]
+    state: pending
+    branch: ""
     rounds: 0
   - id: 3
-    name: "gitleaks-ci"
-    title: "CI: secret scanning with gitleaks (#5)"
+    name: "envelope"
+    title: "Amendment task-count envelope and structural preflight"
     class: "implement"
-    deps: ["agents-md"]
-    base: "agents-md"
-    state: done
-    branch: "brigada/task-3-r1"
-    rounds: 2
+    deps: []
+    base: ""
+    effort: medium
+    review_tier: standard
+    state: pending
+    branch: ""
+    rounds: 0
   - id: 4
-    name: "rc-prerelease"
-    title: "Release workflow: mark tags with a '-' as prereleases (#24)"
+    name: "actuals"
+    title: "Done-report actual per-plan cost"
     class: "implement"
-    deps: ["agents-md"]
-    base: "agents-md"
-    tier: light
-    state: done
-    branch: "brigada/task-4"
+    deps: []
+    base: ""
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 5
+    name: "guidance"
+    title: "Anti-fragmentation guidance and early-verification skill"
+    class: "implement"
+    deps: ["barrier"]
+    base: "barrier"
+    effort: medium
+    state: pending
+    branch: ""
     rounds: 0
