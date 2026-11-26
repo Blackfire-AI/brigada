@@ -75,9 +75,10 @@ tasks:
     tier: heavy
     effort: medium
     skills: ["schema-migration"]
-    state: running
+    state: needs_foreman
     branch: ""
     rounds: 0
+    question: "The base brigada/task-19-r1 @ 5cf9f533285969b70b5398ed73bdbd1f033a6438 lacks 0080_landing_trailer.sql (the #261 land-target sync; it exists on main via merge 085facd1 / PR #265 but not on this chain base). Can this task be re-leased on a base that includes the #261 sync so the new migration can take the next gapless number (0081)?"
   - id: 31
     name: "outcome-accounting"
     title: "Representative outcome accounting and class-scoped reliability cooldown (Refs #263)"
