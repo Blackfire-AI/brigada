@@ -7,7 +7,7 @@ title: "Fix #260: opencode adapter effort as #variant model suffix"
 repo: "github.com/Blackfire-AI/brigada"
 state: active
 created: 2026-11-26T16:40:06.252574689Z
-updated: 2026-11-26T16:52:39.672747065Z
+updated: 2026-11-26T17:04:16.181108004Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -28,7 +28,8 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    review_tier: standard
+    review_tier: light
+    caps: {review_rounds: 2}
     skills: ["bugfix"]
     state: needs_foreman
     branch: "brigada/task-6"
