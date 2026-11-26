@@ -32,10 +32,9 @@ tasks:
     review_tier: standard
     review_effort: medium
     skills: ["schema-migration", "bugfix"]
-    state: needs_foreman
+    state: ready
     branch: ""
     rounds: 0
-    question: "The land-target sync is pending: can brigada/landed be synced with main so it carries 0080_landing_trailer.sql, and task-17 re-dispatched on that synced base so the quota_scope migration can be numbered 0081?"
   - id: 18
     name: "scope-cooling"
     title: "coolUntilTx groups by quota scope; cooling events and renderers name it (Closes #264)"
