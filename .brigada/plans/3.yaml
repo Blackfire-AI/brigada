@@ -32,6 +32,6 @@ tasks:
     review_effort: medium
     caps: {restart: 5}
     skills: ["bugfix"]
-    state: ready
+    state: running
     branch: ""
     rounds: 0
