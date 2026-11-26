@@ -3,11 +3,11 @@
 # here are overwritten. It holds the graph, the task states, the branches
 # and the open questions — never transcripts.
 plan: 13
-title: "Resume sessions in the same worktree path (#42)"
+title: "Fix #123: per-task tool grants"
 repo: "github.com/Blackfire-AI/brigada"
-state: done
-created: 2026-10-20T12:43:57.768485Z
-updated: 2026-10-20T13:23:15.507839Z
+state: reviewing
+created: 2026-11-26T20:46:37.109826591Z
+updated: 2026-11-26T20:46:37.109826591Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -21,13 +21,29 @@ updated: 2026-10-20T13:23:15.507839Z
 # override the task's fix_rounds, review_rounds and restart budgets (§6.1);
 # skills name the project's skills the task carries, in order (§5.10).
 tasks:
-  - id: 49
-    name: "session-worktree"
-    title: "A job that resumes a session runs in the worktree path that created it (#42)"
+  - id: 25
+    name: "tools-field"
+    title: "The tools task field: allowlist, surfaces, approval trigger (Refs #123)"
     class: "implement"
     deps: []
     base: ""
-    effort: high
-    state: done
-    branch: "brigada/task-49"
+    effort: medium
+    review_tier: standard
+    review_effort: medium
+    skills: ["schema-migration", "surface-parity"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 26
+    name: "tools-enforcement"
+    title: "Grant rides the lease to the adapter; runner refuses an unfinished merge (Closes #123)"
+    class: "implement"
+    deps: ["tools-field"]
+    base: "tools-field"
+    continue: "tools-field"
+    effort: medium
+    review_tier: standard
+    review_effort: medium
+    state: pending
+    branch: ""
     rounds: 0
