@@ -5,9 +5,9 @@
 plan: 12
 title: "Fix #161: probe the push path at init and brigada doctor"
 repo: "github.com/Blackfire-AI/brigada"
-state: needs_foreman
+state: reviewing
 created: 2026-11-26T20:46:37.083219715Z
-updated: 2026-11-26T21:38:53.878390625Z
+updated: 2026-11-26T21:46:42.090875255Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -31,6 +31,42 @@ tasks:
     review_tier: standard
     review_effort: medium
     skills: ["cli-flag"]
+    state: cancelled
+    branch: ""
+    rounds: 0
+  - id: 41
+    name: "probe-161"
+    title: "Init push probe with diagnosis and the restated no-push invariant (Refs #161)"
+    class: "implement"
+    deps: []
+    base: ""
+    tier: heavy
+    effort: medium
+    skills: ["surface-parity"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 42
+    name: "doctor-161"
+    title: "brigada doctor: the same probe on demand (Closes #161)"
+    class: "implement"
+    deps: ["probe-161"]
+    base: "probe-161"
+    continue: "probe-161"
+    effort: medium
+    skills: ["cli-flag", "surface-parity"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 43
+    name: "changelog-161"
+    title: "CHANGELOG entry for the push probe and doctor (#161)"
+    class: "implement"
+    deps: ["doctor-161"]
+    base: "doctor-161"
+    tier: light
+    effort: low
+    skills: ["docs-change"]
     state: pending
     branch: ""
     rounds: 0
