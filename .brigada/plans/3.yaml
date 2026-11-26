@@ -32,6 +32,6 @@ tasks:
     review_effort: medium
     caps: {restart: 9}
     skills: ["bugfix"]
-    state: done
+    state: needs_foreman
     branch: "brigada/task-7-r8"
     rounds: 0
