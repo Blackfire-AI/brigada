@@ -31,7 +31,7 @@ tasks:
     effort: medium
     caps: {restart: 5}
     skills: ["schema-migration"]
-    state: needs_foreman
+    state: running
     branch: ""
     rounds: 0
   - id: 2
@@ -66,7 +66,7 @@ tasks:
     base: ""
     effort: medium
     caps: {restart: 6}
-    state: needs_foreman
+    state: running
     branch: ""
     rounds: 0
   - id: 5
