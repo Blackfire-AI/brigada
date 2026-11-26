@@ -32,6 +32,6 @@ tasks:
     review_effort: medium
     caps: {restart: 7}
     skills: ["bugfix"]
-    state: ready
+    state: running
     branch: "brigada/task-7-r5"
     rounds: 0
