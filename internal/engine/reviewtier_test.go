@@ -192,7 +192,7 @@ func TestReviewTierKeepsRetryExclusion(t *testing.T) {
 	p := e.workOn(task)
 	p.Kind = KindReview
 	p.ExcludeFamily = "claude"
-	p.ExcludeAgent = first
+	p.ExcludeAgents = []int64{first}
 	job := e.submit(p)
 	if g := e.leaseAny(e.runner1); g == nil || g.JobID != job.JobID {
 		t.Fatalf("lease = %+v, want review %d", g, job.JobID)

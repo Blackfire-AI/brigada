@@ -217,7 +217,7 @@ func TestPreferPlanReviewRetryRunsTheFamilySteps(t *testing.T) {
 		if retry == nil || retry.Kind != KindPlanReview {
 			t.Fatalf("the foreman's family's agent leased %+v, want the retry", retry)
 		}
-		if got := e.int("SELECT COALESCE(exclude_agent, 0) FROM jobs WHERE id = ?", retry.JobID); got == 0 {
+		if got := e.str("SELECT exclude_agents FROM jobs WHERE id = ?", retry.JobID); got == "[]" {
 			t.Error("the retry excludes no agent, want the first reviewer")
 		}
 		if got := e.pickPlacement(retry.JobID); got != placeSameFamily {

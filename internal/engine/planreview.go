@@ -33,9 +33,9 @@ import (
 // reviewer that cannot be had — no agent offers the
 // review class, or the job never runs, runs past its hard cap or loses
 // its runner too often — proceeds the same way. A reviewer that runs and
-// gives no verdict is retried once on another agent, as a task review is
-// (§7); a second run with no verdict keeps the plan reviewing and wakes
-// the foreman, whose amendment answers it.
+// gives no verdict is retried on another agent of the round's bounded
+// set, as a task review is (§7); an exhausted set keeps the plan
+// reviewing and wakes the foreman, whose amendment answers it.
 
 // maxPlanReviewRounds is the plan review's round cap (§6.2): the
 // creation's review, and one more round after a changes verdict the
@@ -654,8 +654,8 @@ func (e *Engine) planReviewAnswerTx(tx *sql.Tx, project, plan int64, batch []int
 // rounds are spent, when the plan proceeds with the findings recorded;
 // anything else — no block, a malformed one, an approve without
 // substantive findings, a run that ended in an error or a limit — is no
-// verdict, retried once on another reviewer and then held for the
-// foreman (planReviewFailedTx).
+// verdict, retried on another reviewer of the round's bounded set and
+// then held for the foreman (planReviewFailedTx).
 func (e *Engine) planReviewCompletedTx(tx *sql.Tx, job *jobRow, c Completion, now time.Time) error {
 	plan := planReviewOfJobTx(job)
 	if plan == 0 {
@@ -728,7 +728,7 @@ func (e *Engine) retryPlanReviewInfraTx(tx *sql.Tx, job *jobRow, plan int64, c C
 		Prompt:        job.Prompt,
 		PromptMeta:    job.PromptMeta,
 		ExcludeFamily: job.ExcludeFamily,
-		ExcludeAgent:  job.ExcludeAgent,
+		ExcludeAgents: job.ExcludeAgents,
 		NotBefore:     now.Add(infraDelayFor(streak)),
 	}, now)
 	if err != nil {
@@ -747,28 +747,31 @@ func (e *Engine) retryPlanReviewInfraTx(tx *sql.Tx, job *jobRow, plan int64, c C
 }
 
 // planReviewFailedTx answers a plan review that ran and gave no verdict
-// as a task review's unusable answer is answered (§7): once, with
-// another reviewer — the same question on the plan's key, the failed
-// agent excluded — and when that retry also gives none, or no other
-// agent can take it, the plan stays reviewing and the foreman is woken
-// with the reason (planReviewHeldTx). The retry is the job whose
-// ExcludeAgent is set: a plan_review job is never leased by an
-// agent-less runner, so a first run always names its agent.
+// as a task review's unusable answer is answered (§7): on another
+// reviewer of the round's logical attempt — the same question on the
+// plan's key, the failed agents excluded for the whole attempt, at most
+// maxStageAgents distinct agents in all — and when the bound is reached
+// or no other agent can take it, the plan stays reviewing and the
+// foreman is woken with the reason (planReviewHeldTx). A plan_review
+// job is never leased by an agent-less runner, so a run always names
+// its agent.
 func (e *Engine) planReviewFailedTx(tx *sql.Tx, job *jobRow, plan int64, reason string, now time.Time) error {
-	if job.ExcludeAgent != 0 || job.AgentID == 0 {
-		return e.planReviewHeldTx(tx, job.ProjectID, plan, reason+"; the retry on another reviewer gave no verdict either", now)
-	}
-	retry := &jobRow{ProjectID: job.ProjectID, Kind: KindPlanReview, ExcludeFamily: job.ExcludeFamily, ExcludeAgent: job.AgentID}
+	excluded := appendExcluded(job.ExcludeAgents, job.AgentID)
+	spent := len(excluded) >= maxStageAgents
+	retry := &jobRow{ProjectID: job.ProjectID, Kind: KindPlanReview, ExcludeFamily: job.ExcludeFamily, ExcludeAgents: excluded}
 	noAgent, err := noReviewAgentTx(tx, e.cfg.Review.Family, retry)
 	if err != nil {
 		return err
 	}
-	if noAgent {
-		why := "; no other agent can take the retry"
-		if familyPrefer(e.cfg.Review.Family) {
-			// The family steps found no one but the excluded reviewer
-			// (issue #126): say so, since no family rule is the cause.
-			why += ": the only available reviewer was the one excluded"
+	if job.AgentID == 0 || spent || noAgent {
+		why := "; the retry on another reviewer gave no verdict either"
+		if noAgent && !spent && len(job.ExcludeAgents) == 0 {
+			why = "; no other agent can take the retry"
+			if familyPrefer(e.cfg.Review.Family) {
+				// The family steps found no one but the excluded reviewer
+				// (issue #126): say so, since no family rule is the cause.
+				why += ": the only available reviewer was the one excluded"
+			}
 		}
 		return e.planReviewHeldTx(tx, job.ProjectID, plan, reason+why, now)
 	}
@@ -780,7 +783,7 @@ func (e *Engine) planReviewFailedTx(tx *sql.Tx, job *jobRow, plan int64, reason 
 		Prompt:        job.Prompt,
 		PromptMeta:    job.PromptMeta,
 		ExcludeFamily: job.ExcludeFamily,
-		ExcludeAgent:  job.AgentID,
+		ExcludeAgents: excluded,
 	}, now)
 	if err != nil {
 		return err

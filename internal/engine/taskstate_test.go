@@ -519,51 +519,53 @@ func TestWorkCompletionParksTheTaskAtNeedsForeman(t *testing.T) {
 
 // TestReviewVerdicts walks §7's outcomes: a substantive approve alone
 // finishes the task; changes queues a fix round on the author's session
-// (§3, below); and every unusable verdict here parks — the reviewer is
-// the only agent of another family, so its retry lifts to itself
-// (decided 2026-10-20) and the second unusable verdict is what parks.
+// (§3, below); and every unusable verdict here parks at once — the
+// reviewer is the only agent of another family, its exclusion holds for
+// the whole attempt, and no retry is possible. A missing or malformed
+// verdict records a reliability failure on the review class; a thin
+// approve stays off the record.
 func TestReviewVerdicts(t *testing.T) {
 	tests := []struct {
-		name     string
-		result   string
-		state    string
-		event    string
-		outcomes bool
-		twice    bool // the answer is unusable: the lifted retry hears it again
+		name       string
+		result     string
+		state      string
+		event      string
+		outcomeSum int64 // the attempts + successes the outcome record carries
 	}{
 		{
-			name:     "approve with substantive findings",
-			result:   `{"verdict":"approve","findings":"` + substantiveFindings + `"}`,
-			state:    taskDone,
-			event:    evTaskDone,
-			outcomes: true,
+			name:       "approve with substantive findings",
+			result:     `{"verdict":"approve","findings":"` + substantiveFindings + `"}`,
+			state:      taskDone,
+			event:      evTaskDone,
+			outcomeSum: 2,
 		},
 		{
-			name:   "approve without substantive findings",
-			result: `{"verdict":"approve","findings":"` + shortFindings + `"}`,
-			state:  taskNeedsForeman,
-			event:  evReviewNoVerdict,
-			twice:  true,
+			name:       "approve without substantive findings",
+			result:     `{"verdict":"approve","findings":"` + shortFindings + `"}`,
+			state:      taskNeedsForeman,
+			event:      evReviewNoVerdict,
+			outcomeSum: 0,
 		},
 		{
-			name:   "changes queues a fix round",
-			result: `{"verdict":"changes","findings":"` + substantiveFindings + `"}`,
-			state:  taskReviewing,
-			event:  evReviewChanges,
+			name:       "changes queues a fix round",
+			result:     `{"verdict":"changes","findings":"` + substantiveFindings + `"}`,
+			state:      taskReviewing,
+			event:      evReviewChanges,
+			outcomeSum: 0,
 		},
 		{
-			name:   "no verdict block",
-			result: `{"status":"done","summary":"I looked at it"}`,
-			state:  taskNeedsForeman,
-			event:  evReviewNoVerdict,
-			twice:  true,
+			name:       "no verdict block",
+			result:     `{"status":"done","summary":"I looked at it"}`,
+			state:      taskNeedsForeman,
+			event:      evReviewNoVerdict,
+			outcomeSum: 1,
 		},
 		{
-			name:   "an unknown verdict",
-			result: `{"verdict":"abstain","findings":"` + substantiveFindings + `"}`,
-			state:  taskNeedsForeman,
-			event:  evReviewNoVerdict,
-			twice:  true,
+			name:       "an unknown verdict",
+			result:     `{"verdict":"abstain","findings":"` + substantiveFindings + `"}`,
+			state:      taskNeedsForeman,
+			event:      evReviewNoVerdict,
+			outcomeSum: 1,
 		},
 	}
 	for _, tc := range tests {
@@ -578,26 +580,18 @@ func TestReviewVerdicts(t *testing.T) {
 			if ans := e.complete(g, Completion{Result: tc.result}); ans != AnsOK {
 				t.Fatalf("complete the review: %s", ans)
 			}
-			if tc.twice {
-				rg := e.leaseAny(reviewer)
-				if rg == nil || rg.Kind != KindReview {
-					t.Fatalf("the lifted retry was not leased to the lone reviewer: %+v", rg)
-				}
-				if ans := e.complete(rg, Completion{Result: tc.result}); ans != AnsOK {
-					t.Fatalf("complete the lifted retry: %s", ans)
-				}
-			}
 			if state := e.str("SELECT state FROM tasks WHERE id = ?", e.task); state != tc.state {
 				t.Fatalf("task state = %q, want %q", state, tc.state)
 			}
 			if _, ok := e.eventPayloadOf(tc.event); !ok {
 				t.Fatalf("no %s event; have %v", tc.event, e.eventKinds())
 			}
-			// Only the substantive approve counts on the outcome record
-			// (§7): everything else is worth nothing yet.
+			// The substantive approve counts one attempt and one success;
+			// a missing or malformed verdict one attempt and no success;
+			// a thin approve and a changes verdict nothing (§7).
 			n := e.int("SELECT COALESCE(SUM(attempts + successes), 0) FROM outcomes")
-			if want := boolInt(tc.outcomes) * 2; n != int64(want) {
-				t.Errorf("outcome rows carry %d, want %d", n, want)
+			if n != tc.outcomeSum {
+				t.Errorf("outcome rows carry %d, want %d", n, tc.outcomeSum)
 			}
 			if tc.state != taskDone {
 				if state := e.str("SELECT state FROM plans WHERE id = ?", e.plan); state != "active" {

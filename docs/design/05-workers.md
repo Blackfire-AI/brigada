@@ -152,7 +152,7 @@ The engine copies the effective setting (command, key files, timeout, source and
 
 **Failure.** A setup that fails (exit code non-zero, or the timeout) is an infrastructure failure of the job. It completes the job with an error of kind `setup` and the message `setup failed: exit code N` or `timed out after D`, never the output. It is not a failed check, so it starts no fix round, and not a worker failure, so it does not count against the task's attempt caps for the agent.
 
-The engine retries a failed work job up to twice on any eligible agent, as a transient error, charging neither a restart round nor the agent's failure streak; a fix job, a standalone review or a spent retry count goes to the foreman (a review gets its one retry on another reviewer as for any error).
+The engine retries a failed work job up to twice on any eligible agent, as a transient error, charging neither a restart round nor the agent's failure streak; a fix job, a standalone review or a spent retry count goes to the foreman (a review gets its bounded retries on other reviewers as for any error).
 
 Each retry waits a growing not-before delay before it may be leased — 5s, 15s, 45s, 2m, capped — so a network not yet up after a wake is waited out rather than retried every second. That short table is the one setup retries, a fix round's transient retry (its first step) and the foreman's re-wake after a failed turn (§4.2) wait on — a work job's transient restart on another agent waits on none; an infrastructure failure — a fetch or a CLI that cannot connect — waits on the infra table of §5.1 instead, whose minutes-scale steps and three-hour window carry an outage the seconds-scale table would hammer.
 

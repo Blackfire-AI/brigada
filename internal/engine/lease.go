@@ -475,7 +475,7 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 			if len(cands) == 0 {
 				// A foreman turn is placed on its pair: a runner with no agent
 				// for it, agentless included, does not get it.
-				becauseplaced := j.Kind == KindForeman || j.ExcludeFamily != "" || j.ExcludeAgent != 0 || j.RequireAgent != 0
+				becauseplaced := j.Kind == KindForeman || j.ExcludeFamily != "" || len(j.ExcludeAgents) != 0 || j.RequireAgent != 0
 				if !becauseplaced && j.Kind == KindReview {
 					author, err := reviewAuthorTx(tx, j)
 					if err != nil {
@@ -713,13 +713,6 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 				}
 			}
 			payload.Placement = placement
-			// The picked agent may be the one a review retry's exclusion
-			// named: no other qualifying reviewer was available, so the
-			// preference was lifted (§7) and the excluded agent runs —
-			// history should say why.
-			if j.Kind == KindReview && j.ExcludeAgent != 0 && agent == j.ExcludeAgent {
-				payload.ExclusionLifted = true
-			}
 			if _, err := appendEventTx(tx, evJobAgentPicked, j.ProjectID, j.TaskID, j.ID, payload, now); err != nil {
 				return nil, err
 			}
@@ -1282,25 +1275,15 @@ func tierServed(asked string, hasReady map[string]bool) string {
 // keeps the cross-family-only rule of §7 and §8; prefer lets every step
 // of the ladder through at once — a known different family, the author's
 // own on another agent, the author's own agent — and the lease's step
-// choice sorts them. A review retry's agent exclusion is a preference
-// (§7, decided 2026-10-20): reviewExclusionLiftedTx decides it, so the lease's
-// candidates, the tier choice and the structural reviewer checks all
-// read the same exclusion. Structural reviewer checks also use this:
-// broken or cooling reviewers still exist.
+// choice sorts them. The job's exclusion set (§7) holds for its whole
+// logical attempt: the agents that failed it never qualify again, so
+// the lease's candidates, the tier choice and the structural reviewer
+// checks all read the same set. Structural reviewer checks also use
+// this: broken or cooling reviewers still exist.
 func qualifyingAgentRowsTx(tx *sql.Tx, reviewFamily string, runner int64, j *jobRow, class, now string) ([]agentCand, error) {
 	author, err := reviewAuthorTx(tx, j)
 	if err != nil {
 		return nil, err
-	}
-	excludeAgent := j.ExcludeAgent
-	if excludeAgent != 0 && j.Kind == KindReview {
-		lifted, err := reviewExclusionLiftedTx(tx, reviewFamily, j, class, now)
-		if err != nil {
-			return nil, err
-		}
-		if lifted {
-			excludeAgent = 0
-		}
 	}
 	// A foreman turn runs on the harness AND model its project chose: only
 	// an agent offering exactly that pair qualifies, and a turn whose pair
@@ -1364,7 +1347,7 @@ func qualifyingAgentRowsTx(tx *sql.Tx, reviewFamily string, runner int64, j *job
 		if class != "" && j.Kind != KindForeman && !pinnedRetry && !agentOffersClass(classes, class) {
 			continue
 		}
-		if id == excludeAgent {
+		if slices.Contains(j.ExcludeAgents, id) {
 			continue
 		}
 		if j.ExcludeFamily != "" || j.Kind == KindReview || j.Kind == KindPlanReview {
@@ -1377,7 +1360,7 @@ func qualifyingAgentRowsTx(tx *sql.Tx, reviewFamily string, runner int64, j *job
 				if !reviewAgentQualifiesPrefer(id, family, classes, authorFamily, author) {
 					continue
 				}
-			case !reviewAgentQualifies(id, family, classes, j.ExcludeFamily, excludeAgent, author):
+			case !reviewAgentQualifies(id, family, classes, j.ExcludeFamily, j.ExcludeAgents, author):
 				continue
 			}
 		}
@@ -1424,12 +1407,12 @@ func runnerHasAgentsTx(tx *sql.Tx, runner int64) (bool, error) {
 
 // reviewAgentQualifies is the require placement's agent test (§7, §8):
 // when a family is excluded, the agent needs a known different family;
-// it must also offer review and differ from the author and excluded agent.
-// The exclusions name the author, its family and, on a retry, the first
-// reviewer's agent; empty values exclude nothing.
-func reviewAgentQualifies(id int64, family, classes, excludeFamily string, excludeAgent, author int64) bool {
+// it must also offer review and differ from the author and the excluded
+// agents. The exclusions name the author, its family and the agents that
+// failed the job's logical attempt; empty values exclude nothing.
+func reviewAgentQualifies(id int64, family, classes, excludeFamily string, excludeAgents []int64, author int64) bool {
 	switch {
-	case id == excludeAgent || id == author:
+	case slices.Contains(excludeAgents, id) || id == author:
 		return false
 	case excludeFamily != "" && (family == "" || family == excludeFamily):
 		return false
@@ -1456,41 +1439,6 @@ func reviewAgentQualifiesPrefer(id int64, family, classes, authorFamily string, 
 	default:
 		return family != ""
 	}
-}
-
-// reviewExclusionLiftedTx reports whether a review job's agent exclusion
-// gives way (§7, decided 2026-10-20): the exclusion of the first
-// reviewer is a preference, and it holds only while another qualifying
-// reviewer is available — ready and not cooling, whatever the distance
-// to the reset — so the review never waits behind another family's
-// reset while the excluded agent could run again. Under prefer
-// (issue #126) the qualifying set is the family ladder's every step,
-// the author's own agent included. With none available the excluded
-// agent qualifies again. A now of "" asks structurally: another
-// qualifying reviewer of any health keeps the exclusion, the answer the
-// queue-time and unservable checks read. The family rule never lifts:
-// the steps stay ordered whatever is available, and only the retry
-// exclusion is dropped to look for the other reviewer.
-func reviewExclusionLiftedTx(tx *sql.Tx, reviewFamily string, j *jobRow, class, now string) (bool, error) {
-	if j.Kind != KindReview || j.ExcludeAgent == 0 {
-		return false, nil
-	}
-	sans := *j
-	sans.ExcludeAgent = 0 // the other reviewers alone; no recursion: the lift no longer applies
-	rows, err := qualifyingAgentRowsTx(tx, reviewFamily, 0, &sans, class, "")
-	if err != nil {
-		return false, err
-	}
-	for _, a := range rows {
-		if a.id == j.ExcludeAgent {
-			continue
-		}
-		if now != "" && (a.health != "ready" || a.cooling > now) {
-			continue // broken or cooling: not available
-		}
-		return false, nil // another qualifying reviewer: the exclusion holds
-	}
-	return true, nil
 }
 
 // agentOffersClass reports whether the agent's advertised classes (§5.1,

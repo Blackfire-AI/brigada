@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -69,8 +70,8 @@ func TestReviewRetryNeverLeasesToAuthorOrFirstReviewer(t *testing.T) {
 			if n := e.int("SELECT COUNT(*) FROM jobs WHERE task_id = ? AND kind = 'review'", e.task); n != 2 {
 				t.Fatalf("review jobs = %d, want the first and its retry", n)
 			}
-			if id := e.int("SELECT exclude_agent FROM jobs WHERE id = ?", retry); id != e.agentOf(first) {
-				t.Fatalf("retry excludes agent %d, want first reviewer", id)
+			if got, want := e.str("SELECT exclude_agents FROM jobs WHERE id = ?", retry), fmt.Sprintf("[%d]", e.agentOf(first)); got != want {
+				t.Fatalf("retry exclude_agents = %s, want the first reviewer %s", got, want)
 			}
 			if got, want := e.str("SELECT exclude_family FROM jobs WHERE id = ?", retry), e.str("SELECT exclude_family FROM jobs WHERE id = ?", review); got != want {
 				t.Fatalf("retry excludes family %q, want %q", got, want)
@@ -85,8 +86,34 @@ func TestReviewRetryNeverLeasesToAuthorOrFirstReviewer(t *testing.T) {
 				t.Fatalf("second reviewer leased %+v, want retry %d", g, retry)
 			}
 			e.complete(g, Completion{Result: `{}`})
+			if tt.authorFamily == "" {
+				// An unknown author family keeps the author out too:
+				// with both reviewers failed, no one can take the retry.
+				if state := e.str("SELECT state FROM tasks WHERE id = ?", e.task); state != taskNeedsForeman {
+					t.Fatalf("state = %s, want needs_foreman after the retry", state)
+				}
+				return
+			}
+			// The bound is three distinct agents (§7): a second retry is
+			// queued, and under prefer the ladder's last step — the
+			// author's own agent — takes it. The failed two never lease
+			// it again.
+			retry2 := e.int("SELECT id FROM jobs WHERE task_id = ? AND kind = 'review' ORDER BY id DESC LIMIT 1", e.task)
+			if retry2 == retry {
+				t.Fatal("no second retry queued behind the retry's no verdict")
+			}
+			for _, runner := range []int64{first, second} {
+				if g := e.leaseAny(runner); g != nil {
+					t.Fatalf("a failed reviewer leased the second retry: %+v", g)
+				}
+			}
+			g2 := e.leaseAny(author)
+			if g2 == nil || g2.JobID != retry2 {
+				t.Fatalf("the author's own agent leased %+v, want the final retry %d", g2, retry2)
+			}
+			e.complete(g2, Completion{Result: `{}`})
 			if state := e.str("SELECT state FROM tasks WHERE id = ?", e.task); state != taskNeedsForeman {
-				t.Fatalf("state = %s, want needs_foreman after the retry", state)
+				t.Fatalf("state = %s, want needs_foreman after the bound", state)
 			}
 		})
 	}
@@ -100,22 +127,18 @@ func TestReviewRetryDoesNotCountUnknownFamilyAuthorAsReviewer(t *testing.T) {
 	e.runReview(first, `{}`)
 	// The author, though it offers review and shares the unknown
 	// family, is never the retry's other reviewer: with none, the
-	// exclusion lifts and the first reviewer takes the retry instead.
-	if state := e.str("SELECT state FROM tasks WHERE id = ?", e.task); state != taskReviewing {
-		t.Fatalf("state = %s, want reviewing behind the lifted retry", state)
+	// exclusion holds and the task parks instead.
+	if state := e.str("SELECT state FROM tasks WHERE id = ?", e.task); state != taskNeedsForeman {
+		t.Fatalf("state = %s, want needs_foreman: no reviewer can take the retry", state)
 	}
-	if n := e.int("SELECT COUNT(*) FROM jobs WHERE task_id = ? AND kind = 'review'", e.task); n != 2 {
-		t.Fatalf("review jobs = %d, want the first and its lifted retry", n)
+	if n := e.int("SELECT COUNT(*) FROM jobs WHERE task_id = ? AND kind = 'review'", e.task); n != 1 {
+		t.Fatalf("review jobs = %d, want the first alone", n)
 	}
 	if g := e.leaseAny(author); g != nil {
-		t.Fatalf("the author leased the retry: %+v", g)
+		t.Fatalf("the author leased a review: %+v", g)
 	}
-	e.runReview(first, `{}`)
-	if state := e.str("SELECT state FROM tasks WHERE id = ?", e.task); state != taskNeedsForeman {
-		t.Fatalf("state = %s, want needs_foreman after the lifted retry", state)
-	}
-	if p, ok := e.eventPayloadOf(evReviewNoVerdict); !ok || !strings.Contains(p.Reason, "the only available reviewer twice gave no verdict") {
-		t.Fatalf("no-verdict event = %+v (%v), want the twice-no-verdict cause", p, ok)
+	if p, ok := e.eventPayloadOf(evReviewNoVerdict); !ok || !strings.Contains(p.Reason, wantAuthorOnlyReviewer) {
+		t.Fatalf("no-verdict event = %+v (%v), want the author-only cause", p, ok)
 	}
 }
 

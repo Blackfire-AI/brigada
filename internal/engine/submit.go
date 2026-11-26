@@ -39,10 +39,12 @@ type SubmitParams struct {
 	// lease the job. The engine sets it on a task's review job, from
 	// the family of the author job's agent.
 	ExcludeFamily string
-	// ExcludeAgent is the retry rule's exclusion (§3, §7): when set,
-	// that one agent may not lease the job. Work jobs have no family
-	// rule; review retries also apply the review family and class rules.
-	ExcludeAgent int64
+	// ExcludeAgents is the retry rule's exclusion set (§3, §7): these
+	// agents may not lease the job — the ones that failed its logical
+	// attempt, carried forward and appended on each retry, effective for
+	// the whole attempt. Work jobs have no family rule; review retries
+	// also apply the review family and class rules.
+	ExcludeAgents []int64
 	// RequireAgent is a placement pin (§3): when set, the one agent
 	// the job must run on — the author's own, read from the latest work
 	// or fix job — because the harness alone does not name it: another
@@ -192,6 +194,14 @@ func (e *Engine) submitTx(tx *sql.Tx, p SubmitParams, now time.Time) (SubmitResu
 	if err != nil {
 		return SubmitResult{}, fmt.Errorf("encode labels: %w", err)
 	}
+	excludeAgents := p.ExcludeAgents
+	if excludeAgents == nil {
+		excludeAgents = []int64{}
+	}
+	excludeJSON, err := json.Marshal(excludeAgents)
+	if err != nil {
+		return SubmitResult{}, fmt.Errorf("encode the exclusion set: %w", err)
+	}
 	var run int
 	if err := tx.QueryRow("SELECT COUNT(*) FROM jobs WHERE key = ?", p.Key).Scan(&run); err != nil {
 		return SubmitResult{}, fmt.Errorf("count jobs for the run number: %w", err)
@@ -208,10 +218,10 @@ func (e *Engine) submitTx(tx *sql.Tx, p SubmitParams, now time.Time) (SubmitResu
 		notBefore = fmtTime(p.NotBefore)
 	}
 	res, err := tx.Exec(`INSERT INTO jobs (project_id, task_id, kind, key, mode, prompt, prompt_meta, status,
-		harness, model, labels, restart, retry, round, exclude_family, exclude_agent, require_agent, branch, queued_at, not_before, skip_land_ready, created_at, updated_at)
+		harness, model, labels, restart, retry, round, exclude_family, exclude_agents, require_agent, branch, queued_at, not_before, skip_land_ready, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		p.ProjectID, nullIfZero(p.TaskID), string(p.Kind), p.Key, string(p.Mode), p.Prompt, p.PromptMeta,
-		p.Harness, p.Model, string(labelsJSON), boolInt(p.Restart), boolInt(p.Retry), round, p.ExcludeFamily, nullIfZero(p.ExcludeAgent),
+		p.Harness, p.Model, string(labelsJSON), boolInt(p.Restart), boolInt(p.Retry), round, p.ExcludeFamily, string(excludeJSON),
 		nullIfZero(p.RequireAgent), branch, nowStr, notBefore, boolInt(p.SkipLandReady), nowStr, nowStr)
 	if err != nil {
 		if !isUniqueViolation(err) {
