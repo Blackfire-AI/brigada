@@ -28,7 +28,9 @@ import (
 // record nor a hold, the state that used to close the plan.
 func seedHeldChain(t *testing.T) (e *env, author, plan, base, top int64) {
 	t.Helper()
-	e = newEnv(t)
+	e = newEnvCfg(t, func(c *Config) {
+		c.Caps.Tier = map[string]string{"author/anthropic-1": "heavy", "reviewer/google-1": "heavy"}
+	})
 	e.set(map[string]string{SettingApprovalTiers: "heavy"})
 	author = e.agented("author", "anthropic", "implement")
 	reviewer := e.agented("reviewer", "google", "implement", "review")
@@ -166,7 +168,9 @@ func TestLandFailureParksUnderAnOpenPlan(t *testing.T) {
 // close that runs after the release keeps the plan open (#133, part
 // two) until the user releases the dependent and it lands.
 func TestTrailerHoldsDependentAndKeepsPlanOpen(t *testing.T) {
-	e := newEnv(t)
+	e := newEnvCfg(t, func(c *Config) {
+		c.Caps.Tier = map[string]string{"author/anthropic-1": "heavy", "reviewer/google-1": "heavy"}
+	})
 	e.set(map[string]string{SettingApprovalTiers: "heavy"})
 	author := e.agented("author", "anthropic", "implement")
 	reviewer := e.agented("reviewer", "google", "implement", "review")
@@ -233,7 +237,9 @@ func TestTrailerHoldsDependentAndKeepsPlanOpen(t *testing.T) {
 // landed. The hold alone used to close the plan under "waits at a
 // gate"; it no longer does.
 func TestLandGateHeldTaskKeepsPlanOpenUntilItLands(t *testing.T) {
-	e := newEnv(t)
+	e := newEnvCfg(t, func(c *Config) {
+		c.Caps.Tier = map[string]string{"author/anthropic-1": "heavy", "reviewer/google-1": "heavy"}
+	})
 	e.set(map[string]string{SettingApprovalTiers: "heavy"})
 	author := e.agented("author", "anthropic", "implement")
 	reviewer := e.agented("reviewer", "google", "implement", "review")
@@ -304,7 +310,9 @@ func TestLandGateHeldTaskKeepsPlanOpenUntilItLands(t *testing.T) {
 // follows the settle finishes the plan, the task under landed (#133,
 // part two: the settle path the plan waited for).
 func TestLandGateHeldTaskClosesOnTheTrailerLanding(t *testing.T) {
-	e := newEnv(t)
+	e := newEnvCfg(t, func(c *Config) {
+		c.Caps.Tier = map[string]string{"author/anthropic-1": "heavy", "reviewer/google-1": "heavy"}
+	})
 	e.set(map[string]string{SettingApprovalTiers: "heavy"})
 	author := e.agented("author", "anthropic", "implement")
 	reviewer := e.agented("reviewer", "google", "implement", "review")
@@ -352,7 +360,9 @@ func TestLandGateHeldTaskClosesOnTheTrailerLanding(t *testing.T) {
 // happen — and the plan closes, the report naming the task under
 // "landing declined", its branch left alone.
 func TestLandRejectClosesThePlan(t *testing.T) {
-	e := newEnv(t)
+	e := newEnvCfg(t, func(c *Config) {
+		c.Caps.Tier = map[string]string{"author/anthropic-1": "heavy", "reviewer/google-1": "heavy"}
+	})
 	e.set(map[string]string{SettingApprovalTiers: "heavy"})
 	author := e.agented("author", "anthropic", "implement")
 	reviewer := e.agented("reviewer", "google", "implement", "review")
@@ -395,7 +405,9 @@ func TestLandRejectClosesThePlan(t *testing.T) {
 // under "landing declined" — never "all tasks landed", which would say
 // the declined task landed (#133).
 func TestLandRejectNamesDeclinedBesideLanded(t *testing.T) {
-	e := newEnv(t)
+	e := newEnvCfg(t, func(c *Config) {
+		c.Caps.Tier = map[string]string{"author/anthropic-1": "heavy", "reviewer/google-1": "heavy"}
+	})
 	e.set(map[string]string{SettingApprovalTiers: "heavy"})
 	author := e.agented("author", "anthropic", "implement")
 	reviewer := e.agented("reviewer", "google", "implement", "review")
@@ -489,7 +501,9 @@ func TestPushGateNeverStillClosesThePlan(t *testing.T) {
 // already recorded — and when the dependent's release lands it, the
 // close succeeds over that hold, base named under "waits to push".
 func TestPushPhaseHoldLetsThePlanClose(t *testing.T) {
-	e := newEnv(t)
+	e := newEnvCfg(t, func(c *Config) {
+		c.Caps.Tier = map[string]string{"author/anthropic-1": "heavy", "reviewer/google-1": "heavy"}
+	})
 	e.set(map[string]string{SettingApprovalTiers: "heavy", SettingGatePush: GateAsk})
 	author := e.agented("author", "anthropic", "implement")
 	reviewer := e.agented("reviewer", "google", "implement", "review")

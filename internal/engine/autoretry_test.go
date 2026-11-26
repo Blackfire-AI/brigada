@@ -253,7 +253,7 @@ func TestNonTransientWorkFailureDoesNotRestart(t *testing.T) {
 		"stopped":            {Result: `{"status":"stalled","reason":"no progress"}`, Outcome: OutcomeStalled},
 	} {
 		t.Run(name, func(t *testing.T) {
-			e := newEnv(t)
+			e := newEnvCfg(t, func(c *Config) { c.Caps.Tier = map[string]string{"author/a-1": "heavy"} })
 			// Heavy tasks retain the park path; tier escalation has its own coverage.
 			e.exec("UPDATE tasks SET effective_tier = 'heavy', effective_effort = 'high' WHERE id = ?", e.task)
 			author := e.agented("author", "a", "implement")
@@ -613,7 +613,7 @@ func TestNonTransientFixFailureParksAtOnce(t *testing.T) {
 		"unclassified error": {Error: "push failed"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			e := newEnv(t)
+			e := newEnvCfg(t, func(c *Config) { c.Caps.Tier = map[string]string{"author/anthropic-1": "heavy"} })
 			author := e.agented("author", "anthropic", "implement")
 			e.agented("other", "google", "implement")
 			// A result-block failure or an unparsable block climbs the

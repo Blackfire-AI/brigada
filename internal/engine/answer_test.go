@@ -120,7 +120,9 @@ func TestAnswerResumesTheAuthorsSession(t *testing.T) {
 // while the check after the answer's job finds the budget spent exactly
 // by the one genuine round that ran.
 func TestAnswerSpendsNoFixRound(t *testing.T) {
-	e := newEnvCfg(t, nil)
+	// The author serves the heavy tier the task asks: the floor never steps
+	// down to a lighter agent (issue #263).
+	e := newEnvCfg(t, func(c *Config) { c.Caps.Tier = map[string]string{"author/anthropic-1": "heavy"} })
 	e.exec("UPDATE tasks SET effective_tier = 'heavy', effective_effort = 'high' WHERE id = ?", e.task)
 	e.exec("UPDATE tasks SET caps = ? WHERE id = ?", `{"fix_rounds":1}`, e.task)
 	author := e.agented("author", "anthropic", "implement")
@@ -227,7 +229,11 @@ func TestAnswerRefusals(t *testing.T) {
 // back to ready with a task_restarted event, and the fresh attempt's
 // fix rounds counted from zero behind the restart (§6.1).
 func TestRestartTaskFreshAttempt(t *testing.T) {
-	e := newEnv(t)
+	// The agents serve the heavy tier the task asks: the floor never steps
+	// down to a lighter agent (issue #263).
+	e := newEnvCfg(t, func(c *Config) {
+		c.Caps.Tier = map[string]string{"author/anthropic-1": "heavy", "stranger/meta-1": "heavy"}
+	})
 	// Heavy tasks retain the park path; tier escalation has its own coverage.
 	e.exec("UPDATE tasks SET effective_tier = 'heavy', effective_effort = 'high' WHERE id = ?", e.task)
 	author := e.agented("author", "anthropic", "implement")

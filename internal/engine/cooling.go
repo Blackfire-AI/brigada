@@ -28,11 +28,12 @@ const layerCooling = "cooling"
 //
 // Tier fallback is resolved before this hold: an agent that is cooling is
 // unavailable whatever the distance to its reset, so the served tier is the
-// closest tier with an available agent — one tier up first, then down from
-// heavy. The hold reads agents of the served tier alone, so a job whose tier
-// has moved to an available agent is not held, and a hold lifts when it
-// does. Only when no tier has an available agent does the job hold, for the
-// tier whose agent resets first. A pinned job never moves: it waits for its
+// closest tier at or above the asked floor with an available agent — the
+// climb never steps down (issue #263). The hold reads agents of the served
+// tier alone, so a job whose tier has moved to an available agent is not
+// held, and a hold lifts when it does. Only when no tier at or above the
+// floor has an available agent does the job hold, for the tier whose agent
+// resets first among those tiers. A pinned job never moves: it waits for its
 // agent.
 //
 // Precedence between holds. Cooling is a precondition of the others:

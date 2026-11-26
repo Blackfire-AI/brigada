@@ -255,7 +255,10 @@ func TestAfterLandFailureReportedNeverUndone(t *testing.T) {
 // dependent's release names the dependency landed and the dependent
 // waiting at the push gate.
 func TestPlanDoneReportNamesLandings(t *testing.T) {
-	e := newEnv(t)
+	// The agents serve the heavy tier the task asks (issue #263's floor).
+	e := newEnvCfg(t, func(c *Config) {
+		c.Caps.Tier = map[string]string{"author/anthropic-1": "heavy", "reviewer/google-1": "heavy"}
+	})
 	e.set(map[string]string{SettingApprovalTiers: "heavy"})
 	author := e.agented("author", "anthropic", "implement")
 	reviewer := e.agented("reviewer", "google", "implement", "review")

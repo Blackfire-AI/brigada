@@ -193,7 +193,9 @@ func TestRetireDependentStates(t *testing.T) {
 // the hold is gone, nothing lands, and the land decision on it refuses
 // naming the retirement instead of the gateless "not held".
 func TestRetireLandGateHeldTask(t *testing.T) {
-	e := newEnv(t)
+	e := newEnvCfg(t, func(c *Config) {
+		c.Caps.Tier = map[string]string{"author/anthropic-1": "heavy", "reviewer/google-1": "heavy"}
+	})
 	e.set(map[string]string{SettingApprovalTiers: "heavy"})
 	author := e.agented("author", "anthropic", "implement")
 	reviewer := e.agented("reviewer", "google", "implement", "review")

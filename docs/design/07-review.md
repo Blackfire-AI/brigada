@@ -6,13 +6,15 @@ That retry's exclusion of the first reviewer is a preference, not a wall: while 
 
 **The family rule is `review.family`.** The engine config key beside `review.tier` and `review.effort` (engine config, not `project.yaml`) takes `prefer` (the default) or `require`. Under `require` the rule is never relaxed: an agent of the author's family never qualifies, whatever is available, and a review nobody else can take is unservable with the family-caused reason ending `, review.family=require` (§10).
 
-Under `prefer` the review is placed by three steps, each taken only when the step before it has no available reviewer (ready, not cooling, review class, not capped at 0, §8):
+Under `prefer` the review is placed by family groups within the capability floor (§8): the review's tier is a minimum, never stepped down. The groups, each taken only when the ones before it have no available reviewer (ready, not cooling, review class, not capped at 0, §8):
 
-- (a) an agent of another family than the author's,
-- (b) another agent of the author's family,
-- (c) the author's own agent, in a fresh review session that never sees the author's (below).
+- (a) a cross-family reviewer at the asked tier,
+- (b) a same-family reviewer at the asked tier,
+- (c) a cross-family reviewer at a higher tier,
+- (d) a same-family reviewer at a higher tier,
+- (e) the author's own agent at an eligible tier, in a fresh review session that never sees the author's (below).
 
-The steps outrank the tier (§8): a cross-family reviewer on another tier beats a same-family reviewer on the tier the review asked for. The retry exclusion (above) holds over (b) and (c) as it does over (a). When the author's family is unknown — a standalone branch review with no work job, no trailer and no `default_reviewer` naming it — `prefer` keeps the author's own agent excluded and takes any available review-class agent, as before; step (c) applies only when the author's family is known.
+The floor bounds the groups (§8): a same-family reviewer on the tier the review asked for beats a cross-family reviewer on a higher tier, and no reviewer below the asked tier is ever placed. A cap-full preferred family falls through to another family group at the same tier. The retry exclusion (above) holds over (b)–(e) as it does over (a). When the author's family is unknown — a standalone branch review with no work job, no trailer and no `default_reviewer` naming it — `prefer` keeps the author's own agent excluded and takes any available review-class agent, as before; step (e) applies only when the author's family is known.
 
 **The placement is labelled.** The lease records the kind on the review job's `job_agent_picked` event beside the pick and tiers: `cross_family`, `same_family`, `same_agent`, or `unknown` (the author's family is not known, never shown as cross-family). `task_reviewing` is written at queue time, before any reviewer is picked, and claims none; only a resumed re-review, whose agent is known then, carries its pick `resumed` and agent.
 

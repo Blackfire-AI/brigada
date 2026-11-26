@@ -300,7 +300,10 @@ func TestLandGateProtectedPathHolds(t *testing.T) {
 
 // TestLandGateTierHolds: a task whose tier is among approval_tiers waits.
 func TestLandGateTierHolds(t *testing.T) {
-	e := newEnv(t)
+	// The agents serve the heavy tier the task asks (issue #263's floor).
+	e := newEnvCfg(t, func(c *Config) {
+		c.Caps.Tier = map[string]string{"author/anthropic-1": "heavy", "reviewer/google-1": "heavy"}
+	})
 	e.set(map[string]string{SettingApprovalTiers: "heavy"})
 	e.exec("UPDATE tasks SET effective_tier = 'heavy' WHERE id = ?", e.task)
 	author := e.agented("author", "anthropic", "implement")
@@ -582,7 +585,9 @@ func TestLandWaitsForDependencyWaitingAtThePushGate(t *testing.T) {
 // finishes — the hold blocks only the dependent's landing, never its work
 // (§6.3: "work on the rest of the plan goes on").
 func TestLandHoldDoesNotBlockDependentsWork(t *testing.T) {
-	e := newEnv(t)
+	e := newEnvCfg(t, func(c *Config) {
+		c.Caps.Tier = map[string]string{"author/anthropic-1": "heavy", "reviewer/google-1": "heavy"}
+	})
 	author := e.agented("author", "anthropic", "implement")
 	reviewer := e.agented("reviewer", "google", "implement", "review")
 	e.set(map[string]string{SettingApprovalTiers: "heavy"})

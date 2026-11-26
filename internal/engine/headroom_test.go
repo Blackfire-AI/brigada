@@ -78,60 +78,60 @@ func TestHeadroomAtCapOneNeverLeases(t *testing.T) {
 
 // TestHeadroomZeroedTierFallsBack: the asked tier is served only by a
 // headroom-zeroed agent on the foreman's account, while a ready agent of
-// another tier sits on another account, so the job falls back per §8 —
-// climbing, then stepping down from heavy — and leases there, never
-// cap-held on the foreman account.
+// another tier sits on another account. The job climbs to a higher tier per
+// §8 and leases there, never cap-held on the foreman account; but the floor
+// never steps down (issue #263) — a heavy ask whose only ready agent is
+// light waits unplaced.
 func TestHeadroomZeroedTierFallsBack(t *testing.T) {
-	for _, tc := range []struct {
-		name   string
-		asked  string
-		served string
-		seed   func(e *env) int64 // the available agent of another tier
-	}{
-		{name: "climb", asked: "standard", served: "heavy", seed: func(e *env) int64 {
-			return e.addAgent(e.runner1, "claude", "opus", "personal")
-		}},
-		{name: "step down", asked: "heavy", served: "light", seed: func(e *env) int64 {
-			e.seedAgent(e.runner1, "claude", "claude", "opus", "work") // heavy on the foreman account, zeroed too
-			return e.addAgent(e.runner1, "claude", "haiku", "personal")
-		}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			e := headroomEnv(t, 1, nil)
-			// The only standard agent must be the foreman-account one the
-			// fixture seeds; the personal standard agent would serve the tier.
-			e.exec("DELETE FROM agents WHERE harness = 'kimi'")
-			want := tc.seed(e)
-			job := e.tierWork(tc.asked)
-			g := e.leaseAny(e.runner1)
-			if g == nil || g.JobID != job.JobID {
-				t.Fatalf("lease = %+v, want task %d to fall back to the %s tier", g, job.JobID, tc.served)
-			}
-			e.assertTierPick(job.JobID, want, tc.asked, tc.served)
-		})
-	}
+	t.Run("climb", func(t *testing.T) {
+		e := headroomEnv(t, 1, nil)
+		// The only standard agent must be the foreman-account one the
+		// fixture seeds; the personal standard agent would serve the tier.
+		e.exec("DELETE FROM agents WHERE harness = 'kimi'")
+		opus := e.addAgent(e.runner1, "claude", "opus", "personal")
+		job := e.tierWork("standard")
+		g := e.leaseAny(e.runner1)
+		if g == nil || g.JobID != job.JobID {
+			t.Fatalf("lease = %+v, want task %d to climb to the heavy tier", g, job.JobID)
+		}
+		e.assertTierPick(job.JobID, opus, "standard", "heavy")
+	})
+	t.Run("never steps down", func(t *testing.T) {
+		e := headroomEnv(t, 1, nil)
+		e.exec("DELETE FROM agents WHERE harness = 'kimi'")
+		e.seedAgent(e.runner1, "claude", "claude", "opus", "work") // heavy on the foreman account, zeroed too
+		e.addAgent(e.runner1, "claude", "haiku", "personal")       // light, below the heavy floor
+		job := e.tierWork("heavy")
+		if g := e.leaseAny(e.runner1); g != nil {
+			t.Fatalf("leased %+v below the heavy floor, want no placement", g)
+		}
+		if got := e.heldLayer(job.JobID); got != "" {
+			t.Errorf("hold layer = %q, want none: a headroom-zeroed account is cap-0", got)
+		}
+	})
 }
 
 // TestHeadroomZeroedReviewFallsBack: a review whose asked tier is served
-// only by a headroom-zeroed reviewer on the foreman's account falls back
-// to an available reviewer of another tier, as a work job does.
+// only by a headroom-zeroed reviewer on the foreman's account climbs to an
+// available reviewer of a higher tier, as a work job does; the floor never
+// steps it down (issue #263).
 func TestHeadroomZeroedReviewFallsBack(t *testing.T) {
 	e := headroomEnv(t, 1, func(c *Config) {
-		c.Caps.Tier = map[string]string{"claude/sonnet": "heavy"}
+		c.Caps.Tier = map[string]string{"opencode/glm-5": "heavy"}
 	})
 	e.exec("DELETE FROM agents WHERE harness = 'kimi'")
 	glm := e.addAgent(e.runner1, "opencode", "glm-5", "personal")
 	task := e.addTask("{}")
-	e.exec("UPDATE tasks SET tier = 'heavy', effective_tier = 'heavy', review_tier = 'heavy' WHERE id = ?", task)
+	e.exec("UPDATE tasks SET tier = 'standard', effective_tier = 'standard', review_tier = 'standard' WHERE id = ?", task)
 	p := e.workOn(task)
 	p.Kind = KindReview
 	p.ExcludeFamily = "codex"
 	job := e.submit(p)
 	g := e.leaseAny(e.runner1)
 	if g == nil || g.JobID != job.JobID {
-		t.Fatalf("lease = %+v, want review %d to fall back to the standard tier", g, job.JobID)
+		t.Fatalf("lease = %+v, want review %d to climb to the heavy tier", g, job.JobID)
 	}
-	e.assertTierPick(job.JobID, glm, "heavy", "standard")
+	e.assertTierPick(job.JobID, glm, "standard", "heavy")
 }
 
 // TestHeadroomPinnedJobParksNamingAccount: a job pinned to a

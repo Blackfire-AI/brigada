@@ -58,11 +58,11 @@ func TestLeaseStandardByDefault(t *testing.T) {
 func TestTierClimbsWhenNoneRegistered(t *testing.T) {
 	e := newEnv(t)
 	sonnet := e.addAgent(e.runner1, "claude", "sonnet", "work")
-	job := e.tierWork("heavy")
+	job := e.tierWork("light")
 	if g := e.leaseAny(e.runner1); g == nil || g.JobID != job.JobID {
 		t.Fatalf("lease = %+v, want job %d", g, job.JobID)
 	}
-	e.assertTierPick(job.JobID, sonnet, "heavy", "standard")
+	e.assertTierPick(job.JobID, sonnet, "light", "standard")
 }
 
 func TestTierClimbsPastBrokenAgents(t *testing.T) {
@@ -77,7 +77,10 @@ func TestTierClimbsPastBrokenAgents(t *testing.T) {
 	e.assertTierPick(job.JobID, opus, "standard", "heavy")
 }
 
-func TestTierStepsDownFromHeavy(t *testing.T) {
+// The asked tier is a floor (issue #263): a heavy task whose heavy agents
+// are broken never steps down to a ready standard or light agent — it waits
+// unplaced for a heavy one, however long that takes.
+func TestTierNeverStepsDownFromHeavy(t *testing.T) {
 	for _, brokenStandard := range []bool{false, true} {
 		name := "standard ready"
 		if brokenStandard {
@@ -86,19 +89,19 @@ func TestTierStepsDownFromHeavy(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			e := newEnv(t)
 			opus := e.addAgent(e.runner1, "claude", "opus", "heavy")
-			haiku := e.addAgent(e.runner1, "claude", "haiku", "light")
+			e.addAgent(e.runner1, "claude", "haiku", "light")
 			sonnet := e.addAgent(e.runner1, "claude", "sonnet", "standard")
 			e.exec("UPDATE agents SET health = 'broken' WHERE id = ?", opus)
-			want, tier := sonnet, "standard"
 			if brokenStandard {
 				e.exec("UPDATE agents SET health = 'broken' WHERE id = ?", sonnet)
-				want, tier = haiku, "light"
 			}
 			job := e.tierWork("heavy")
-			if g := e.leaseAny(e.runner1); g == nil || g.JobID != job.JobID {
-				t.Fatalf("lease = %+v, want job %d", g, job.JobID)
+			if g := e.leaseAny(e.runner1); g != nil {
+				t.Fatalf("leased %+v below the heavy floor, want no placement", g)
 			}
-			e.assertTierPick(job.JobID, want, "heavy", tier)
+			if got := e.jobAgent(job.JobID); got != 0 {
+				t.Errorf("picked agent %d, want none below the heavy floor", got)
+			}
 		})
 	}
 }
@@ -278,16 +281,18 @@ func TestForemanTurnIgnoresClassFilter(t *testing.T) {
 
 func TestTierServed(t *testing.T) {
 	// Each row lists the expected service tier for asked light, standard,
-	// heavy, respectively, for every combination of ready-health tiers.
+	// heavy, respectively, for every combination of ready-health tiers. The
+	// asked tier is a floor: the choice climbs but never steps down, so a
+	// ready tier below the ask is never served (issue #263).
 	for _, tt := range []struct {
 		ready []string
 		want  [3]string
 	}{
 		{nil, [3]string{"light", "standard", "heavy"}},
-		{[]string{"light"}, [3]string{"light", "light", "light"}},
-		{[]string{"standard"}, [3]string{"standard", "standard", "standard"}},
+		{[]string{"light"}, [3]string{"light", "standard", "heavy"}},
+		{[]string{"standard"}, [3]string{"standard", "standard", "heavy"}},
 		{[]string{"heavy"}, [3]string{"heavy", "heavy", "heavy"}},
-		{[]string{"light", "standard"}, [3]string{"light", "standard", "standard"}},
+		{[]string{"light", "standard"}, [3]string{"light", "standard", "heavy"}},
 		{[]string{"light", "heavy"}, [3]string{"light", "heavy", "heavy"}},
 		{[]string{"standard", "heavy"}, [3]string{"standard", "standard", "heavy"}},
 		{[]string{"light", "standard", "heavy"}, [3]string{"light", "standard", "heavy"}},
@@ -337,7 +342,7 @@ func TestTierQueueTTLNamesAskedTier(t *testing.T) {
 	job := e.tierWork("heavy")
 	e.elapse(11 * time.Minute)
 	e.mustSweep()
-	if got := e.str("SELECT result FROM jobs WHERE id = ?", job.JobID); !strings.Contains(got, "no agent of tier heavy, or of any tier, offers implement") {
+	if got := e.str("SELECT result FROM jobs WHERE id = ?", job.JobID); !strings.Contains(got, "no agent of tier heavy or above offers implement") {
 		t.Errorf("park reason = %s, want the asked tier and class", got)
 	}
 }
@@ -356,34 +361,34 @@ func (e *env) tierReview(tier string) SubmitResult {
 	return e.submit(p)
 }
 
-// A tier whose only other-family reviewer is cooling counts like a
-// broken one: the review climbs to a standard reviewer of another family.
-func TestHeavyReviewSkipsCoolingReviewer(t *testing.T) {
+// A heavy review whose only cross-family heavy reviewer is cooling waits
+// for it: the floor never steps down to the ready standard reviewer of
+// another family (issue #263).
+func TestHeavyReviewWaitsForItsCoolingReviewer(t *testing.T) {
 	e := newEnv(t)
-	e.addAgent(e.runner1, "claude", "opus", "heavy")
 	codex := e.addAgent(e.runner1, "codex", "gpt-5-pro", "codex")
-	glm := e.addAgent(e.runner1, "opencode", "glm-5", "opencode")
+	e.addAgent(e.runner1, "opencode", "glm-5", "opencode")
 	e.coolUntil(codex, 3*24*time.Hour)
 	job := e.tierReview("heavy")
-	if g := e.leaseAny(e.runner1); g == nil || g.JobID != job.JobID {
-		t.Fatalf("lease = %+v, want review %d", g, job.JobID)
+	if g := e.leaseAny(e.runner1); g != nil {
+		t.Fatalf("leased %+v below the heavy floor, want the cooling wait", g)
 	}
-	e.assertTierPick(job.JobID, glm, "heavy", "standard")
+	e.assertHeld(job.JobID, layerCooling)
 }
 
-// A heavy review does not wait out even a short cooling: it steps down
-// at once to the standard reviewer of the other family.
-func TestHeavyReviewFallsBackOnAShortCoolingReviewer(t *testing.T) {
+// Even a short cooling does not move a heavy review below its floor: it
+// waits for the heavy reviewer's reset rather than stepping down to the
+// standard reviewer of the other family (issue #263).
+func TestHeavyReviewWaitsEvenForAShortCooling(t *testing.T) {
 	e := newEnv(t)
-	e.addAgent(e.runner1, "claude", "opus", "heavy")
 	codex := e.addAgent(e.runner1, "codex", "gpt-5-pro", "codex")
-	glm := e.addAgent(e.runner1, "opencode", "glm-5", "opencode")
+	e.addAgent(e.runner1, "opencode", "glm-5", "opencode")
 	e.coolUntil(codex, 30*time.Minute)
 	job := e.tierReview("heavy")
-	if g := e.leaseAny(e.runner1); g == nil || g.JobID != job.JobID {
-		t.Fatalf("lease = %+v, want review %d", g, job.JobID)
+	if g := e.leaseAny(e.runner1); g != nil {
+		t.Fatalf("leased %+v below the heavy floor, want the cooling wait", g)
 	}
-	e.assertTierPick(job.JobID, glm, "heavy", "standard")
+	e.assertHeld(job.JobID, layerCooling)
 }
 
 func TestLightTaskClimbsPastCooling(t *testing.T) {
@@ -399,12 +404,15 @@ func TestLightTaskClimbsPastCooling(t *testing.T) {
 	e.assertTierPick(job.JobID, sonnet, "light", "standard")
 }
 
-// With no tier available, the job waits for the earliest reset, in whichever
-// tier that is — minutes away as much as days.
+// With no tier available, the job waits for the earliest reset among the
+// tiers at or above the floor — minutes away as much as days. A lower tier
+// that resets sooner is never waited on (issue #263).
 func TestEveryTierCoolingHoldsForTheEarliestReset(t *testing.T) {
 	e := newEnv(t)
+	haiku := e.addAgent(e.runner1, "claude", "haiku", "light")
 	sonnet := e.addAgent(e.runner1, "claude", "sonnet", "standard")
 	opus := e.addAgent(e.runner1, "claude", "opus", "heavy")
+	e.coolUntil(haiku, 5*time.Minute) // resets first, but below the standard floor
 	e.coolUntil(sonnet, 50*time.Minute)
 	soon := e.coolUntil(opus, 20*time.Minute)
 	job := e.tierWork("standard")

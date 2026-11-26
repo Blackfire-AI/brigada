@@ -36,3 +36,9 @@ regexes = [
   '''^198\.51\.100\.[0-9]+$''',
   '''^203\.0\.113\.[0-9]+$''',
 ]
+
+[[allowlists]]
+description = "GitHub push-protection signatures named in the init/doctor docs (GH007/private email), not credentials"
+regexes = [
+  '''GH007/private''',
+]

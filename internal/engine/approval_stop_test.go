@@ -182,7 +182,8 @@ func TestPlanGateNeverHoldsForLandRules(t *testing.T) {
 // --and-stop-asking releases the hold, changes the rules that held the
 // landing and queues the land job (§6.3).
 func TestLandApproveStopAskingChangesTheRules(t *testing.T) {
-	e := newEnv(t)
+	// The author serves the heavy tier the task asks (issue #263's floor).
+	e := newEnvCfg(t, func(c *Config) { c.Caps.Tier = map[string]string{"author/anthropic-1": "heavy"} })
 	author := e.agented("author", "anthropic", "implement")
 	reviewer := e.agented("reviewer", "google", "implement", "review")
 	e.set(map[string]string{SettingGateLand: GateAsk, SettingApprovalTiers: "heavy"})

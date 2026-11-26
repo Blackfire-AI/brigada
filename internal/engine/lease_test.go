@@ -242,7 +242,9 @@ func TestReleaseExclusionAndLapse(t *testing.T) {
 // leases with nothing recorded). Which job a lease takes does not
 // change.
 func TestLeaseRecordsTheAgent(t *testing.T) {
-	e := newEnv(t)
+	// Both agents serve the standard tier the fixture task asks: the floor
+	// never steps down to the gemini agent's light model (issue #263).
+	e := newEnvCfg(t, func(c *Config) { c.Caps.Tier = map[string]string{"gemini/flash": "standard"} })
 	agented, err := e.eng.Register(e.ctx, "agented", 0, []AgentAdvert{
 		{Adapter: "claude", Harness: "claude", Model: "sonnet", Family: "anthropic", Account: "work", Classes: []string{"implement", "review"}},
 		{Adapter: "gemini", Harness: "gemini", Model: "flash", Family: "google", Account: "work", Classes: []string{"implement", "review"}},
