@@ -3,11 +3,11 @@
 # here are overwritten. It holds the graph, the task states, the branches
 # and the open questions — never transcripts.
 plan: 5
-title: "1.0 repository hygiene: SECURITY.md, issue templates, CONTRIBUTING.md, Dependabot (#2, #3, #4, #6)"
+title: "Issue #259 first slice (re-created): landing barrier, plan monitoring, amendment envelope, guidance"
 repo: "github.com/Blackfire-AI/brigada"
-state: done
-created: 2026-10-19T21:27:47.72639Z
-updated: 2026-10-19T23:54:37.464812Z
+state: reviewing
+created: 2026-11-26T20:28:37.793635647Z
+updated: 2026-11-26T20:28:37.793635647Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -21,36 +21,54 @@ updated: 2026-10-19T23:54:37.464812Z
 # override the task's fix_rounds, review_rounds and restart budgets (§6.1);
 # skills name the project's skills the task carries, in order (§5.10).
 tasks:
-  - id: 19
-    name: "security"
-    title: "SECURITY.md and issue templates (#2, #4)"
+  - id: 9
+    name: "barrier"
+    title: "Landing-aware wait_landed barrier task field"
     class: "implement"
     deps: []
     base: ""
-    tier: light
-    effort: low
-    state: done
-    branch: "brigada/task-19"
-    rounds: 1
-  - id: 20
-    name: "contributing"
-    title: "CONTRIBUTING.md (#3)"
-    class: "implement"
-    deps: []
-    base: ""
-    tier: light
-    effort: medium
-    state: done
-    branch: "brigada/task-20"
+    effort: high
+    review_tier: standard
+    review_effort: medium
+    skills: ["schema-migration"]
+    state: pending
+    branch: ""
     rounds: 0
-  - id: 21
-    name: "dependabot"
-    title: "Dependabot for Go modules and GitHub Actions (#6)"
+  - id: 10
+    name: "monitoring"
+    title: "Plan-scoped history/status monitoring with --plan and --json"
     class: "implement"
     deps: []
     base: ""
-    tier: light
-    effort: low
-    state: done
-    branch: "brigada/task-21"
+    effort: medium
+    review_tier: standard
+    review_effort: medium
+    skills: ["cli-flag", "surface-parity"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 11
+    name: "envelope"
+    title: "Amendment task-count envelope and structural preflight summary"
+    class: "implement"
+    deps: []
+    base: ""
+    effort: medium
+    review_tier: standard
+    review_effort: medium
+    skills: ["config-setting"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 12
+    name: "guidance"
+    title: "Anti-fragmentation guidance and early-verification skill"
+    class: "implement"
+    deps: ["barrier"]
+    base: "barrier"
+    effort: medium
+    review_tier: standard
+    review_effort: medium
+    state: pending
+    branch: ""
     rounds: 0
