@@ -458,7 +458,10 @@ func TestPlanCloseWaitsForTheLastLanding(t *testing.T) {
 // it, so the rule never hands a land job to a task already on the
 // branch.
 func TestRecordLandedChainNoLandJobs(t *testing.T) {
-	e := newEnv(t)
+	// The agents serve the heavy tier the task asks (issue #263's floor).
+	e := newEnvCfg(t, func(c *Config) {
+		c.Caps.Tier = map[string]string{"author/anthropic-1": "heavy", "reviewer/google-1": "heavy"}
+	})
 	e.set(map[string]string{SettingApprovalTiers: "heavy"})
 	author := e.agented("author", "anthropic", "implement")
 	reviewer := e.agented("reviewer", "google", "implement", "review")

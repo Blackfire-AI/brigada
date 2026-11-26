@@ -547,7 +547,7 @@ func (e *Engine) sweepPolledTx(tx *sql.Tx, now time.Time, polling int64) (rep Sw
 						return rep, err
 					}
 					if asked != "" {
-						reason += fmt.Sprintf("; no agent of tier %s, or of any tier, offers %s", asked, kindClass(j.Kind))
+						reason += fmt.Sprintf("; no agent of tier %s or above offers %s", asked, kindClass(j.Kind))
 					}
 				}
 			}

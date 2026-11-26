@@ -207,7 +207,9 @@ func TestRunnerWorkRunsOnTheNamedModel(t *testing.T) {
 	e.seedProject(remote)
 	task := e.seedTask("", "true")
 	if err := e.update(func(tx *sql.Tx) error {
-		_, err := tx.Exec("UPDATE tasks SET effort = 'high' WHERE id = ?", task)
+		// The task asks the light tier the haiku agent serves: the floor
+		// never steps down to it from a heavier ask (issue #263).
+		_, err := tx.Exec("UPDATE tasks SET effort = 'high', tier = 'light', effective_tier = 'light' WHERE id = ?", task)
 		return err
 	}); err != nil {
 		t.Fatal(err)

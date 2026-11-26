@@ -1040,74 +1040,90 @@ func leaseAgentsTx(tx *sql.Tx, cfg *Config, rnd func() float64, runner int64, j 
 // whose candidate lookup uses the task's class rather than the job kind's.
 // Runner 0 ranks all registered agents for an automatic restart's pin. A
 // caller that only asks who qualifies passes a nil rnd and gets id order.
-// A review under review.family=prefer is placed by preferReviewAgentsTx
-// instead (issue #126): its family steps read availability. An agent
-// capped at exactly 0 for the job's kind is never returned (issue #195),
-// so an automatic retry never pins one.
+// A review under review.family=prefer is placed by the family order within
+// the capability floor (issue #126, #263). An agent capped at exactly 0 for
+// the job's kind is never returned (issue #195), so an automatic retry
+// never pins one.
 func eligibleAgentsTx(tx *sql.Tx, cfg *Config, rnd func() float64, runner int64, j *jobRow, class, now string) ([]agentCand, error) {
 	return qualifyingAgentsTx(tx, cfg, rnd, runner, j, class, now, false)
 }
 
-// qualifyingAgentsTx is eligibleAgentsTx's lookup. With unavailable
-// true it also returns the agents that are broken or cooling at now —
-// those that qualify for the job by pin, harness, class and family rule
-// but cannot take it yet — with their model, health and cooling
-// deadline filled in: what the cooling hold (§8.1) and the queue-TTL
-// park reason read. Either way an agent whose account — or, for any kind
-// but a foreman turn, whose model — is capped at exactly 0, configured or
-// headroom-zeroed for a task job (§8.2), is left out (zeroCapLayer, issue
-// #195): it can never take the job, so it is not a candidate, an automatic
-// retry's pin or what the cooling hold waits on; a merely full cap is the
-// lease's cap gate, as before. Unpinned task jobs are restricted to the served tier
-// before availability is checked: the task's effective tier for a work or
-// fix job, the review tier for a review (jobTierTx). A review retry's agent exclusion is
-// applied as the preference it is (§7): the lift is decided inside
-// qualifyingAgentRowsTx, so the tier choice above, the candidates and
-// the hold all read the same exclusion.
+// qualifyingAgentsTx is eligibleAgentsTx's lookup: the one placement
+// pipeline for work, fix, task review, plan review and foreman jobs (§8,
+// issue #263), in stages. Structural eligibility first — the registered
+// class, the harness/model/runner/label constraints, an explicit pin,
+// session affinity, the family rule where family matters and the logical
+// attempt's exclusion (qualifyingAgentRowsTx) — then the cap-0 drop
+// (zeroCapLayer, issue #195): an agent whose account, or for any kind but a
+// foreman turn whose model, is capped at exactly 0, configured or
+// headroom-zeroed for a task job (§8.2), can never take the job, so it is
+// not a candidate, an automatic retry's pin or what the cooling hold waits
+// on; a merely full cap is the lease's cap gate, as before. Current
+// availability next: broken, auth-failed and cooling agents are left out of
+// the pick. The capability floor then fixes the served tier — the asked
+// tier is a minimum, climbed but never stepped down — and the declared
+// preference orders the candidates within it: a prefer review's family
+// groups (issue #126), else the cost-weighted sampling alone. Capacity is
+// the lease's cap gate over the ordered candidates.
+//
+// With unavailable true the lookup also returns the agents that are broken
+// or cooling at now — those that qualify structurally but cannot take the
+// job yet — with their model, health and cooling deadline filled in: what
+// the cooling hold (§8.1) and the queue-TTL park reason read. The tier and
+// preference choice reads every runner's agents together; the polling
+// runner's filter runs last. A review retry's agent exclusion is applied as
+// the preference it is (§7): the lift is decided inside
+// qualifyingAgentRowsTx, so the tier choice, the candidates and the hold
+// all read the same exclusion.
 func qualifyingAgentsTx(tx *sql.Tx, cfg *Config, rnd func() float64, runner int64, j *jobRow, class, now string, unavailable bool) ([]agentCand, error) {
-	// A review under prefer walks the family steps (issue #126), whose
-	// order reads availability: its own lookup decides them and the tier.
-	if familyPrefer(cfg.Review.Family) && (j.Kind == KindReview || j.Kind == KindPlanReview) {
-		return preferReviewAgentsTx(tx, cfg, rnd, runner, j, class, now, unavailable)
-	}
 	limits := cfg.Caps
 	foreman, err := foremanAccountSetTx(tx, limits, j.ProjectID)
 	if err != nil {
 		return nil, err
 	}
-	asked, served := "", ""
+	// The tier the job asks for (§8): the task's effective tier for a work
+	// or fix job, the review tier for a review (jobTierTx); a plan review
+	// (§6.2) has no task, so the project's plan_review.tier asks. Foreman
+	// turns and pinned jobs rank no tier.
+	asked := ""
 	if j.TaskID != 0 && j.Kind != KindForeman {
 		if asked, err = jobTierTx(tx, cfg.Review, j); err != nil {
 			return nil, err
 		}
-		if j.RequireAgent == 0 {
-			served, err = tierServedTx(tx, cfg.Review.Family, limits, foreman, j, class, asked, now)
-			if err != nil {
-				return nil, err
-			}
-		}
 	} else if j.Kind == KindPlanReview {
-		// A plan review (§6.2) has no task to name a tier: the
-		// project's plan_review.tier asks, and the tier fallback below
-		// serves, as a task review's does.
 		if asked, err = planReviewTierTx(tx, cfg, j); err != nil {
 			return nil, err
 		}
-		served, err = tierServedTx(tx, cfg.Review.Family, limits, foreman, j, class, asked, now)
-		if err != nil {
-			return nil, err
-		}
 	}
-	rows, err := qualifyingAgentRowsTx(tx, cfg.Review.Family, runner, j, class, now)
+	rows, err := qualifyingAgentRowsTx(tx, cfg.Review.Family, 0, j, class, now)
 	if err != nil {
 		return nil, err
 	}
+	rows = dropZeroCapped(limits, foreman, j.Kind, rows)
+
+	prefer := familyPrefer(cfg.Review.Family) && (j.Kind == KindReview || j.Kind == KindPlanReview)
+	var author int64
+	var authorFamily string
+	if prefer {
+		if author, authorFamily, err = reviewAuthorKnownFamilyTx(tx, j); err != nil {
+			return nil, err
+		}
+	}
+	// The capability floor, then the declared preference, pick the served
+	// tier. A pinned job names its agent and is never moved to another tier.
+	served := ""
+	if j.RequireAgent == 0 && asked != "" {
+		if prefer {
+			served = preferServedTier(limits, foreman, rows, author, authorFamily, asked, now)
+		} else {
+			served = tierServedRows(limits, foreman, rows, asked, now)
+		}
+	}
 	var cands []agentCand
-	// An agent capped at exactly 0 for this kind of job — configured, or
-	// headroom-zeroed for a task job (§8.2) — is dropped whatever
-	// unavailable says (issue #195): a pin on one gets no candidate, an
-	// unmet placement the queue TTL parks.
-	for _, c := range dropZeroCapped(limits, foreman, j.Kind, rows) {
+	for _, c := range rows {
+		if runner != 0 && c.runner != runner {
+			continue
+		}
 		tier := limits.TierOf(c.harness, c.model)
 		if served != "" && tier != served {
 			continue
@@ -1124,35 +1140,41 @@ func qualifyingAgentsTx(tx *sql.Tx, cfg *Config, rnd func() float64, runner int6
 	if j.RequireAgent != 0 {
 		rnd = nil // a pinned job names its agent: nothing to rank or draw
 	}
-	rankAgents(cands, rnd)
+	if prefer {
+		cands = orderPreferCandidates(cands, rnd, author, authorFamily)
+		// The family order is judged over every runner: a polling runner
+		// whose best family group here is below the winning one gets nothing
+		// — the winning group's runner leases it. Only a winning group that
+		// is present here but cap-full falls through to the next family group
+		// at the same tier (the cap gate walks the order). The cooling hold's
+		// unavailable lookup keeps its agents whatever the family order.
+		if !unavailable && authorFamily != "" && len(cands) > 0 {
+			win := preferWinningClass(limits, rows, author, authorFamily, served, now)
+			if preferFamilyClass(cands[0].id, cands[0].family, author, authorFamily) != win {
+				cands = nil
+			}
+		}
+	} else {
+		rankAgents(cands, rnd)
+	}
 	return cands, nil
 }
 
-// tierServedTx considers every runner's structurally qualifying agents.
-// An agent counts as available for its tier only when it is ready and not
-// cooling at all: an agent whose cooling_until is ahead of now, whatever
-// the distance to the reset, is unavailable, like a broken one. A model or
-// account capped at exactly 0 — configured, or headroom-zeroed for a task
-// job (§8.2) — can never take a job, so its agents do not count as ready;
-// a cap that is merely full still waits (§8). Other caps are applied
-// later, after the tier is fixed. When no tier has an available agent but
-// some agents are only cooling, the tier of the agent that resets first is
-// served, so the job waits for the earliest reset.
-func tierServedTx(tx *sql.Tx, reviewFamily string, limits caps.Limits, foreman map[string]bool, j *jobRow, class, asked, now string) (string, error) {
-	agents, err := qualifyingAgentRowsTx(tx, reviewFamily, 0, j, class, now)
-	if err != nil {
-		return "", err
-	}
-	return tierServedRows(limits, foreman, agents, asked, now), nil
-}
-
-// tierServedRows is tierServedTx's choice over a given set of qualifying
-// agents: prefer the asked tier, then climb, then step down from heavy;
-// with no ready agent anywhere, the tier of the agent that resets first,
-// so the job waits for the earliest reset. The prefer placement (issue
-// #126) applies it within one family step alone, so the steps outrank
-// the tier.
+// tierServedRows picks the served tier over a given set of qualifying
+// agents. An agent counts as available for its tier only when it is ready
+// and not cooling at all: an agent whose cooling_until is ahead of now,
+// whatever the distance to the reset, is unavailable, like a broken one. A
+// model or account capped at exactly 0 — configured, or headroom-zeroed for
+// a task job (§8.2) — can never take a job, so its agents do not count as
+// ready; a cap that is merely full still waits (§8). Other caps are applied
+// later, after the tier is fixed. The asked tier is a floor — prefer it,
+// then climb to the next tier up, never step down (issue #263). With no
+// ready agent at or above the floor, the tier of the agent that resets
+// first among those tiers is served, so the job waits for the earliest
+// reset the floor allows, never a lower tier's. The prefer placement
+// (issue #126) applies its family order within the same floor.
 func tierServedRows(limits caps.Limits, foreman map[string]bool, agents []agentCand, asked, now string) string {
+	floor := slices.Index(adapter.Tiers, asked)
 	hasReady := map[string]bool{}
 	var soonest string
 	soonestTiers := map[string]bool{}
@@ -1161,6 +1183,9 @@ func tierServedRows(limits caps.Limits, foreman map[string]bool, agents []agentC
 			continue
 		}
 		tier := limits.TierOf(a.harness, a.model)
+		if floor >= 0 && slices.Index(adapter.Tiers, tier) < floor {
+			continue // below the floor: never served, never waited on
+		}
 		if a.cooling <= now {
 			hasReady[tier] = true
 			continue
@@ -1234,23 +1259,18 @@ func dropZeroCapped(limits caps.Limits, foreman map[string]bool, kind Kind, rows
 	return kept
 }
 
-// tierServed prefers the asked tier, then climbs, then steps down from
-// heavy. hasReady names the tiers with an agent that is ready, not capped at
-// 0 and not cooling. With none anywhere, retain the asked tier.
+// tierServed prefers the asked tier, then climbs to the next tier up. The
+// asked tier is a floor, so it never steps down (issue #263). hasReady
+// names the tiers with an agent that is ready, not capped at 0 and not
+// cooling. With none at or above the floor, retain the asked tier.
 func tierServed(asked string, hasReady map[string]bool) string {
-	tiers := []string{"light", "standard", "heavy"}
-	at := slices.Index(tiers, asked)
+	at := slices.Index(adapter.Tiers, asked)
 	if at < 0 || hasReady[asked] {
 		return asked
 	}
-	for _, tier := range tiers[at+1:] {
+	for _, tier := range adapter.Tiers[at+1:] {
 		if hasReady[tier] {
 			return tier
-		}
-	}
-	for i := at - 1; i >= 0; i-- {
-		if hasReady[tiers[i]] {
-			return tiers[i]
 		}
 	}
 	return asked

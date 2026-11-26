@@ -467,7 +467,8 @@ func TestCancelledFailureIsNotPlannerSuccess(t *testing.T) {
 // TestRestartedThenCancelledIsNotLaundered: a failed task restarted to
 // ready and then cancelled by the foreman is still an abandoned failure.
 func TestRestartedThenCancelledIsNotLaundered(t *testing.T) {
-	e := newEnv(t)
+	// The agent serves the heavy tier the task asks (issue #263's floor).
+	e := newEnvCfg(t, func(c *Config) { c.Caps.Tier = map[string]string{"claude/sonnet": "heavy"} })
 	agent := e.addAgent(e.runner1, "claude", "sonnet", "work")
 	res := e.createPlan([]PlanTask{{Name: "solo", Spec: "do it", Class: "answer"}})
 	e.exec("UPDATE tasks SET effective_tier = 'heavy', effective_effort = 'high' WHERE plan_id = ?", res.PlanID)

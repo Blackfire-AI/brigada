@@ -486,15 +486,20 @@ func TestContinueAfterCheckReviewApproval(t *testing.T) {
 // author's latest work job's — an attempt that moved to another agent
 // continues from that agent, not the first.
 func TestContinuePlacementReadsTheDepAuthor(t *testing.T) {
-	e := newEnv(t)
+	// The agents serve the heavy tier the task asks (issue #263's floor).
+	e := newEnvCfg(t, func(c *Config) {
+		c.Caps.Tier = map[string]string{"author/claude-1": "heavy", "other/codex-1": "heavy"}
+	})
 	author := e.agented("author", "claude", "implement")
 	other := e.agented("other", "codex", "implement")
 	res := e.continuePlan("answer")
 	build, ship := res.Tasks[0].TaskID, res.Tasks[1].TaskID
 
 	// The first attempt fails on the author's agent; the task parks past
-	// every escalation step.
+	// every escalation step. The ship asks the same heavy tier so the
+	// continue placement matches its heavy author (issue #263's floor).
 	e.exec("UPDATE tasks SET effective_tier = 'heavy', effective_effort = 'high' WHERE id = ?", build)
+	e.exec("UPDATE tasks SET effective_tier = 'heavy' WHERE id = ?", ship)
 	g := e.lease(author, []string{"author"}, nil)
 	if g == nil {
 		t.Fatal("build's work job was not leased")

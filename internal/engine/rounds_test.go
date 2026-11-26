@@ -316,7 +316,9 @@ func TestRoundsExhaustedParksTheTask(t *testing.T) {
 		{"check"}, {"changes"},
 	} {
 		t.Run("the default two "+tc.path+" rounds", func(t *testing.T) {
-			e := newEnv(t)
+			e := newEnvCfg(t, func(c *Config) {
+				c.Caps.Tier = map[string]string{"author/anthropic-1": "heavy", "reviewer/google-1": "heavy"}
+			})
 			e.exec("UPDATE tasks SET effective_tier = 'heavy', effective_effort = 'high' WHERE id = ?", e.task)
 			author := e.agented("author", "anthropic", "implement")
 			reviewer := e.agented("reviewer", "google", "implement", "review")
@@ -376,7 +378,9 @@ func TestRoundsExhaustedParksTheTask(t *testing.T) {
 		{`{"review_rounds":0}`, passCheck, roundReview},
 	} {
 		t.Run("cap of zero: "+tc.want, func(t *testing.T) {
-			e := newEnv(t)
+			e := newEnvCfg(t, func(c *Config) {
+				c.Caps.Tier = map[string]string{"author/anthropic-1": "heavy", "reviewer/google-1": "heavy"}
+			})
 			e.exec("UPDATE tasks SET effective_tier = 'heavy', effective_effort = 'high' WHERE id = ?", e.task)
 			author := e.agented("author", "anthropic", "implement")
 			reviewer := e.agented("reviewer", "google", "implement", "review")
@@ -406,7 +410,9 @@ func TestRoundsExhaustedParksTheTask(t *testing.T) {
 // own rounds, and the other way around.
 func TestFixRoundsShareOneCount(t *testing.T) {
 	fresh := func(t *testing.T, caps string) (*env, int64, int64) {
-		e := newEnv(t)
+		e := newEnvCfg(t, func(c *Config) {
+			c.Caps.Tier = map[string]string{"author/anthropic-1": "heavy", "reviewer/google-1": "heavy"}
+		})
 		e.exec("UPDATE tasks SET effective_tier = 'heavy', effective_effort = 'high' WHERE id = ?", e.task)
 		e.exec("UPDATE tasks SET caps = ? WHERE id = ?", caps, e.task)
 		return e, e.agented("author", "anthropic", "implement"), e.agented("reviewer", "google", "implement", "review")
@@ -691,7 +697,7 @@ func TestCheckFailFeedbackNamesAnEmptyTail(t *testing.T) {
 // needs-you reason and the foreman's wake carry the check command and its
 // exit code first, then the worker's summary.
 func TestOutOfRoundsNeedsYouNamesTheCheck(t *testing.T) {
-	e := newEnv(t)
+	e := newEnvCfg(t, func(c *Config) { c.Caps.Tier = map[string]string{"author/anthropic-1": "heavy"} })
 	e.exec("UPDATE tasks SET effective_tier = 'heavy', effective_effort = 'high' WHERE id = ?", e.task)
 	author := e.agented("author", "anthropic", "implement")
 	e.exec(`UPDATE tasks SET check_cmd = 'test -f DOES_NOT_EXIST', caps = ? WHERE id = ?`, `{"fix_rounds":0}`, e.task)
@@ -728,7 +734,7 @@ func TestOutOfRoundsNeedsYouNamesTheCheck(t *testing.T) {
 func TestOutOfRoundsBumpsTheTier(t *testing.T) {
 	for _, path := range []string{roundFix, roundReview} {
 		t.Run(path, func(t *testing.T) {
-			e := newEnv(t)
+			e := newEnvCfg(t, func(c *Config) { c.Caps.Tier = map[string]string{"author/anthropic-1": "heavy"} })
 			author := e.agented("author", "anthropic", "implement")
 			reviewer := e.agented("reviewer", "google", "review")
 			// High effort is the top of the standard tier's effort steps:
@@ -790,7 +796,7 @@ func TestOutOfRoundsBumpsTheTier(t *testing.T) {
 }
 
 func TestOutOfRoundsAtHeavyParks(t *testing.T) {
-	e := newEnv(t)
+	e := newEnvCfg(t, func(c *Config) { c.Caps.Tier = map[string]string{"author/anthropic-1": "heavy"} })
 	author := e.agented("author", "anthropic", "implement")
 	e.exec(`UPDATE tasks SET effective_tier = 'heavy', effective_effort = 'high', caps = '{"fix_rounds":0}' WHERE id = ?`, e.task)
 	e.submit(e.work())
@@ -804,7 +810,7 @@ func TestOutOfRoundsAtHeavyParks(t *testing.T) {
 }
 
 func TestFailedResultBumpsTheTier(t *testing.T) {
-	e := newEnv(t)
+	e := newEnvCfg(t, func(c *Config) { c.Caps.Tier = map[string]string{"author/anthropic-1": "heavy"} })
 	author := e.agented("author", "anthropic", "implement")
 	e.exec("UPDATE tasks SET tier = 'light', effective_tier = 'light', effective_effort = 'high' WHERE id = ?", e.task)
 	e.submit(e.work())
@@ -831,7 +837,7 @@ func TestFailedResultBumpsTheTier(t *testing.T) {
 // retries on standard at high, then on heavy at its own effort, then on
 // heavy at high, and only then reaches the foreman (§8).
 func TestFailedResultStepsTheEffortFirst(t *testing.T) {
-	e := newEnv(t)
+	e := newEnvCfg(t, func(c *Config) { c.Caps.Tier = map[string]string{"author/anthropic-1": "heavy"} })
 	author := e.agented("author", "anthropic", "implement")
 	e.exec(`UPDATE tasks SET effort = 'medium', effective_effort = 'medium', caps = '{"restart":5}' WHERE id = ?`, e.task)
 	e.submit(e.work())
@@ -986,7 +992,7 @@ func TestBumpRespectsTheRestartCap(t *testing.T) {
 }
 
 func TestSecondBumpReachesHeavyThenParks(t *testing.T) {
-	e := newEnv(t)
+	e := newEnvCfg(t, func(c *Config) { c.Caps.Tier = map[string]string{"author/anthropic-1": "heavy"} })
 	author := e.agented("author", "anthropic", "implement")
 	e.exec(`UPDATE tasks SET tier = 'light', effective_tier = 'light', caps = '{"fix_rounds":1,"restart":5}' WHERE id = ?`, e.task)
 	e.submit(e.work())

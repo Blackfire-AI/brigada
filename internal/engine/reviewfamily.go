@@ -4,7 +4,9 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 
+	"github.com/Blackfire-AI/brigada/internal/adapter"
 	"github.com/Blackfire-AI/brigada/internal/caps"
 )
 
@@ -73,137 +75,131 @@ func reviewAuthorKnownFamilyTx(tx *sql.Tx, j *jobRow) (int64, string, error) {
 	return author, family, nil
 }
 
-// preferReviewAgentsTx places a review under review.family=prefer
-// (issue #126): three ordered family steps — an agent of a known
-// different family than the author's first, then an agent of the
-// author's own family other than the author's, then the author's own
-// agent — and the first step with an available reviewer wins, judged
-// over every runner's agents together so a cross-family reviewer on any
-// runner beats a same-family one on the polling runner. The tier
-// fallback (§8) runs within the winning step alone: a cross-family
-// reviewer on any tier beats a same-family one on the asked tier, and
-// with no step available the job waits on the preferred step's soonest
-// reset. An author whose family is unknown keeps today's rule instead:
-// any review-class agent but the author's own. A pinned job (a
-// re-review on its reviewer's session) has its agent for the winning
-// step whatever its family. runner 0 ranks over every registered agent.
-// A reviewer whose model or account is capped at exactly 0 — configured,
-// or headroom-zeroed for a task job (§8.2) — is never placed, as in
-// qualifyingAgentsTx (issue #195).
-func preferReviewAgentsTx(tx *sql.Tx, cfg *Config, rnd func() float64, runner int64, j *jobRow, class, now string, unavailable bool) ([]agentCand, error) {
-	author, authorFamily, err := reviewAuthorKnownFamilyTx(tx, j)
-	if err != nil {
-		return nil, err
+// preferServedTier picks the tier a review under review.family=prefer is
+// served at (§7, §8, issues #126, #263): the capability floor bounds the
+// family order. The asked tier is a minimum, never stepped down. Within
+// it a cross-family reviewer beats a same-family one; only when the asked
+// tier has no available reviewer does a higher tier come into play, its
+// cross-family reviewers before its same-family ones, and the author's own
+// agent last of all, at an eligible tier in a fresh session. The first
+// group with an available reviewer (ready, not cooling, not capped at 0)
+// wins, judged over every runner's agents together so a cross-family
+// reviewer on any runner beats a same-family one on the polling runner.
+// With no group available the job waits on the earliest reset the floor
+// allows (tierServedRows). An author whose family is unknown keeps one
+// group — any review-class agent but the author's own — and the plain
+// floor chooses its tier. A reviewer capped at exactly 0 is already left
+// out by the caller (dropZeroCapped, issue #195).
+func preferServedTier(limits caps.Limits, foreman map[string]bool, rows []agentCand, author int64, authorFamily, asked, now string) string {
+	floor := slices.Index(adapter.Tiers, asked)
+	if authorFamily == "" || floor < 0 {
+		return tierServedRows(limits, foreman, rows, asked, now)
 	}
-	foreman, err := foremanAccountSetTx(tx, cfg.Caps, j.ProjectID)
-	if err != nil {
-		return nil, err
-	}
-	rows, err := qualifyingAgentRowsTx(tx, cfg.Review.Family, 0, j, class, now)
-	if err != nil {
-		return nil, err
-	}
-	// A reviewer capped at exactly 0 — configured, or headroom-zeroed for
-	// a task job (§8.2) — can never take the review (issue #195): it is
-	// left out before the steps are drawn, so a step of such reviewers
-	// alone is no step to wait on, and no candidate.
-	rows = dropZeroCapped(cfg.Caps, foreman, j.Kind, rows)
-	steps := reviewFamilySteps(rows, author, authorFamily)
-	winning, first := -1, -1
-	for i, step := range steps {
-		if len(step) == 0 {
+	askedReady := false
+	higherCross := map[string]bool{}
+	higherSame := map[string]bool{}
+	authorTiers := map[string]bool{}
+	for _, a := range rows {
+		if a.health != "ready" || a.cooling > now {
 			continue
 		}
-		if first < 0 {
-			first = i
+		tier := limits.TierOf(a.harness, a.model)
+		at := slices.Index(adapter.Tiers, tier)
+		if at < floor {
+			continue // below the floor: never a placement
 		}
-		if stepAvailable(cfg.Caps, foreman, step, now) {
-			winning = i
-			break
-		}
-	}
-	if winning < 0 {
-		winning = first // no step available: wait on the preferred one
-	}
-	if winning < 0 {
-		return nil, nil
-	}
-	step := steps[winning]
-	asked := ""
-	if j.TaskID != 0 && j.Kind != KindForeman {
-		if asked, err = jobTierTx(tx, cfg.Review, j); err != nil {
-			return nil, err
-		}
-	} else if j.Kind == KindPlanReview {
-		// A plan review (§6.2) has no task to name a tier: the
-		// project's plan_review.tier asks, as a task review's own ask.
-		if asked, err = planReviewTierTx(tx, cfg, j); err != nil {
-			return nil, err
-		}
-	}
-	served := ""
-	if j.RequireAgent == 0 && asked != "" {
-		served = tierServedRows(cfg.Caps, foreman, step, asked, now)
-	}
-	var cands []agentCand
-	for _, c := range step {
-		if runner != 0 && c.runner != runner {
-			continue
-		}
-		tier := cfg.Caps.TierOf(c.harness, c.model)
-		if served != "" && tier != served {
-			continue
-		}
-		if !unavailable && (c.health != "ready" || c.cooling > now) {
-			continue
-		}
-		if asked != "" {
-			c.tierAsked, c.tierServed = asked, tier
-		}
-		c.weight = cfg.Caps.CostOf(c.harness, c.model)
-		cands = append(cands, c)
-	}
-	if j.RequireAgent != 0 {
-		rnd = nil // a pinned job names its agent: nothing to rank or draw
-	}
-	rankAgents(cands, rnd)
-	return cands, nil
-}
-
-// reviewFamilySteps splits a review's qualifying agents into the ordered
-// prefer steps (issue #126): a known different family first, then the
-// author's family on another agent, then the author's own agent. An
-// author of unknown family keeps one step alone — every qualifying
-// agent, which today's rule already keeps the author out of.
-func reviewFamilySteps(rows []agentCand, author int64, authorFamily string) [][]agentCand {
-	if authorFamily == "" {
-		return [][]agentCand{rows}
-	}
-	steps := make([][]agentCand, 3)
-	for _, c := range rows {
 		switch {
-		case c.id == author:
-			steps[2] = append(steps[2], c)
-		case c.family == authorFamily:
-			steps[1] = append(steps[1], c)
+		case a.id == author:
+			authorTiers[tier] = true
+		case at == floor:
+			askedReady = true // a cross- or same-family reviewer at the asked tier
+		case a.family != authorFamily:
+			higherCross[tier] = true
 		default:
-			steps[0] = append(steps[0], c)
+			higherSame[tier] = true
 		}
 	}
-	return steps
+	if askedReady {
+		return asked
+	}
+	for _, tier := range adapter.Tiers[floor+1:] {
+		if higherCross[tier] {
+			return tier
+		}
+	}
+	for _, tier := range adapter.Tiers[floor+1:] {
+		if higherSame[tier] {
+			return tier
+		}
+	}
+	for _, tier := range adapter.Tiers[floor:] {
+		if authorTiers[tier] {
+			return tier
+		}
+	}
+	return tierServedRows(limits, foreman, rows, asked, now)
 }
 
-// stepAvailable reports whether any agent of one family step is available
-// now — ready, not cooling and not capped at 0 (configured or
-// headroom-zeroed, §8.2), the meaning the tier fallback's ready set
-// already has (§8).
-func stepAvailable(limits caps.Limits, foreman map[string]bool, step []agentCand, now string) bool {
-	for _, a := range step {
-		if a.health == "ready" && a.cooling <= now && !cappedAtZero(limits, foreman, a.account, a.model) {
-			return true
+// orderPreferCandidates orders a prefer review's candidates by the family
+// preference within the served tier (§7, issue #263): a cross-family
+// reviewer first, then a same-family one, then the author's own agent,
+// each group ranked by the cost-weighted sampling (rankAgents). The cap
+// gate walks this order, so a cap-full preferred family falls through to
+// the next family group at the same tier under prefer, never to another
+// tier. An author of unknown family keeps one group, ranked alone.
+func orderPreferCandidates(cands []agentCand, rnd func() float64, author int64, authorFamily string) []agentCand {
+	if authorFamily == "" {
+		rankAgents(cands, rnd)
+		return cands
+	}
+	var groups [3][]agentCand
+	for _, c := range cands {
+		g := preferFamilyClass(c.id, c.family, author, authorFamily)
+		groups[g] = append(groups[g], c)
+	}
+	var out []agentCand
+	for _, g := range groups {
+		rankAgents(g, rnd)
+		out = append(out, g...)
+	}
+	for i := range out {
+		out[i].rank = i
+	}
+	return out
+}
+
+// preferFamilyClass names a reviewer's family group under prefer: 0 a
+// known family other than the author's, 1 the author's family on another
+// agent, 2 the author's own agent.
+func preferFamilyClass(id int64, family string, author int64, authorFamily string) int {
+	switch {
+	case id == author:
+		return 2
+	case family == authorFamily:
+		return 1
+	default:
+		return 0
+	}
+}
+
+// preferWinningClass names the first family group with an available reviewer
+// at the served tier (every runner's agents together): the group the lease
+// places, and the one a polling runner must offer to take the job at all.
+// An empty served tier reads every tier, as a standalone review's does.
+func preferWinningClass(limits caps.Limits, rows []agentCand, author int64, authorFamily, served, now string) int {
+	best := -1
+	for _, a := range rows {
+		if a.health != "ready" || a.cooling > now {
+			continue
+		}
+		if served != "" && limits.TierOf(a.harness, a.model) != served {
+			continue
+		}
+		if c := preferFamilyClass(a.id, a.family, author, authorFamily); best < 0 || c < best {
+			best = c
 		}
 	}
-	return false
+	return best
 }
 
 // reviewPlacementKindTx names how a picked reviewer relates to the

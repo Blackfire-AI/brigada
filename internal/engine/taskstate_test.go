@@ -264,7 +264,7 @@ func TestApprovedTaskScoresTheFinalAuthor(t *testing.T) {
 // TestOutOfRoundsScoresTheAttemptOnly: a task that runs out of rounds
 // counts the attempt and no success.
 func TestOutOfRoundsScoresTheAttemptOnly(t *testing.T) {
-	e := newEnv(t)
+	e := newEnvCfg(t, func(c *Config) { c.Caps.Tier = map[string]string{"author/anthropic-1": "heavy"} })
 	e.exec("UPDATE tasks SET effective_tier = 'heavy', effective_effort = 'high' WHERE id = ?", e.task)
 	author := e.agented("author", "anthropic", "implement")
 	e.exec("UPDATE tasks SET caps = ? WHERE id = ?", `{"fix_rounds":0}`, e.task)

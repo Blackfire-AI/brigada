@@ -151,12 +151,14 @@ func TestPreferNeverPlacesZeroCappedReviewer(t *testing.T) {
 	}
 }
 
-// TestPreferFamilyStepsOutrankTier: a cross-family reviewer on another
-// tier beats a same-family reviewer on the tier the review asked for.
-func TestPreferFamilyStepsOutrankTier(t *testing.T) {
+// TestPreferFamilyOrderWithinTheFloor: the family preference applies within
+// the capability floor (issue #263). A same-family reviewer on the tier the
+// review asked for beats a cross-family reviewer on a higher tier — the
+// family steps no longer outrank the tier.
+func TestPreferFamilyOrderWithinTheFloor(t *testing.T) {
 	e := newEnvCfg(t, func(c *Config) {
 		// The task runs standard, so the review asks light; the
-		// cross-family agent alone is heavy.
+		// same-family agent is light, the cross-family one heavy.
 		c.Caps.Tier = map[string]string{"sibling/anthropic-1": "light", "other/google-1": "heavy"}
 	})
 	author := e.agented("author", "anthropic", "implement")
@@ -165,19 +167,19 @@ func TestPreferFamilyStepsOutrankTier(t *testing.T) {
 	e.exec("UPDATE tasks SET effective_tier = 'standard' WHERE id = ?", e.task)
 	review := e.runToReview(author)
 
-	g := e.leaseAny(sibling)
+	g := e.leaseAny(other)
 	if g != nil {
-		t.Fatalf("the same-family agent on the asked tier leased the review: %+v", g)
+		t.Fatalf("the cross-family agent on a higher tier leased the review over the asked-tier same-family one: %+v", g)
 	}
-	g = e.leaseAny(other)
+	g = e.leaseAny(sibling)
 	if g == nil || g.JobID != review {
-		t.Fatalf("the cross-family agent on another tier leased %+v, want the review %d", g, review)
+		t.Fatalf("the same-family agent on the asked tier leased %+v, want the review %d", g, review)
 	}
-	if p := e.pickEvents(review); len(p) != 1 || p[0].TierAsked != "light" || p[0].TierServed != "heavy" {
-		t.Errorf("pick = %+v, want the light ask served heavy", p)
+	if p := e.pickEvents(review); len(p) != 1 || p[0].TierAsked != "light" || p[0].TierServed != "light" {
+		t.Errorf("pick = %+v, want the light ask served light", p)
 	}
-	if got := e.pickPlacement(review); got != placeCrossFamily {
-		t.Errorf("placement = %q, want %q", got, placeCrossFamily)
+	if got := e.pickPlacement(review); got != placeSameFamily {
+		t.Errorf("placement = %q, want %q", got, placeSameFamily)
 	}
 }
 
