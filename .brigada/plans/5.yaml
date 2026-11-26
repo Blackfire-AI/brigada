@@ -5,9 +5,9 @@
 plan: 5
 title: "Issue #259 first slice (re-created): landing barrier, plan monitoring, amendment envelope, guidance"
 repo: "github.com/Blackfire-AI/brigada"
-state: reviewing
+state: needs_foreman
 created: 2026-11-26T20:28:37.793635647Z
-updated: 2026-11-26T21:55:38.505893912Z
+updated: 2026-11-26T22:05:45.925575834Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
