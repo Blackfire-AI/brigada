@@ -3,11 +3,11 @@
 # here are overwritten. It holds the graph, the task states, the branches
 # and the open questions — never transcripts.
 plan: 12
-title: "Fewer headless foreman wakes while an interactive session is active"
+title: "Fix #161: probe the push path at init and brigada doctor"
 repo: "github.com/Blackfire-AI/brigada"
-state: done
-created: 2026-10-20T12:18:12.362113Z
-updated: 2026-10-20T12:55:54.411731Z
+state: reviewing
+created: 2026-11-26T20:46:37.083219715Z
+updated: 2026-11-26T20:46:37.083219715Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -21,13 +21,16 @@ updated: 2026-10-20T12:55:54.411731Z
 # override the task's fix_rounds, review_rounds and restart budgets (§6.1);
 # skills name the project's skills the task carries, in order (§5.10).
 tasks:
-  - id: 47
-    name: "quiet-wakes"
-    title: "Hold headless foreman wakes while the interactive foreman was recently active"
+  - id: 24
+    name: "t161"
+    title: "Init push probe + brigada doctor (Closes #161)"
     class: "implement"
     deps: []
     base: ""
-    effort: high
-    state: done
-    branch: "brigada/task-47"
+    effort: medium
+    review_tier: standard
+    review_effort: medium
+    skills: ["cli-flag"]
+    state: pending
+    branch: ""
     rounds: 0
