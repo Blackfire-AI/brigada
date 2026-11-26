@@ -3,11 +3,11 @@
 # here are overwritten. It holds the graph, the task states, the branches
 # and the open questions — never transcripts.
 plan: 16
-title: "One foreman, one memory: attach is the door; retire mode A (interactive hold, quiet window, init wiring)"
+title: "Fix #53: redirect a running task without cancelling its dependents"
 repo: "github.com/Blackfire-AI/brigada"
-state: done
-created: 2026-10-20T15:04:59.234039Z
-updated: 2026-10-30T22:01:19.796764Z
+state: reviewing
+created: 2026-11-26T20:46:37.185268399Z
+updated: 2026-11-26T20:46:37.185268399Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -21,55 +21,16 @@ updated: 2026-10-30T22:01:19.796764Z
 # override the task's fix_rounds, review_rounds and restart budgets (§6.1);
 # skills name the project's skills the task carries, in order (§5.10).
 tasks:
-  - id: 52
-    name: "attach-home"
-    title: "Attach and headless foreman turns run in the foreman checkout with the user's own harness config"
-    class: "implement"
-    deps: []
-    base: ""
-    effort: high
-    state: cancelled
-    branch: "brigada/task-52"
-    rounds: 0
-  - id: 53
-    name: "drop-mode-a-core"
-    title: "Retire mode A in engine, API, MCP bridge and CLI: interactive hold, quiet window, decision_note, hold command"
-    class: "implement"
-    deps: []
-    base: ""
-    tier: heavy
-    effort: medium
-    state: done
-    branch: "brigada/task-53-r3"
-    rounds: 0
-  - id: 54
-    name: "drop-mode-a-init"
-    title: "brigada init writes no harness wiring: no router block, foreman.md, .mcp.json bridge, hook or Codex table; remove this repo's own wiring"
+  - id: 29
+    name: "t53"
+    title: "Note-to-next-job and stop_running restart (Closes #53)"
     class: "implement"
     deps: []
     base: ""
     effort: medium
-    state: retired
-    branch: "brigada/task-54-r1"
-    rounds: 0
-  - id: 55
-    name: "docs-one-foreman"
-    title: "Docs: attach is the interactive foreman; mode A retired with its reasons"
-    class: "implement"
-    deps: ["drop-mode-a-core", "drop-mode-a-init"]
-    base: "drop-mode-a-init"
-    effort: medium
-    state: retired
-    branch: "brigada/task-55"
-    rounds: 0
-  - id: 58
-    name: "hold-noop"
-    title: "Keep `brigada hold yield` and `hold confirm` as do-nothing commands for old hooks"
-    class: "implement"
-    deps: ["drop-mode-a-core"]
-    base: "drop-mode-a-core"
-    tier: light
-    effort: low
-    state: done
-    branch: "brigada/task-58"
+    review_tier: standard
+    review_effort: medium
+    skills: ["schema-migration"]
+    state: pending
+    branch: ""
     rounds: 0
