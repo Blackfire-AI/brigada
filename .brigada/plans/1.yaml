@@ -30,7 +30,7 @@ tasks:
     effort: high
     caps: {restart: 9}
     skills: ["schema-migration"]
-    state: needs_foreman
+    state: ready
     branch: ""
     rounds: 0
   - id: 2
