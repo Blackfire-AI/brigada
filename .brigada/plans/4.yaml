@@ -3,11 +3,11 @@
 # here are overwritten. It holds the graph, the task states, the branches
 # and the open questions — never transcripts.
 plan: 4
-title: "#29 Optimal model and effort: usage, cost-aware Thompson ranking, effort ladder, foreman rules"
+title: "Fix #262: headroom-zeroed account counts as cap-0 for task jobs (held until #261 is live)"
 repo: "github.com/Blackfire-AI/brigada"
-state: done
-created: 2026-10-19T21:14:17.910958Z
-updated: 2026-10-20T06:29:49.547388Z
+state: reviewing
+created: 2026-11-26T19:37:47.592978568Z
+updated: 2026-11-26T19:37:47.592978568Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -21,55 +21,17 @@ updated: 2026-10-20T06:29:49.547388Z
 # override the task's fix_rounds, review_rounds and restart budgets (§6.1);
 # skills name the project's skills the task carries, in order (§5.10).
 tasks:
-  - id: 15
-    name: "usage"
-    title: "Record usage per job and show cost per success in stats (#29 item 1)"
+  - id: 8
+    name: "fix-262"
+    title: "Dispatch: headroom-zeroed account counts as cap-0 for task jobs (Closes #262)"
     class: "implement"
     deps: []
     base: ""
+    tier: heavy
     effort: medium
-    state: done
-    branch: "brigada/task-15"
-    rounds: 0
-  - id: 16
-    name: "ranking"
-    title: "Rank agents by expected cost with Thompson sampling; medium effort default; cap-0 tiers (#29 items 2, 3, 5)"
-    class: "implement"
-    deps: []
-    base: ""
-    effort: high
-    state: done
-    branch: "brigada/task-16-r1"
-    rounds: 1
-  - id: 17
-    name: "ladder"
-    title: "Escalation ladder: effort first, then tier; no-result retries before a bump (#29 item 4)"
-    class: "implement"
-    deps: ["ranking"]
-    base: "ranking"
-    effort: medium
-    state: done
-    branch: "brigada/task-17-r1"
-    rounds: 0
-  - id: 18
-    name: "foreman-rules"
-    title: "Foreman rules for choosing tier and effort; effort in capacity (#29 item 6)"
-    class: "implement"
-    deps: []
-    base: ""
-    tier: light
-    effort: medium
-    state: cancelled
-    branch: "brigada/task-18"
-    rounds: 0
-  - id: 29
-    name: "foreman-rules-2"
-    title: "Foreman rules for choosing tier and effort; effort in capacity (#29 item 6)"
-    class: "implement"
-    deps: []
-    base: ""
-    tier: light
-    effort: medium
-    state: done
-    branch: "brigada/task-29-r1"
+    review_tier: standard
+    review_effort: medium
+    skills: ["bugfix"]
+    state: pending
+    branch: ""
     rounds: 0
