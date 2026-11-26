@@ -5,9 +5,9 @@
 plan: 13
 title: "Fix #123: per-task tool grants"
 repo: "github.com/Blackfire-AI/brigada"
-state: needs_foreman
+state: reviewing
 created: 2026-11-26T20:46:37.109826591Z
-updated: 2026-11-26T22:40:19.426292462Z
+updated: 2026-11-26T22:43:27.572005909Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -57,18 +57,18 @@ tasks:
     tier: heavy
     effort: medium
     skills: ["schema-migration"]
-    state: reviewing
+    state: cancelled
     branch: "brigada/task-44"
     rounds: 1
   - id: 45
     name: "grants-surfaces"
     title: "Per-task tool grants: MCP, CLI, API, status, history, plan file (Refs #123)"
     class: "implement"
-    deps: ["grants-core"]
-    base: "grants-core"
-    continue: "grants-core"
+    deps: ["grants-core-v2"]
+    base: "grants-core-v2"
+    continue: "grants-core-v2"
     effort: medium
-    skills: ["surface-parity"]
+    skills: ["surface-parity", "cli-flag"]
     state: pending
     branch: ""
     rounds: 0
@@ -79,6 +79,7 @@ tasks:
     deps: ["grants-surfaces"]
     base: "grants-surfaces"
     continue: "grants-surfaces"
+    tier: heavy
     effort: medium
     skills: ["config-setting", "surface-parity"]
     state: pending
@@ -93,6 +94,18 @@ tasks:
     tier: light
     effort: low
     skills: ["docs-change"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 56
+    name: "grants-core-v2"
+    title: "Per-task tool grants core: reuse task-44 with the migration renumber and git-add allowlist (Refs #123)"
+    class: "implement"
+    deps: []
+    base: ""
+    tier: heavy
+    effort: medium
+    skills: ["schema-migration"]
     state: pending
     branch: ""
     rounds: 0
