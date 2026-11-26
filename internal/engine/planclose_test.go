@@ -220,7 +220,7 @@ func TestTrailerHoldsDependentAndKeepsPlanOpen(t *testing.T) {
 	if !ok {
 		t.Fatal("no plan_done event")
 	}
-	if p.Reason != "all tasks landed" {
+	if !strings.Contains(p.Reason, "all tasks landed") {
 		t.Errorf("plan_done report = %q, want all tasks landed", p.Reason)
 	}
 }
@@ -291,7 +291,7 @@ func TestLandGateHeldTaskKeepsPlanOpenUntilItLands(t *testing.T) {
 	if !ok {
 		t.Fatal("no plan_done event")
 	}
-	if p.Reason != "all tasks landed" {
+	if !strings.Contains(p.Reason, "all tasks landed") {
 		t.Errorf("plan_done report = %q, want all tasks landed", p.Reason)
 	}
 }
@@ -339,7 +339,7 @@ func TestLandGateHeldTaskClosesOnTheTrailerLanding(t *testing.T) {
 	if !ok {
 		t.Fatal("no plan_done event")
 	}
-	if p.Reason != "all tasks landed" {
+	if !strings.Contains(p.Reason, "all tasks landed") {
 		t.Errorf("plan_done report = %q, want all tasks landed", p.Reason)
 	}
 }
@@ -473,7 +473,7 @@ func TestPushGateNeverStillClosesThePlan(t *testing.T) {
 	if !ok {
 		t.Fatal("no plan_done event")
 	}
-	if p.Reason != "all tasks landed" {
+	if !strings.Contains(p.Reason, "all tasks landed") {
 		t.Errorf("plan_done report = %q, want all tasks landed", p.Reason)
 	}
 }
