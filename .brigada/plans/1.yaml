@@ -30,7 +30,7 @@ tasks:
     tier: heavy
     effort: high
     skills: ["schema-migration"]
-    state: ready
+    state: running
     branch: ""
     rounds: 0
   - id: 2
@@ -64,7 +64,7 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    state: ready
+    state: running
     branch: ""
     rounds: 0
   - id: 5
