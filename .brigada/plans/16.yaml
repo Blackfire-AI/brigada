@@ -82,7 +82,6 @@ tasks:
     base: ""
     effort: medium
     skills: ["schema-migration", "surface-parity"]
-    state: needs_foreman
+    state: ready
     branch: ""
     rounds: 0
-    question: "Please sync brigada/landed (or rebase this task's worktree) so it includes PR #265 with 0080_landing_trailer.sql, then re-dispatch this task; on that synced base I would add 0081 as specified."
