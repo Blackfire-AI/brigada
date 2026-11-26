@@ -3,11 +3,11 @@
 # here are overwritten. It holds the graph, the task states, the branches
 # and the open questions — never transcripts.
 plan: 11
-title: "Reduce token consumption: measure, step economy, warm sessions, batching"
+title: "Landing machinery: land-target sync (#127) then batch landing (#134)"
 repo: "github.com/Blackfire-AI/brigada"
-state: done
-created: 2026-10-20T11:06:42.957904Z
-updated: 2026-10-20T13:10:09.518848Z
+state: reviewing
+created: 2026-11-26T20:46:37.060237154Z
+updated: 2026-11-26T20:46:37.060237154Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -21,65 +21,32 @@ updated: 2026-10-20T13:10:09.518848Z
 # override the task's fix_rounds, review_rounds and restart budgets (§6.1);
 # skills name the project's skills the task carries, in order (§5.10).
 tasks:
-  - id: 40
-    name: "usage-measure"
-    title: "Usage counted the same way across adapters, and model calls per job (#38)"
+  - id: 22
+    name: "sync-127"
+    title: "Implement land-target sync as designed in §7.1 (Closes #127)"
     class: "implement"
     deps: []
     base: ""
+    tier: heavy
     effort: medium
-    state: done
-    branch: "brigada/task-40"
+    review_tier: standard
+    review_effort: medium
+    skills: ["schema-migration"]
+    state: pending
+    branch: ""
     rounds: 0
-  - id: 41
-    name: "step-economy"
-    title: "Worker and reviewer prompts: fewer, larger steps"
+  - id: 23
+    name: "batch-134"
+    title: "Implement batch landing as designed in §7.1 (Closes #134)"
     class: "implement"
-    deps: []
-    base: ""
+    deps: ["sync-127"]
+    base: "sync-127"
+    continue: "sync-127"
+    tier: heavy
     effort: medium
-    state: done
-    branch: "brigada/task-41"
+    review_tier: standard
+    review_effort: medium
+    skills: ["schema-migration", "config-setting"]
+    state: pending
+    branch: ""
     rounds: 0
-  - id: 42
-    name: "rereview-session"
-    title: "Re-review after a fix round resumes the reviewer's session"
-    class: "implement"
-    deps: []
-    base: ""
-    effort: high
-    state: done
-    branch: "brigada/task-42"
-    rounds: 0
-  - id: 43
-    name: "continue-session"
-    title: "A task may continue its dependency's worker session (opt-in)"
-    class: "implement"
-    deps: ["rereview-session"]
-    base: "rereview-session"
-    effort: high
-    state: cancelled
-    branch: "brigada/task-43"
-    rounds: 1
-  - id: 44
-    name: "foreman-batching"
-    title: "Foreman rules: batch small edits, continue sessions in a chain"
-    class: "implement"
-    deps: ["step-economy", "continue-2"]
-    base: ""
-    tier: light
-    effort: medium
-    state: done
-    branch: "brigada/task-44"
-    rounds: 0
-  - id: 48
-    name: "continue-2"
-    title: "continue sessions: finish from task 43 and fix the base rule"
-    class: "implement"
-    deps: []
-    base: ""
-    effort: medium
-    state: done
-    branch: "brigada/task-48"
-    rounds: 0
-    extra_repos: [["prior", "github.com/Blackfire-AI/brigada", "2617fd93330e5af61cba46414e75701f0c79a716"]]
