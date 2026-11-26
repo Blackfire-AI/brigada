@@ -3,11 +3,11 @@
 # here are overwritten. It holds the graph, the task states, the branches
 # and the open questions — never transcripts.
 plan: 14
-title: "Cheaper reviews: review tier and effort set apart from the task's (#34)"
+title: "Fix #110: issue_read for Gitea-API forges"
 repo: "github.com/Blackfire-AI/brigada"
-state: done
-created: 2026-10-20T14:14:19.803795Z
-updated: 2026-10-20T18:05:06.465134Z
+state: reviewing
+created: 2026-11-26T20:46:37.136764596Z
+updated: 2026-11-26T20:46:37.136764596Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -21,13 +21,16 @@ updated: 2026-10-20T18:05:06.465134Z
 # override the task's fix_rounds, review_rounds and restart budgets (§6.1);
 # skills name the project's skills the task carries, in order (§5.10).
 tasks:
-  - id: 50
-    name: "review-tier"
-    title: "Review jobs choose their tier and effort apart from the task's (#34)"
+  - id: 27
+    name: "t110"
+    title: "Tracker settings, per-host token refs, Gitea fetcher beside ghIssueFetch (Closes #110)"
     class: "implement"
     deps: []
     base: ""
-    effort: high
-    state: cancelled
-    branch: "brigada/task-50-r1"
+    effort: medium
+    review_tier: standard
+    review_effort: medium
+    skills: ["config-setting", "surface-parity"]
+    state: pending
+    branch: ""
     rounds: 0
