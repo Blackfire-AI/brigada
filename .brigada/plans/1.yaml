@@ -7,7 +7,7 @@ title: "Issue #259 first slice: guidance, plan monitoring, landing barrier, amen
 repo: "github.com/Blackfire-AI/brigada"
 state: active
 created: 2026-11-26T16:13:28.485100341Z
-updated: 2026-11-26T16:29:30.887594891Z
+updated: 2026-11-26T16:35:27.84988238Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -28,7 +28,8 @@ tasks:
     deps: []
     base: ""
     tier: heavy
-    effort: high
+    effort: medium
+    caps: {restart: 5}
     skills: ["schema-migration"]
     state: needs_foreman
     branch: ""
@@ -64,6 +65,7 @@ tasks:
     deps: []
     base: ""
     effort: medium
+    caps: {restart: 6}
     state: needs_foreman
     branch: ""
     rounds: 0
