@@ -3,11 +3,11 @@
 # here are overwritten. It holds the graph, the task states, the branches
 # and the open questions — never transcripts.
 plan: 7
-title: "opencode reset time and project isolation; 1.0 compatibility statement (#22)"
+title: "Fix #254: flaky lifecycle test seeds example.com"
 repo: "github.com/Blackfire-AI/brigada"
-state: done
-created: 2026-10-20T00:47:38.936768Z
-updated: 2026-10-20T06:32:34.010451Z
+state: reviewing
+created: 2026-11-26T20:42:36.030416107Z
+updated: 2026-11-26T20:42:36.030416107Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -21,44 +21,17 @@ updated: 2026-10-20T06:32:34.010451Z
 # override the task's fix_rounds, review_rounds and restart budgets (§6.1);
 # skills name the project's skills the task carries, in order (§5.10).
 tasks:
-  - id: 25
-    name: "opencode-reset"
-    title: "Read opencode/Z.ai's usage-limit reset time"
-    class: "implement"
-    deps: []
-    base: ""
-    effort: medium
-    state: done
-    branch: "brigada/task-25"
-    rounds: 0
-  - id: 26
-    name: "opencode-project"
-    title: "opencode must treat the job worktree as its project"
-    class: "implement"
-    deps: []
-    base: ""
-    effort: high
-    state: cancelled
-    branch: "brigada/task-26"
-    rounds: 0
-  - id: 27
-    name: "compat"
-    title: "Compatibility statement for 1.0 (#22)"
+  - id: 14
+    name: "t254"
+    title: "Seed example.invalid in the three flaky lifecycle test projects (Closes #254)"
     class: "implement"
     deps: []
     base: ""
     tier: light
-    effort: medium
-    state: done
-    branch: "brigada/task-27"
-    rounds: 1
-  - id: 28
-    name: "worker-pwd"
-    title: "Set PWD to the job's worktree for every worker and reviewer command"
-    class: "implement"
-    deps: []
-    base: ""
-    effort: medium
-    state: done
-    branch: "brigada/task-28"
+    effort: low
+    review_tier: standard
+    review_effort: medium
+    skills: ["bugfix"]
+    state: pending
+    branch: ""
     rounds: 0
