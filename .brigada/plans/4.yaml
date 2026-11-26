@@ -5,9 +5,9 @@
 plan: 4
 title: "Fix #262: headroom-zeroed account counts as cap-0 for task jobs (held until #261 is live)"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: reviewing
 created: 2026-11-26T19:37:47.592978568Z
-updated: 2026-11-26T20:37:50.880354806Z
+updated: 2026-11-26T20:46:36.933741229Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -33,5 +33,34 @@ tasks:
     review_effort: medium
     skills: ["bugfix"]
     state: ready
+    branch: ""
+    rounds: 0
+  - id: 19
+    name: "placement-pipeline"
+    title: "Unified placement pipeline with capability floors (Refs #263)"
+    class: "implement"
+    deps: ["fix-262"]
+    base: "fix-262"
+    tier: heavy
+    effort: medium
+    review_tier: standard
+    review_effort: medium
+    skills: ["refactor"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 20
+    name: "placement-outcomes"
+    title: "Per-attempt exclusions, representative outcome accounting, bounded retries, placement observability (Refs #263)"
+    class: "implement"
+    deps: ["placement-pipeline"]
+    base: "placement-pipeline"
+    continue: "placement-pipeline"
+    tier: heavy
+    effort: medium
+    review_tier: standard
+    review_effort: medium
+    skills: ["bugfix"]
+    state: pending
     branch: ""
     rounds: 0
