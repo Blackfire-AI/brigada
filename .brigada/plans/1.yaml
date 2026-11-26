@@ -5,9 +5,9 @@
 plan: 1
 title: "Issue #259 first slice: guidance, plan monitoring, landing barrier, amendment envelope, done-report actuals"
 repo: "github.com/Blackfire-AI/brigada"
-state: needs_foreman
+state: reviewing
 created: 2026-11-26T16:13:28.485100341Z
-updated: 2026-11-26T16:22:28.746886267Z
+updated: 2026-11-26T16:24:26.369811804Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -37,8 +37,8 @@ tasks:
     name: "monitoring"
     title: "Plan-scoped history/status monitoring with JSON output"
     class: "implement"
-    deps: []
-    base: ""
+    deps: ["barrier"]
+    base: "barrier"
     effort: medium
     review_tier: standard
     skills: ["cli-flag", "surface-parity"]
@@ -49,8 +49,9 @@ tasks:
     name: "envelope"
     title: "Amendment task-count envelope and structural preflight"
     class: "implement"
-    deps: []
-    base: ""
+    deps: ["barrier"]
+    base: "barrier"
+    continue: "barrier"
     effort: medium
     review_tier: standard
     state: pending
