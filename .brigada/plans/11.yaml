@@ -5,9 +5,9 @@
 plan: 11
 title: "Landing machinery: land-target sync (#127) then batch landing (#134)"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: reviewing
 created: 2026-11-26T20:46:37.060237154Z
-updated: 2026-11-26T22:42:49.447730856Z
+updated: 2026-11-26T22:49:36.543099648Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -32,7 +32,7 @@ tasks:
     review_tier: standard
     review_effort: medium
     skills: ["schema-migration"]
-    state: ready
+    state: cancelled
     branch: ""
     rounds: 0
   - id: 23
@@ -47,6 +47,153 @@ tasks:
     review_tier: standard
     review_effort: medium
     skills: ["schema-migration", "config-setting"]
+    state: cancelled
+    branch: ""
+    rounds: 0
+  - id: 57
+    name: "sync-engine"
+    title: "Land-target sync: migration and engine sync job (Refs #127)"
+    class: "implement"
+    deps: []
+    base: ""
+    tier: heavy
+    effort: medium
+    skills: ["schema-migration"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 58
+    name: "sync-runner"
+    title: "Land-target sync: runner merge and auto push (Refs #127)"
+    class: "implement"
+    deps: ["sync-engine"]
+    base: "sync-engine"
+    continue: "sync-engine"
+    tier: heavy
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 59
+    name: "sync-waiting"
+    title: "Land-target sync: ask/never waiting ref, trailer, conflict (Refs #127)"
+    class: "implement"
+    deps: ["sync-runner"]
+    base: "sync-runner"
+    continue: "sync-runner"
+    tier: heavy
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 60
+    name: "sync-surfaces"
+    title: "Land-target sync: commits-behind status and foreman prompt (Refs #127)"
+    class: "implement"
+    deps: ["sync-waiting"]
+    base: "sync-waiting"
+    continue: "sync-waiting"
+    effort: medium
+    skills: ["surface-parity"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 61
+    name: "sync-docs"
+    title: "Land-target sync: docs and CHANGELOG (Closes #127)"
+    class: "implement"
+    deps: ["sync-surfaces"]
+    base: "sync-surfaces"
+    continue: "sync-surfaces"
+    tier: light
+    effort: low
+    skills: ["docs-change"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 62
+    name: "batch-setting"
+    title: "Batch landing: land_batch_max setting and reservation migration (Refs #134)"
+    class: "implement"
+    deps: ["sync-docs"]
+    base: "sync-docs"
+    continue: "sync-docs"
+    effort: medium
+    skills: ["config-setting", "schema-migration"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 63
+    name: "batch-formation"
+    title: "Batch landing: engine formation, reservation and readers (Refs #134)"
+    class: "implement"
+    deps: ["batch-setting"]
+    base: "batch-setting"
+    continue: "batch-setting"
+    tier: heavy
+    effort: medium
+    skills: ["schema-migration"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 64
+    name: "batch-run"
+    title: "Batch landing: runner batch run, park-alone, publishing, retries (Refs #134)"
+    class: "implement"
+    deps: ["batch-formation"]
+    base: "batch-formation"
+    continue: "batch-formation"
+    tier: heavy
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 65
+    name: "batch-holds"
+    title: "Batch landing: per-member gate holds and push-phase holds (Refs #134)"
+    class: "implement"
+    deps: ["batch-run"]
+    base: "batch-run"
+    continue: "batch-run"
+    tier: heavy
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 66
+    name: "batch-evidence"
+    title: "Batch landing: checked-head evidence, baselines and suspects (Refs #134)"
+    class: "implement"
+    deps: ["batch-holds"]
+    base: "batch-holds"
+    continue: "batch-holds"
+    tier: heavy
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 67
+    name: "batch-recovery"
+    title: "Batch landing: lost-runner reconciliation and completion accounting (Refs #134)"
+    class: "implement"
+    deps: ["batch-evidence"]
+    base: "batch-evidence"
+    continue: "batch-evidence"
+    tier: heavy
+    effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 68
+    name: "batch-docs"
+    title: "Batch landing: docs, banners and CHANGELOG (Closes #134)"
+    class: "implement"
+    deps: ["batch-recovery"]
+    base: "batch-recovery"
+    continue: "batch-recovery"
+    tier: light
+    effort: low
+    skills: ["docs-change"]
     state: pending
     branch: ""
     rounds: 0
