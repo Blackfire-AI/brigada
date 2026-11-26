@@ -32,8 +32,8 @@ type continuedPlacement struct {
 // session (§6.1), in the caller's transaction: nil when the task
 // continues nothing, and nil with no error for every fallback too — the
 // unknown session id, the author with no agent, the agent gone, broken,
-// capped at 0 or cooling (§8), and the agent outside
-// the task's effective tier. The checks are the dispatcher's own words
+// capped at 0 (configured or headroom-zeroed, §8.2) or cooling (§8), and
+// the agent outside the task's effective tier. The checks are the dispatcher's own words
 // for an agent that cannot take the job now, so a continuation never
 // waits on an agent the fresh work job would not have been pinned to.
 func (e *Engine) continuePlacementTx(tx *sql.Tx, taskID int64, now time.Time) (*continuedPlacement, error) {
@@ -81,10 +81,21 @@ func (e *Engine) continuePlacementTx(tx *sql.Tx, taskID int64, now time.Time) (*
 	if err := tx.QueryRow("SELECT effective_tier FROM tasks WHERE id = ?", taskID).Scan(&tier); err != nil {
 		return nil, fmt.Errorf("read the tier of task %d: %w", taskID, err)
 	}
+	// The placement is a task work job, so headroom applies (§8.2): the
+	// project comes through the task's plan, and a headroom-zeroed account
+	// counts as capped at 0 exactly as the dispatcher's zero-cap rules read it.
+	var project int64
+	if err := tx.QueryRow(`SELECT pl.project_id FROM tasks t JOIN plans pl ON pl.id = t.plan_id WHERE t.id = ?`, taskID).Scan(&project); err != nil {
+		return nil, fmt.Errorf("read the project of task %d: %w", taskID, err)
+	}
+	foreman, err := foremanAccountSetTx(tx, e.cfg.Caps, project)
+	if err != nil {
+		return nil, err
+	}
 	switch {
 	case health != "ready":
 		return nil, nil
-	case cappedAtZero(e.cfg.Caps, account, model):
+	case cappedAtZero(e.cfg.Caps, foreman, account, model):
 		return nil, nil
 	case cooling > fmtTime(now):
 		return nil, nil

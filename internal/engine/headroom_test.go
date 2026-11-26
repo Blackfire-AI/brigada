@@ -1,7 +1,7 @@
 package engine
 
 import (
-	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -48,27 +48,170 @@ func TestHeadroomLowersTaskCap(t *testing.T) {
 }
 
 // TestHeadroomAtCapOneNeverLeases: at account cap 1 task workers never
-// run on the foreman's account, and the held job waits past the queue
-// TTL: it is stamped, never parked.
+// run on the foreman's account. The headroom-zeroed account counts as
+// cap-0 (§8), so no cap-hold is stamped for it; with no other tier or
+// account able to serve the claude-harnessed task, it is an unmet
+// placement the queue TTL parks — never a forever hold.
 func TestHeadroomAtCapOneNeverLeases(t *testing.T) {
-	e := headroomEnv(t, 1, nil)
-	held := e.submit(e.workOnHarness("claude"))
+	e := headroomEnv(t, 1, func(c *Config) { c.RunnerStale = time.Hour })
+	job := e.submit(e.workOnHarness("claude"))
 	if g := e.lease(e.runner1, []string{"claude"}, nil); g != nil {
 		t.Fatalf("a task leased job %d on the foreman's account at cap 1", g.JobID)
 	}
-	e.assertHeld(held.JobID, caps.LayerAccount)
+	if got := e.heldLayer(job.JobID); got != "" {
+		t.Errorf("hold layer = %q, want none: a headroom-zeroed account is cap-0", got)
+	}
+	if layers := e.capHeldLayers(job.JobID); len(layers) != 0 {
+		t.Errorf("job_cap_held events = %v, want none", layers)
+	}
+	e.elapse(e.eng.cfg.QueueTTL + time.Minute)
+	if status := e.str("SELECT status FROM jobs WHERE id = ?", job.JobID); status != statusFailed {
+		t.Fatalf("job status = %q, want failed by the queue TTL, not a forever hold", status)
+	}
+	result := e.str("SELECT result FROM jobs WHERE id = ?", job.JobID)
+	for _, want := range []string{"queue TTL exceeded", "no agent of tier standard"} {
+		if !strings.Contains(result, want) {
+			t.Errorf("result = %q, want it to contain %q", result, want)
+		}
+	}
+}
 
-	e.clock.Advance(e.eng.cfg.QueueTTL / 2)
-	if g := e.lease(e.runner1, []string{"claude"}, nil); g != nil {
-		t.Fatalf("a task leased job %d on the foreman's account at cap 1", g.JobID)
+// TestHeadroomZeroedTierFallsBack: the asked tier is served only by a
+// headroom-zeroed agent on the foreman's account, while a ready agent of
+// another tier sits on another account, so the job falls back per §8 —
+// climbing, then stepping down from heavy — and leases there, never
+// cap-held on the foreman account.
+func TestHeadroomZeroedTierFallsBack(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		asked  string
+		served string
+		seed   func(e *env) int64 // the available agent of another tier
+	}{
+		{name: "climb", asked: "standard", served: "heavy", seed: func(e *env) int64 {
+			return e.addAgent(e.runner1, "claude", "opus", "personal")
+		}},
+		{name: "step down", asked: "heavy", served: "light", seed: func(e *env) int64 {
+			e.seedAgent(e.runner1, "claude", "claude", "opus", "work") // heavy on the foreman account, zeroed too
+			return e.addAgent(e.runner1, "claude", "haiku", "personal")
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := headroomEnv(t, 1, nil)
+			// The only standard agent must be the foreman-account one the
+			// fixture seeds; the personal standard agent would serve the tier.
+			e.exec("DELETE FROM agents WHERE harness = 'kimi'")
+			want := tc.seed(e)
+			job := e.tierWork(tc.asked)
+			g := e.leaseAny(e.runner1)
+			if g == nil || g.JobID != job.JobID {
+				t.Fatalf("lease = %+v, want task %d to fall back to the %s tier", g, job.JobID, tc.served)
+			}
+			e.assertTierPick(job.JobID, want, tc.asked, tc.served)
+		})
 	}
-	e.clock.Advance(e.eng.cfg.QueueTTL/2 + 2*time.Minute)
-	rep := e.mustSweep()
-	if slices.Contains(rep.QueueTimedOut, held.JobID) {
-		t.Errorf("sweep timed out the headroom-held job %d; it waits, never parks", held.JobID)
+}
+
+// TestHeadroomZeroedReviewFallsBack: a review whose asked tier is served
+// only by a headroom-zeroed reviewer on the foreman's account falls back
+// to an available reviewer of another tier, as a work job does.
+func TestHeadroomZeroedReviewFallsBack(t *testing.T) {
+	e := headroomEnv(t, 1, func(c *Config) {
+		c.Caps.Tier = map[string]string{"claude/sonnet": "heavy"}
+	})
+	e.exec("DELETE FROM agents WHERE harness = 'kimi'")
+	glm := e.addAgent(e.runner1, "opencode", "glm-5", "personal")
+	task := e.addTask("{}")
+	e.exec("UPDATE tasks SET tier = 'heavy', effective_tier = 'heavy', review_tier = 'heavy' WHERE id = ?", task)
+	p := e.workOn(task)
+	p.Kind = KindReview
+	p.ExcludeFamily = "codex"
+	job := e.submit(p)
+	g := e.leaseAny(e.runner1)
+	if g == nil || g.JobID != job.JobID {
+		t.Fatalf("lease = %+v, want review %d to fall back to the standard tier", g, job.JobID)
 	}
-	if status := e.str("SELECT status FROM jobs WHERE id = ?", held.JobID); status != statusQueued {
-		t.Errorf("held job status = %q, want queued", status)
+	e.assertTierPick(job.JobID, glm, "heavy", "standard")
+}
+
+// TestHeadroomPinnedJobParksNamingAccount: a job pinned to a
+// headroom-zeroed agent has no candidate, so it is neither cap-held nor
+// cooling-held (even when the agent also cools); the queue TTL parks it
+// with a reason naming the pin and the account layer, and the capacity
+// snapshot reads the pin as capped_at_0.
+func TestHeadroomPinnedJobParksNamingAccount(t *testing.T) {
+	for _, cool := range []bool{false, true} {
+		name := "account"
+		if cool {
+			name += " cooling"
+		}
+		t.Run(name, func(t *testing.T) {
+			e := headroomEnv(t, 1, func(c *Config) { c.RunnerStale = time.Hour })
+			sonnet := e.int("SELECT id FROM agents WHERE harness = 'claude'")
+			if cool {
+				e.coolUntil(sonnet, time.Hour) // longer than the TTL
+			}
+			fix := e.pinnedFix(sonnet)
+
+			e.elapse(5 * time.Minute)
+			if g := e.lease(e.runner1, nil, nil); g != nil {
+				t.Fatalf("leased job %d on a headroom-zeroed agent", g.JobID)
+			}
+			e.mustSweep()
+			if got := e.heldLayer(fix.JobID); got != "" {
+				t.Errorf("hold layer = %q, want none: a headroom-zeroed account is an unmet placement", got)
+			}
+			if layers := e.capHeldLayers(fix.JobID); len(layers) != 0 {
+				t.Errorf("job_cap_held events = %v, want none", layers)
+			}
+			snap, err := e.eng.Capacity(e.ctx, e.project)
+			if err != nil {
+				t.Fatalf("capacity: %v", err)
+			}
+			if len(snap.Pins) != 1 || snap.Pins[0].JobID != fix.JobID || snap.Pins[0].State != PinCappedAtZero {
+				t.Errorf("pins = %+v, want job %d capped_at_0", snap.Pins, fix.JobID)
+			}
+
+			e.elapse(5*time.Minute + time.Second)
+			if status := e.str("SELECT status FROM jobs WHERE id = ?", fix.JobID); status != statusFailed {
+				t.Fatalf("status = %q, want failed by the queue TTL", status)
+			}
+			result := e.str("SELECT result FROM jobs WHERE id = ?", fix.JobID)
+			for _, want := range []string{"queue TTL exceeded", "pinned to claude/sonnet", "capped at 0 at the account layer"} {
+				if !strings.Contains(result, want) {
+					t.Errorf("result = %q, want it to contain %q", result, want)
+				}
+			}
+		})
+	}
+}
+
+// TestContinueFallsBackWhenAuthorHeadroomZeroed: a continuing task whose
+// dep author sits on a headroom-zeroed account starts fresh and unpinned,
+// as it does for an author capped at a configured 0.
+func TestContinueFallsBackWhenAuthorHeadroomZeroed(t *testing.T) {
+	e := newEnvCfg(t, func(c *Config) { c.Caps.NoHeadroom = true })
+	e.seedAgent(e.runner1, "claude", "claude", "sonnet", "work")
+	res := e.continuePlan("answer")
+	g := e.lease(e.runner1, []string{"claude"}, nil)
+	if g == nil {
+		t.Fatal("build's work job was not leased")
+	}
+	// Headroom on and the foreman account capped at 1: the author is
+	// headroom-zeroed when the dependent starts.
+	e.eng.cfg.Caps.NoHeadroom = false
+	e.eng.cfg.Caps.Account = map[string]int{"work": 1}
+	c := doneOn(branchOf(g.TaskID), "")
+	c.SessionID = "hs-build-1"
+	if ans := e.complete(g, c); ans != AnsOK {
+		t.Fatalf("complete build: %s", ans)
+	}
+	job := e.shipJob(res)
+	if got := e.str("SELECT mode FROM jobs WHERE id = ?", job); got != string(ModeFresh) {
+		t.Errorf("mode = %q, want fresh", got)
+	}
+	if agent := e.int("SELECT COALESCE(require_agent, 0) FROM jobs WHERE id = ?", job); agent != 0 {
+		t.Errorf("required agent = %d, want none", agent)
 	}
 }
 

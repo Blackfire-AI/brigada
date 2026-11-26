@@ -18,8 +18,9 @@ import (
 //     reference types the value as a model-dependent string, so this is
 //     brigada's accepted set, not a claim that every model supports every
 //     value — the CLI judges that.
-//   - opencode: `opencode run --variant <v>` accepts provider-specific names,
-//     validated separately rather than restricted to a fixed list.
+//   - opencode: `-m provider/model#variant` carries a provider-specific
+//     name as a #variant suffix on the model, validated separately rather
+//     than restricted to a fixed list.
 //   - dsh: the patch file's reasoningEffort takes off, low, high, max (no
 //     medium); the adapter writes it into a per-job patch file.
 //   - kimi: the CLI documents no effort option; refused.

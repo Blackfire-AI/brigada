@@ -1054,10 +1054,11 @@ func eligibleAgentsTx(tx *sql.Tx, cfg *Config, rnd func() float64, runner int64,
 // but cannot take it yet — with their model, health and cooling
 // deadline filled in: what the cooling hold (§8.1) and the queue-TTL
 // park reason read. Either way an agent whose account — or, for any kind
-// but a foreman turn, whose model — is capped at exactly 0 is left out
-// (zeroCapLayer, issue #195): it can never take the job, so it is not a
-// candidate, an automatic retry's pin or what the cooling hold waits on;
-// a merely full cap is the lease's cap gate, as before. Unpinned task jobs are restricted to the served tier
+// but a foreman turn, whose model — is capped at exactly 0, configured or
+// headroom-zeroed for a task job (§8.2), is left out (zeroCapLayer, issue
+// #195): it can never take the job, so it is not a candidate, an automatic
+// retry's pin or what the cooling hold waits on; a merely full cap is the
+// lease's cap gate, as before. Unpinned task jobs are restricted to the served tier
 // before availability is checked: the task's effective tier for a work or
 // fix job, the review tier for a review (jobTierTx). A review retry's agent exclusion is
 // applied as the preference it is (§7): the lift is decided inside
@@ -1070,14 +1071,17 @@ func qualifyingAgentsTx(tx *sql.Tx, cfg *Config, rnd func() float64, runner int6
 		return preferReviewAgentsTx(tx, cfg, rnd, runner, j, class, now, unavailable)
 	}
 	limits := cfg.Caps
+	foreman, err := foremanAccountSetTx(tx, limits, j.ProjectID)
+	if err != nil {
+		return nil, err
+	}
 	asked, served := "", ""
 	if j.TaskID != 0 && j.Kind != KindForeman {
-		var err error
 		if asked, err = jobTierTx(tx, cfg.Review, j); err != nil {
 			return nil, err
 		}
 		if j.RequireAgent == 0 {
-			served, err = tierServedTx(tx, cfg.Review.Family, limits, j, class, asked, now)
+			served, err = tierServedTx(tx, cfg.Review.Family, limits, foreman, j, class, asked, now)
 			if err != nil {
 				return nil, err
 			}
@@ -1086,11 +1090,10 @@ func qualifyingAgentsTx(tx *sql.Tx, cfg *Config, rnd func() float64, runner int6
 		// A plan review (§6.2) has no task to name a tier: the
 		// project's plan_review.tier asks, and the tier fallback below
 		// serves, as a task review's does.
-		var err error
 		if asked, err = planReviewTierTx(tx, cfg, j); err != nil {
 			return nil, err
 		}
-		served, err = tierServedTx(tx, cfg.Review.Family, limits, j, class, asked, now)
+		served, err = tierServedTx(tx, cfg.Review.Family, limits, foreman, j, class, asked, now)
 		if err != nil {
 			return nil, err
 		}
@@ -1100,10 +1103,11 @@ func qualifyingAgentsTx(tx *sql.Tx, cfg *Config, rnd func() float64, runner int6
 		return nil, err
 	}
 	var cands []agentCand
-	// An agent capped at exactly 0 for this kind of job is dropped
-	// whatever unavailable says (issue #195): a pin on one gets no
-	// candidate, an unmet placement the queue TTL parks.
-	for _, c := range dropZeroCapped(limits, j.Kind, rows) {
+	// An agent capped at exactly 0 for this kind of job — configured, or
+	// headroom-zeroed for a task job (§8.2) — is dropped whatever
+	// unavailable says (issue #195): a pin on one gets no candidate, an
+	// unmet placement the queue TTL parks.
+	for _, c := range dropZeroCapped(limits, foreman, j.Kind, rows) {
 		tier := limits.TierOf(c.harness, c.model)
 		if served != "" && tier != served {
 			continue
@@ -1128,17 +1132,18 @@ func qualifyingAgentsTx(tx *sql.Tx, cfg *Config, rnd func() float64, runner int6
 // An agent counts as available for its tier only when it is ready and not
 // cooling at all: an agent whose cooling_until is ahead of now, whatever
 // the distance to the reset, is unavailable, like a broken one. A model or
-// account capped at exactly 0 can never take a job, so its agents
-// do not count as ready; a cap that is merely full still waits (§8). Other
-// caps are applied later, after the tier is fixed. When no tier has an
-// available agent but some agents are only cooling, the tier of the agent
-// that resets first is served, so the job waits for the earliest reset.
-func tierServedTx(tx *sql.Tx, reviewFamily string, limits caps.Limits, j *jobRow, class, asked, now string) (string, error) {
+// account capped at exactly 0 — configured, or headroom-zeroed for a task
+// job (§8.2) — can never take a job, so its agents do not count as ready;
+// a cap that is merely full still waits (§8). Other caps are applied
+// later, after the tier is fixed. When no tier has an available agent but
+// some agents are only cooling, the tier of the agent that resets first is
+// served, so the job waits for the earliest reset.
+func tierServedTx(tx *sql.Tx, reviewFamily string, limits caps.Limits, foreman map[string]bool, j *jobRow, class, asked, now string) (string, error) {
 	agents, err := qualifyingAgentRowsTx(tx, reviewFamily, 0, j, class, now)
 	if err != nil {
 		return "", err
 	}
-	return tierServedRows(limits, agents, asked, now), nil
+	return tierServedRows(limits, foreman, agents, asked, now), nil
 }
 
 // tierServedRows is tierServedTx's choice over a given set of qualifying
@@ -1147,12 +1152,12 @@ func tierServedTx(tx *sql.Tx, reviewFamily string, limits caps.Limits, j *jobRow
 // so the job waits for the earliest reset. The prefer placement (issue
 // #126) applies it within one family step alone, so the steps outrank
 // the tier.
-func tierServedRows(limits caps.Limits, agents []agentCand, asked, now string) string {
+func tierServedRows(limits caps.Limits, foreman map[string]bool, agents []agentCand, asked, now string) string {
 	hasReady := map[string]bool{}
 	var soonest string
 	soonestTiers := map[string]bool{}
 	for _, a := range agents {
-		if a.health != "ready" || cappedAtZero(limits, a.account, a.model) {
+		if a.health != "ready" || cappedAtZero(limits, foreman, a.account, a.model) {
 			continue
 		}
 		tier := limits.TierOf(a.harness, a.model)
@@ -1173,26 +1178,40 @@ func tierServedRows(limits caps.Limits, agents []agentCand, asked, now string) s
 	return tierServed(asked, hasReady)
 }
 
+// headroomZeroed reports whether the headroom rule (§8.2) zeroes the
+// account's cap for a task job: headroom on, the account one of the
+// project's foreman accounts, and HeadroomCap of its configured cap 0. An
+// account with no configured cap is never headroom-zeroed.
+func headroomZeroed(limits caps.Limits, foreman map[string]bool, account string) bool {
+	if limits.NoHeadroom || !foreman[account] {
+		return false
+	}
+	n, ok := limits.Account[account]
+	return ok && caps.HeadroomCap(n) == 0
+}
+
 // cappedAtZero reports whether the model's cap or the account's cap is
-// configured as exactly 0 (§8.1).
-func cappedAtZero(limits caps.Limits, account, model string) bool {
+// configured as exactly 0 (§8.1), or the account's cap is headroom-zeroed
+// for a task job (§8.2). Its callers place task jobs alone.
+func cappedAtZero(limits caps.Limits, foreman map[string]bool, account, model string) bool {
 	if n, ok := limits.Model[model]; ok && n == 0 {
 		return true
 	}
 	n, ok := limits.Account[account]
-	return ok && n == 0
+	return ok && (n == 0 || headroomZeroed(limits, foreman, account))
 }
 
 // zeroCapLayer names the cap layer — caps.LayerAccount or
 // caps.LayerModel — that is configured as exactly 0 on an agent's path
-// for a job of the given kind, or "" when none is (§8.1, issue #195). It
-// follows caps.Room's exemptions: a foreman turn ignores the model cap,
-// so only an account capped at 0 shuts an agent out of one; every other
-// kind is shut out by either. An agent so capped can never take the job,
-// so the placement drops it outright: it is neither a candidate nor an
-// agent the cooling hold waits on.
-func zeroCapLayer(limits caps.Limits, kind Kind, account, model string) string {
-	if n, ok := limits.Account[account]; ok && n == 0 {
+// for a job of the given kind, or "" when none is (§8.1, issue #195). A
+// headroom-zeroed account counts as capped at 0 for every kind but a
+// foreman turn (§8.2). It follows caps.Room's exemptions: a foreman turn
+// ignores the model cap, so only an account capped at 0 shuts an agent
+// out of one; every other kind is shut out by either. An agent so capped
+// can never take the job, so the placement drops it outright: it is
+// neither a candidate nor an agent the cooling hold waits on.
+func zeroCapLayer(limits caps.Limits, foreman map[string]bool, kind Kind, account, model string) string {
+	if n, ok := limits.Account[account]; ok && (n == 0 || (kind != KindForeman && headroomZeroed(limits, foreman, account))) {
 		return caps.LayerAccount
 	}
 	if kind != KindForeman {
@@ -1205,10 +1224,10 @@ func zeroCapLayer(limits caps.Limits, kind Kind, account, model string) string {
 
 // dropZeroCapped removes the agents zeroCapLayer shuts out of a job of
 // the given kind, keeping the rest in order.
-func dropZeroCapped(limits caps.Limits, kind Kind, rows []agentCand) []agentCand {
+func dropZeroCapped(limits caps.Limits, foreman map[string]bool, kind Kind, rows []agentCand) []agentCand {
 	kept := rows[:0:0]
 	for _, c := range rows {
-		if zeroCapLayer(limits, kind, c.account, c.model) == "" {
+		if zeroCapLayer(limits, foreman, kind, c.account, c.model) == "" {
 			kept = append(kept, c)
 		}
 	}
