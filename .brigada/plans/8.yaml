@@ -5,9 +5,9 @@
 plan: 8
 title: "Fix #249: plan review renders cancelled tasks as live"
 repo: "github.com/Blackfire-AI/brigada"
-state: reviewing
+state: active
 created: 2026-11-26T20:42:36.058715453Z
-updated: 2026-11-26T21:03:31.109458218Z
+updated: 2026-11-26T21:42:59.144682277Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -31,6 +31,6 @@ tasks:
     review_tier: standard
     review_effort: medium
     skills: ["bugfix"]
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
