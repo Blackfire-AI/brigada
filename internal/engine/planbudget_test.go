@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"database/sql"
 	"strings"
 	"testing"
 
@@ -186,5 +187,87 @@ func TestPlanBudgetHoldsAmendment(t *testing.T) {
 	}
 	if got := e.str("SELECT state FROM plans WHERE id = ?", res.PlanID); got != "active" {
 		t.Errorf("plan state = %q, want active", got)
+	}
+}
+
+// TestPlanActualsTx: the done report's actuals read straight off the
+// jobs' records — tokens, dollars and wall time only where a job
+// reported them, and the restarts and fix/review rounds the engine
+// recorded itself. A setup retry is no restart, and a plain work job
+// spends no round.
+func TestPlanActualsTx(t *testing.T) {
+	e := newEnv(t)
+	seed := func(kind, key string, restart, retry int, round string, in, out, cost, wall any) {
+		e.exec(`INSERT INTO jobs (project_id, task_id, kind, key, mode, prompt, status, restart, retry, round, input_tokens, output_tokens, cost_usd, wall_seconds, created_at, updated_at)
+			VALUES (?, ?, ?, ?, 'fresh', 'p', 'done', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			e.project, e.task, kind, key, restart, retry, round, in, out, cost, wall, seedTS, seedTS)
+	}
+	seed("work", "a", 0, 0, "", 10, 5, 0.5, 30.0)
+	seed("fix", "b", 0, 0, roundFix, nil, nil, nil, nil)
+	seed("fix", "c", 0, 0, roundReview, nil, nil, nil, nil)
+	seed("work", "d", 1, 0, "", nil, nil, nil, nil) // a restart
+	seed("work", "e", 1, 1, "", nil, nil, nil, nil) // a setup retry, no restart
+
+	var a planActuals
+	if err := e.st.Update(e.ctx, func(tx *sql.Tx) error {
+		var err error
+		a, err = planActualsTx(tx, e.plan)
+		return err
+	}); err != nil {
+		t.Fatalf("planActualsTx: %v", err)
+	}
+	if a.tokens == nil || *a.tokens != 15 || a.usd == nil || *a.usd != 0.5 || a.wall == nil || *a.wall != 30 {
+		t.Errorf("actuals = %+v, want tokens 15, $0.5, wall 30", a)
+	}
+	if a.restarts != 1 || a.rounds != 2 {
+		t.Errorf("actuals restarts/rounds = %d/%d, want 1/2", a.restarts, a.rounds)
+	}
+}
+
+// TestPlanActualText: the done report renders each known counter and
+// leaves an unknown one out — never zero — while the engine's own
+// restarts and rounds always show.
+func TestPlanActualText(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		a    planActuals
+		want string
+	}{
+		{"all known", planActuals{tokens: usageInt(168), usd: usageFloat(2.5), wall: usageFloat(90), restarts: 1, rounds: 2},
+			"168 tokens and $2.5, 1m30s wall, 1 restart, 2 rounds"},
+		{"no dollars", planActuals{tokens: usageInt(168), wall: usageFloat(90), restarts: 1, rounds: 2},
+			"168 tokens, 1m30s wall, 1 restart, 2 rounds"},
+		{"no tokens", planActuals{usd: usageFloat(2.5), wall: usageFloat(90)},
+			"$2.5, 1m30s wall, 0 restarts, 0 rounds"},
+		{"no wall", planActuals{tokens: usageInt(168), usd: usageFloat(2.5)},
+			"168 tokens and $2.5, 0 restarts, 0 rounds"},
+		{"only rounds", planActuals{}, "0 restarts, 0 rounds"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := planActualText(tc.a); got != tc.want {
+				t.Errorf("planActualText = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestWallText: the done report's wall time reads as a duration, "45m"
+// not "45m0s".
+func TestWallText(t *testing.T) {
+	for _, tc := range []struct {
+		seconds float64
+		want    string
+	}{
+		{0, "0s"},
+		{30, "30s"},
+		{90, "1m30s"},
+		{45 * 60, "45m"},
+		{60 * 60, "1h"},
+		{90 * 60, "1h30m"},
+		{3661, "1h1m1s"},
+	} {
+		if got := wallText(tc.seconds); got != tc.want {
+			t.Errorf("wallText(%v) = %q, want %q", tc.seconds, got, tc.want)
+		}
 	}
 }

@@ -108,6 +108,109 @@ func planSpendTx(tx *sql.Tx, plan int64) (tokens int64, usd float64, err error) 
 	return tokens, usd, nil
 }
 
+// planActuals is a plan's recorded usage for the done report (§6.2):
+// what the jobs' harnesses reported, and the rounds the engine records
+// itself. The harness-reported counters are nil when no job reported
+// them — unknown, never zero — while restarts and rounds are always
+// known.
+type planActuals struct {
+	tokens   *int64
+	usd      *float64
+	wall     *float64
+	restarts int64
+	rounds   int64
+}
+
+// planActualsTx reads a plan's actuals from its jobs' records (§6.2):
+// input plus output tokens, dollars, and wall time — each nil when no
+// job's harness reported the counter, the budget rule's convention
+// (planSpendTx sums only what the harness reported) — and the restarts
+// and fix/review rounds its jobs spent, which the engine records itself
+// and so always knows.
+func planActualsTx(tx *sql.Tx, plan int64) (planActuals, error) {
+	var a planActuals
+	var tokens sql.NullInt64
+	var usd, wall sql.NullFloat64
+	err := tx.QueryRow(`SELECT
+		SUM(CASE WHEN j.input_tokens IS NOT NULL OR j.output_tokens IS NOT NULL
+			THEN COALESCE(j.input_tokens, 0) + COALESCE(j.output_tokens, 0) END),
+		SUM(j.cost_usd),
+		SUM(j.wall_seconds),
+		COALESCE(SUM(CASE WHEN j.restart = 1 AND j.retry = 0 THEN 1 ELSE 0 END), 0),
+		COALESCE(SUM(CASE WHEN j.kind = 'fix' AND j.round IN (?, ?) THEN 1 ELSE 0 END), 0)
+		FROM jobs j JOIN tasks t ON t.id = j.task_id WHERE t.plan_id = ?`,
+		roundFix, roundReview, plan).Scan(&tokens, &usd, &wall, &a.restarts, &a.rounds)
+	if err != nil {
+		return a, fmt.Errorf("sum the actuals of plan %d: %w", plan, err)
+	}
+	if tokens.Valid {
+		a.tokens = &tokens.Int64
+	}
+	if usd.Valid {
+		a.usd = &usd.Float64
+	}
+	if wall.Valid {
+		a.wall = &wall.Float64
+	}
+	return a, nil
+}
+
+// planActualText renders the done report's actuals (§6.2): the plan's
+// spend and rounds, the harness-reported counters shown only when some
+// job reported them — unknown stays out, never zero — and the restarts
+// and rounds, which the engine records itself, always shown.
+func planActualText(a planActuals) string {
+	var parts []string
+	switch {
+	case a.tokens != nil && a.usd != nil:
+		parts = append(parts, fmt.Sprintf("%d tokens and $%s", *a.tokens, budgetUSD(*a.usd)))
+	case a.tokens != nil:
+		parts = append(parts, fmt.Sprintf("%d tokens", *a.tokens))
+	case a.usd != nil:
+		parts = append(parts, "$"+budgetUSD(*a.usd))
+	}
+	if a.wall != nil {
+		parts = append(parts, wallText(*a.wall)+" wall")
+	}
+	parts = append(parts, countNoun(a.restarts, "restart"))
+	parts = append(parts, countNoun(a.rounds, "round"))
+	return strings.Join(parts, ", ")
+}
+
+// countNoun renders a count with the singular or plural of its noun:
+// "1 restart", "2 restarts".
+func countNoun(n int64, singular string) string {
+	if n == 1 {
+		return "1 " + singular
+	}
+	return fmt.Sprintf("%d %ss", n, singular)
+}
+
+// wallText renders the done report's wall time (§6.2): a whole-second
+// span as "1m30s", "45m" or "30s", never "45m0s".
+func wallText(seconds float64) string {
+	d := time.Duration(seconds * float64(time.Second)).Round(time.Second)
+	h := int(d / time.Hour)
+	m := int((d % time.Hour) / time.Minute)
+	s := int((d % time.Minute) / time.Second)
+	switch {
+	case h > 0 && m > 0 && s > 0:
+		return fmt.Sprintf("%dh%dm%ds", h, m, s)
+	case h > 0 && m > 0:
+		return fmt.Sprintf("%dh%dm", h, m)
+	case h > 0 && s > 0:
+		return fmt.Sprintf("%dh%ds", h, s)
+	case h > 0:
+		return fmt.Sprintf("%dh", h)
+	case m > 0 && s > 0:
+		return fmt.Sprintf("%dm%ds", m, s)
+	case m > 0:
+		return fmt.Sprintf("%dm", m)
+	default:
+		return fmt.Sprintf("%ds", s)
+	}
+}
+
 // budgetGate is one plan's budget decision, read once for a wave of
 // tasks about to start. A nil gate is no budget: nothing parks.
 type budgetGate struct {

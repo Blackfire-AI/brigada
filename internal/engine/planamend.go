@@ -1274,7 +1274,10 @@ func planLiveWorkTx(tx *sql.Tx, nodes []amendNode) ([]int64, error) {
 // that later fails parks its task under a plan that is still active and
 // the foreman can still act on. A landing the user declined — a
 // rejected land hold (§6.3) — is not live work: it will never happen,
-// and the report names it declined. The plan also counts one
+// and the report names it declined. The report also carries the plan's
+// actuals (§6.2): the tokens and dollars, wall time, restarts, and
+// fix/review rounds spent, summed from the jobs' records, with a counter
+// no harness reported left unknown, never zero. The plan also counts one
 // attempt on the "plan" class for the foreman's agent: a success when
 // every task ended done, was cancelled with the user's approval
 // (skip_approved) or was retired, a failure when a task failed out,
@@ -1417,6 +1420,14 @@ func (e *Engine) finishPlanIfClosedTx(tx *sql.Tx, project, plan, task, job int64
 			report = append(report, "never ran: "+strings.Join(waiting, "; "))
 		}
 	}
+	// The plan's actuals (§6.2): what the jobs' harnesses reported and
+	// the rounds they spent, beside the task names above. Unknown
+	// counters stay unknown, never zero.
+	actuals, err := planActualsTx(tx, plan)
+	if err != nil {
+		return false, err
+	}
+	report = append(report, "spent: "+planActualText(actuals))
 	if err := inboxEventTx(tx, evPlanDone, project, task, job,
 		eventPayload{Status: planDone, Plan: plan, Reason: strings.Join(report, "; ")}, now); err != nil {
 		return false, err

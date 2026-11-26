@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/Blackfire-AI/brigada/internal/adapter"
 )
 
 // amend runs AmendPlan and fails the test on a refusal.
@@ -762,5 +764,66 @@ func TestAmendRetier(t *testing.T) {
 		if _, err := e.eng.AmendPlan(e.ctx, e.project, res.PlanID, PlanAmendment{Retier: []PlanRetier{rt}}); err == nil {
 			t.Errorf("bad retier accepted: %+v", rt)
 		}
+	}
+}
+
+// TestDoneReportCarriesPlanActuals: a closing plan's done report names
+// the plan's actuals beside the task names — tokens, dollars, wall time,
+// restarts and rounds — matching the job records.
+func TestDoneReportCarriesPlanActuals(t *testing.T) {
+	e := newEnv(t)
+	e.addAgent(e.runner1, "claude", "sonnet", "work")
+	res := e.createPlan([]PlanTask{{Name: "solo", Spec: "do it", Class: "answer"}})
+	g := e.leaseAny(e.runner1)
+	if g == nil {
+		t.Fatal("no work job")
+	}
+	in, out := int64(123), int64(45)
+	cost, wall := 2.5, 90.0
+	c := done()
+	c.Usage = &adapter.Usage{InputTokens: &in, OutputTokens: &out, CostUSD: &cost}
+	c.WallSeconds = &wall
+	if ans := e.complete(g, c); ans != AnsOK {
+		t.Fatal(ans)
+	}
+	if got := e.str("SELECT state FROM plans WHERE id = ?", res.PlanID); got != planDone {
+		t.Fatalf("plan = %q, want done", got)
+	}
+	p, ok := e.eventPayloadOf(evPlanDone)
+	if !ok {
+		t.Fatal("no plan_done event")
+	}
+	want := "spent: 168 tokens and $2.5, 1m30s wall, 0 restarts, 0 rounds"
+	if !strings.Contains(p.Reason, want) {
+		t.Errorf("plan_done report = %q, want %q", p.Reason, want)
+	}
+}
+
+// TestDoneReportUnknownUsageStaysUnknown: a counter no job's harness
+// reported stays out of the done report — never zero — while the rounds
+// the engine records itself always show.
+func TestDoneReportUnknownUsageStaysUnknown(t *testing.T) {
+	e := newEnv(t)
+	e.addAgent(e.runner1, "claude", "sonnet", "work")
+	e.createPlan([]PlanTask{{Name: "solo", Spec: "do it", Class: "answer"}})
+	g := e.leaseAny(e.runner1)
+	if g == nil {
+		t.Fatal("no work job")
+	}
+	in := int64(168)
+	c := done()
+	c.Usage = &adapter.Usage{InputTokens: &in}
+	if ans := e.complete(g, c); ans != AnsOK {
+		t.Fatal(ans)
+	}
+	p, ok := e.eventPayloadOf(evPlanDone)
+	if !ok {
+		t.Fatal("no plan_done event")
+	}
+	if !strings.Contains(p.Reason, "spent: 168 tokens, 0 restarts, 0 rounds") {
+		t.Errorf("plan_done report = %q, want the tokens and the known rounds", p.Reason)
+	}
+	if strings.Contains(p.Reason, "$0") || strings.Contains(p.Reason, "0s wall") {
+		t.Errorf("plan_done report = %q, want unknown dollars and wall time left out, never zero", p.Reason)
 	}
 }
