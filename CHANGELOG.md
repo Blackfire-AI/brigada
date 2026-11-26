@@ -11,6 +11,8 @@ Adds `brigada-operator`, an Agent Skill that carries the operator's procedure �
 
 - `brigada init` no longer writes `.brigada/operator.md` or `.claude/skills/brigada-operator/SKILL.md`. Its plan and its `Next:` block print the installation command, `npx skills add Blackfire-AI/brigada --skill brigada-operator`, instead, and init never runs it, so brigada takes no Node.js dependency and writes no harness configuration (issue #255).
 - A rerun of `brigada init` and `brigada remove` delete the legacy operator files that carry init's generated header, and the emptied `.claude/skills/brigada-operator` directory with them; any other file at either path is left alone. A copy of the skill the `skills` CLI installed at the legacy path is not brigada's: the plan shows it unchanged, and nothing of brigada's reads, updates or removes it. `--no-wiring` holds back the harness wiring strip only, so a rerun with it still removes the marked copies (issue #255).
+- DeepSeek's `pro` models — `deepseek-v4-pro` — are heavy again: the per-family tier table gains a DeepSeek row so the flagship reads as its vendor's top model, where it had fallen to standard alongside the other families' `pro` words.
+- An agent's cost weight without a `cost.<harness>/<model>` key defaults to its tier — light 1, standard 2, heavy 3 — instead of a flat 1, so a heavier agent reads dearer before the user tunes it.
 
 ### Added
 

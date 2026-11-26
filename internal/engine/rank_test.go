@@ -61,8 +61,8 @@ func TestLeaseRanksByScore(t *testing.T) {
 	if ev.Agent != a2 || ev.Pick != pickSampled || ev.Score != Score(4, 4) || len(ev.PassedOver) != 0 {
 		t.Errorf("pick event = %+v, want sampled agent %d at score %v", ev, a2, Score(4, 4))
 	}
-	if ev.Weight == nil || *ev.Weight != 1 || ev.Draw <= 0 || len(ev.Candidates) != 2 || ev.Candidates[0].Agent != a2 {
-		t.Errorf("pick event = %+v, want weight 1, a draw and both candidates, %d first", ev, a2)
+	if ev.Weight == nil || *ev.Weight != 2 || ev.Draw <= 0 || len(ev.Candidates) != 2 || ev.Candidates[0].Agent != a2 {
+		t.Errorf("pick event = %+v, want weight 2, a draw and both candidates, %d first", ev, a2)
 	}
 }
 

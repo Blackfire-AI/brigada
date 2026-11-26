@@ -197,8 +197,8 @@ func TestCapacityBody(t *testing.T) {
 	if a.Cap != nil || a.CapLayer != "none" {
 		t.Errorf("agent cap = %v (%s), want nil (none): the test engine caps nothing", a.Cap, a.CapLayer)
 	}
-	if a.Running != 1 || a.Quota != "ready" || a.Cost != 1 {
-		t.Errorf("agent running/quota/cost = %d/%s/%d, want 1/ready/1", a.Running, a.Quota, a.Cost)
+	if a.Running != 1 || a.Quota != "ready" || a.Cost != 2 {
+		t.Errorf("agent running/quota/cost = %d/%s/%d, want 1/ready/2", a.Running, a.Quota, a.Cost)
 	}
 
 	layer := func(kind, key string) engine.CapacityLayer {

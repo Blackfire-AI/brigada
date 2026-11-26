@@ -61,7 +61,7 @@ func TestRunnerHarnessRegisters(t *testing.T) {
 		{"opencode nemotron", "opencode", "opencode/nemotron-3-super-free", "nvidia", "light", true},
 		{"dsh flash", "dsh", "deepseek-flash", "deepseek", "light", false},
 		{"dsh flash agent flag", "dsh", "deepseek-flash", "deepseek", "light", true},
-		{"dsh pro agent flag", "dsh", "deepseek-v4-pro", "deepseek", "standard", true},
+		{"dsh pro agent flag", "dsh", "deepseek-v4-pro", "deepseek", "heavy", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			testRunnerHarnessRegisters(t, tc.harness, tc.model, tc.family, tc.tier, tc.agentForm)

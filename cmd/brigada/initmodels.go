@@ -362,7 +362,7 @@ func initDshModels(ctx context.Context) initModelSource {
 	return initModelSource{
 		entries: []initModelEntry{
 			{id: 1, name: "deepseek-flash", value: "deepseek-flash", note: "light; dsh's default"},
-			{id: 2, name: "deepseek-v4-pro", value: "deepseek-v4-pro", note: "standard"},
+			{id: 2, name: "deepseek-v4-pro", value: "deepseek-v4-pro", note: "heavy"},
 		},
 		signIn: probeHarness(ctx, "dsh"),
 	}

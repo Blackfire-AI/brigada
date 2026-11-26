@@ -86,9 +86,9 @@ func TestServeCallCapacity(t *testing.T) {
 		t.Fatalf("capacity errored: %s", text)
 	}
 	for _, want := range []string{
-		"agent 1 claude/sonnet tier=standard effort=default account=work cap=none running=1 quota=ready cost=1 permission=bypassPermissions\n",
-		"agent 2 claude/sonnet tier=standard effort=default account=work cap=none running=0 quota=cooling until " + coolUntil + " cost=1",
-		"agent 3 claude/sonnet tier=standard effort=high account=work cap=none running=0 quota=broken cost=1 tools=Bash(npm test:*)+Bash(npx jest:*)\n",
+		"agent 1 claude/sonnet tier=standard effort=default account=work cap=none running=1 quota=ready cost=2 permission=bypassPermissions\n",
+		"agent 2 claude/sonnet tier=standard effort=default account=work cap=none running=0 quota=cooling until " + coolUntil + " cost=2",
+		"agent 3 claude/sonnet tier=standard effort=high account=work cap=none running=0 quota=broken cost=2 tools=Bash(npm test:*)+Bash(npx jest:*)\n",
 		"runner 1 cap=none use=1 queue=0",
 		"account work cap=none use=1 queue=0",
 		"plan 1 cap=none use=1 queue=0",

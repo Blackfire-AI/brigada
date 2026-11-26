@@ -14,7 +14,8 @@ import "github.com/Blackfire-AI/brigada/internal/adapter"
 //
 // Cost is not a limit but is configured beside them: the relative cost
 // weight of one (harness, model) pair, which the foreman reads through
-// `capacity` (§12.2). A missing entry there is the default weight of 1.
+// `capacity` (§12.2). A missing entry there is the tier's default weight
+// (light 1, standard 2, heavy 3).
 // Tier overrides the model table for every agent of a (harness, model)
 // pair. Outcome record keys stay (repo, class, agent), so records earned
 // under one label stay with the agent when an override changes its tier.
@@ -41,12 +42,19 @@ func HeadroomCap(limit int) int {
 }
 
 // CostOf is the cost weight of one (harness, model) pair (§8.1): what
-// the config named, else the default of 1.
+// the config named, else the tier's default weight — light 1, standard 2,
+// heavy 3 — so a heavier agent reads dearer before the user tunes it.
 func (l Limits) CostOf(harness, model string) int {
 	if n, ok := l.Cost[harness+"/"+model]; ok {
 		return n
 	}
-	return 1
+	switch l.TierOf(harness, model) {
+	case adapter.TierHeavy:
+		return 3
+	case adapter.TierStandard:
+		return 2
+	}
+	return 1 // light
 }
 
 // TierOf is the configured tier of a (harness, model) pair, else its table tier.

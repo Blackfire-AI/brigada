@@ -1639,7 +1639,7 @@ func assertInitAgentTable(t *testing.T, out string, longModels bool) {
 	if longModels {
 		want = append(want,
 			"dsh deepseek-flash DeepSeek light writes code, reviews",
-			"dsh deepseek-v4-pro DeepSeek standard writes code, reviews")
+			"dsh deepseek-v4-pro DeepSeek heavy writes code, reviews")
 	}
 	var rows []string
 	familyColumn, tierColumn, families := -1, -1, 0

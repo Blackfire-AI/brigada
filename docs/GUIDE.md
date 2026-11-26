@@ -960,7 +960,7 @@ The foreman can be `claude`, `codex`, `opencode` or `qwen-code`; `kimi` and `dsh
 
 - Install: `npm i -g @deepseek-ai/dsh`, so that `dsh` is on the runner's `PATH`.
 - Key: set `env.dsh.DEEPSEEK_API_KEY = keychain:<item>` or `env.dsh.DEEPSEEK_API_KEY = file:<path>` in the config file. The runner resolves it at every start, whoever starts it, and passes it to dsh jobs only; a file must be mode 0600, else the start is refused. Without that key, `export DEEPSEEK_API_KEY=...` in the environment you run `brigada start` from (the runner passes it to dsh) still works, and so does dsh's own credential store. A missing or invalid key fails the job as an authentication error.
-- Run it: `brigada runner --agent harness=dsh,model=deepseek-flash`. The models are `deepseek-flash` (dsh's default, light tier) and `deepseek-v4-pro` (standard tier).
+- Run it: `brigada runner --agent harness=dsh,model=deepseek-flash`. The models are `deepseek-flash` (dsh's default, light tier) and `deepseek-v4-pro` (heavy tier).
 - Each job runs `dsh --profile headless --json` with the prompt on stdin, always with `DSH_TELEMETRY_MODE=DISABLED`, and `DSH_PERMISSION_MODE=read-only` for a review or `workspace-write` for other jobs. brigada never sets `danger-full-access`. `tools=` is refused.
 - The model and effort ride a per-job patch file in a fresh directory under the OS temp directory, outside the worktree. brigada does not remove it when the job ends.
 
@@ -1248,7 +1248,7 @@ Without UTF-8 in the locale every glyph the view draws has an ASCII fallback —
 
 The same hint as `status`, dim, one row per line, sits under the header when your harnesses offer unregistered models or a newer model version replaces a registered one (`brigada agents update` moves them), in the piped snapshot too; `top` only reads the cached listing on each redraw ([section 8](#models-added-later)).
 
-The foreman can look at the capacity it has when it plans (per agent: the tier, the configured effort or `default`, the cap, the running jobs, the quota state and the cost weight), but the engine enforces the caps whatever the foreman believes. `cost.<harness>/<model>` is a relative weight, default 1, that the foreman sees when it decides which tasks can wait for a cheaper agent. It also steers dispatch: agents of a tier rank by `weight / p` ([section 8](#tiers)), so a dearer agent is picked less often unless its record is clearly better.
+The foreman can look at the capacity it has when it plans (per agent: the tier, the configured effort or `default`, the cap, the running jobs, the quota state and the cost weight), but the engine enforces the caps whatever the foreman believes. `cost.<harness>/<model>` is a relative weight, defaulting to the agent's tier (light 1, standard 2, heavy 3), that the foreman sees when it decides which tasks can wait for a cheaper agent. It also steers dispatch: agents of a tier rank by `weight / p` ([section 8](#tiers)), so a dearer agent is picked less often unless its record is clearly better.
 
 ### Headroom
 
@@ -1275,7 +1275,7 @@ AGENT  TIER  CLASS  SKILLS  ATTEMPTS  SUCCESSES  RATE  CONFIDENCE  INPUT  OUTPUT
 - **Cost/success** divides summed dollars by successes where dollars are known, otherwise summed tokens by successes. No successes or no reported usage displays `-`. Missing counters display `-`, distinct from reported zero. Sums include only known values, so mixed old and new jobs can yield partial totals. Usage does not steer dispatch.
 - An agent whose runner has not been seen lately is marked `(stale)`; a registered agent with no record yet shows at 0 attempts.
 
-Read it by class. For each task, every agent in the served tier that is ready, has quota and has room under the caps draws p from Beta(successes + 0.5, failures + 0.5), and the dispatcher picks the lowest weight / p, weight being the agent's `cost.<harness>/<model>` (default 1). A thin record draws widely, so an agent with few attempts keeps being tried and measured without a separate exploration share.
+Read it by class. For each task, every agent in the served tier that is ready, has quota and has room under the caps draws p from Beta(successes + 0.5, failures + 0.5), and the dispatcher picks the lowest weight / p, weight being the agent's `cost.<harness>/<model>` (defaulting to the agent's tier: light 1, standard 2, heavy 3). A thin record draws widely, so an agent with few attempts keeps being tried and measured without a separate exploration share.
 
 Two limits:
 
@@ -1433,7 +1433,7 @@ The config file is optional. Its format:
 | `caps.runner` | integer, 0 or more | no cap | Most parallel jobs per runner. A runner's own `--max-parallel` also applies, and the smaller wins. |
 | `caps.account.<label>` | integer, 0 or more | no cap | Most parallel jobs on one account label ([section 8](#capacity)). |
 | `caps.model.<model>` | integer, 0 or more | no cap | Most parallel jobs on one model. |
-| `cost.<harness>/<model>` | integer, 0 or more | `1` | Relative cost weight of an agent, shown to the foreman. Dispatch ranks the agents of a tier by weight / p, p being a draw from the agent's success record, so a higher weight is picked less often. `0` means free: ranked before every agent with a positive weight. |
+| `cost.<harness>/<model>` | integer, 0 or more | `1` light, `2` standard, `3` heavy | Relative cost weight of an agent, shown to the foreman. The default is the agent's tier, so a heavier agent reads dearer without a key. Dispatch ranks the agents of a tier by weight / p, p being a draw from the agent's success record, so a higher weight is picked less often. `0` means free: ranked before every agent with a positive weight. |
 | `tier.<harness>/<model>` | `light`, `standard` or `heavy` | from the model table | Override the tier for every agent of this harness/model, shown wherever a tier is. |
 | `tools.claude/<model>` | `+`-separated Claude Code tool patterns, or `none` | none: the claude default `bypassPermissions` applies | Deprecated alias of `permission.claude/<model>`: it stores the same value for the claude agent on that model and warns, and it is removed in the next major version; `--agent ...,tools=` is the agent-level alias ([section 8](#worker-tools-claude)). Other harnesses are refused. |
 | `permission.<harness>/<model>` | a permission mode: one token, no spaces or commas (claude: a `--permission-mode` value) | claude `bypassPermissions`; other harnesses none | Permission mode brigada passes to that agent's harness; `--agent ...,permission=` overrides it ([section 8](#permissions-per-agent)). The runner advertises the resolved value and every job grant of the agent carries it to the adapter. |

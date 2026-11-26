@@ -97,7 +97,7 @@ func TestConfigSavedAgentsAndRunningRunnerOutsideRepo(t *testing.T) {
 		"review.family = prefer (default)",
 		"snapshot_dir = none (default)", "retention_days = 0, keep everything (default)", "caps.plan = no cap (default)",
 		"caps.runner = no cap (default)", "caps.account.<label> = no cap (default)",
-		"caps.model.<model> = no cap (default)", "cost.<harness>/<model> = 1 (default)",
+		"caps.model.<model> = no cap (default)", "cost.<harness>/<model> = light 1, standard 2, heavy 3 (default)",
 	} {
 		if !strings.Contains(flat, want) {
 			t.Errorf("missing %q in:\n%s", want, out)

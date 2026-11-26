@@ -109,7 +109,8 @@ type CapacityAgent struct {
 	Quota        string `json:"quota"`
 	CoolingUntil string `json:"cooling_until,omitempty"`
 	// Cost is the agent's cost weight (§8.1): the configured weight of
-	// its (harness, model) pair, 1 when the config names none.
+	// its (harness, model) pair, else the tier's default weight (light 1,
+	// standard 2, heavy 3).
 	Cost int `json:"cost"`
 	// Tools is a claude worker agent's shell scope as its runner
 	// advertised it (§5.2): Claude Code patterns joined by "+", or

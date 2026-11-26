@@ -191,8 +191,8 @@ func TestConfigFile(t *testing.T) {
 	if got := c.CostOf("claude", "sonnet"); got != 2 {
 		t.Errorf("cost claude/sonnet = %d, want 2", got)
 	}
-	if got := c.CostOf("claude", "opus"); got != 1 {
-		t.Errorf("unnamed cost = %d, want the default 1", got)
+	if got := c.CostOf("claude", "opus"); got != 3 {
+		t.Errorf("unnamed heavy cost = %d, want the tier default 3", got)
 	}
 
 	if c.Tier["claude/sonnet"] != "heavy" || c.Tier["opencode/provider/model"] != "light" {

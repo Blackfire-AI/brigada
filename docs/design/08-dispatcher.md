@@ -21,7 +21,7 @@ Stats sum known counters per agent and class from every job, including work, fix
   - the agent's tier is the task's effective tier, with the fallback below; for a review job it is the review tier: by default one tier below the task's effective tier, per §7, and then the same fallback.
 - **Cap room:** an eligible agent is picked only if every concurrency cap on its path has room (§8.1). Caps shrink the set of eligible agents with room, so a task whose best agent is cap-blocked goes to the next-best agent with room; it waits in the queue only when no eligible agent has room, and that never parks it. **Parking** means no agent is eligible with caps ignored.
 - **Score:** per (repo, class, agent): a success rate with a prior, where success = check passed and review approved within the rounds. Defaults for a cold start. `stats` shows it with its confidence. The record is counted per skill count as well (§5.10): `stats` rows are per (agent, class, skills) and each row's rate comes from its own attempts, while the dispatcher ranks on the sum over skill counts.
-- **Ranking.** Within the served tier, each eligible agent draws p from Beta(successes + 0.5, failures + 0.5), its outcome record for the job's (repo, class), and the agents rank by `weight / p`, lowest first, where weight is the configured `cost.<harness>/<model>` (default 1, §8.1). This is Thompson sampling with a cost: a thin record draws widely, so a weaker or newer agent keeps being tried without a separate exploration share, and a clearly better record beats a slightly cheaper agent most of the time.
+- **Ranking.** Within the served tier, each eligible agent draws p from Beta(successes + 0.5, failures + 0.5), its outcome record for the job's (repo, class), and the agents rank by `weight / p`, lowest first, where weight is the configured `cost.<harness>/<model>` (defaulting to the tier, §8.1). This is Thompson sampling with a cost: a thin record draws widely, so a weaker or newer agent keeps being tried without a separate exploration share, and a clearly better record beats a slightly cheaper agent most of the time.
 
   A weight of 0 ranks before every positive weight; among zero weights the higher p goes first. Exact ties break by a further draw, never by agent id alone. The draws come from the engine's injectable uniform source, so tests stay deterministic.
 
@@ -36,7 +36,7 @@ Stats sum known counters per agent and class from every job, including work, fix
 
 ## Tiers and escalation
 
-**Tiers.** Each agent serves one tier, from brigada's tier table: rows of model-line words per family, beside the family table (§7's detection), each row applying only to models of its family, the family the harness serves when the name alone does not tell it. Anthropic's `fable` and `opus` segment prefixes, and OpenAI's and Moonshot's whole `pro` segment and OpenAI's `astra`, are heavy; Anthropic's `haiku` segment prefix and OpenAI's `luna` are light, as are the whole `mini`, `nano`, `flash`, `lite` and `free` segments of any family; any other model is standard, a CLI default and a model of unknown family included. Heavy rows win. A word outside its family's row carries no tier: `pro` of another vendor, `max`, `ultra` and a `highspeed` serving leave the model at the tier of its line.
+**Tiers.** Each agent serves one tier, from brigada's tier table: rows of model-line words per family, beside the family table (§7's detection), each row applying only to models of its family, the family the harness serves when the name alone does not tell it. Anthropic's `fable` and `opus` segment prefixes, and OpenAI's, Moonshot's and DeepSeek's whole `pro` segment and OpenAI's `astra`, are heavy; Anthropic's `haiku` segment prefix and OpenAI's `luna` are light, as are the whole `mini`, `nano`, `flash`, `lite` and `free` segments of any family; any other model is standard, a CLI default and a model of unknown family included. Heavy rows win. A word outside its family's row carries no tier: `pro` of another vendor, `max`, `ultra` and a `highspeed` serving leave the model at the tier of its line.
 
 The config override `tier.<harness>/<model>` (same shape as `cost.`, §8.1) corrects the table for every agent of that harness/model, as `cost.` does. Because the tier is an attribute of the agent, like effort, the outcome record keeps its key (repo, class, agent); records earned under one tier stay attached to the agent when an override changes its label. `stats` and `capacity` (§12.2) show the tier beside each agent.
 
@@ -83,7 +83,7 @@ A job pinned to such an agent has no candidate, an unmet placement rather than a
 
 A waiting turn follows the project's foreman. When a project's foreman harness or model changes (§4.1, §4.4), every queued foreman turn of the project that records a model takes the new pair in the same transaction, whatever pair it was submitted on. A turn that is leased finishes on the pair it was leased with; one that returns to the queue instead — its lease lapses, or its runner gives it back — is requeued on the pair the project holds then. In both the pair is the user's own later choice, not a fallback. A turn whose pair changes keeps its prompt, its events and its place in the queue, gets a `foreman_turn_moved` event naming both pairs, and keeps a `no_pair` hold only while no registered agent offers its new pair. From then on it is a turn of the new pair: a model change on the same harness keeps the session and a harness change starts a fresh one, as the switch provides (§4.2). `brigada project foreman` names each turn it moved. A turn submitted on another harness with no model recorded stays unresolved.
 
-Each agent also carries a **cost weight** (default 1), a relative cost the user sets, which the foreman sees through `capacity` (§12.2) when it chooses which tasks can wait for a cheaper agent. The dispatcher uses it too: agents of one tier rank by `weight / p` (§8), so a dearer agent is picked less often, and a weight of 0 makes an agent free, ranked before every paid one.
+Each agent also carries a **cost weight**, a relative cost the user sets, defaulting to the agent's tier — light 1, standard 2, heavy 3 — which the foreman sees through `capacity` (§12.2) when it chooses which tasks can wait for a cheaper agent. The dispatcher uses it too: agents of one tier rank by `weight / p` (§8), so a dearer agent is picked less often, and a weight of 0 makes an agent free, ranked before every paid one.
 
 **Effort and caps.** A task's effort (§6.1) is not a layer: a `max` job and a `low` job on one agent share that agent's caps. A high effort drains the account's window faster per job.
 
@@ -103,7 +103,7 @@ caps.account.claude = 3
 caps.account.codex = 2
 caps.account.kimi = 1
 caps.model.<heavy-model> = 1
-# cost weight per agent, default 1
+# cost weight per agent, defaulting to the tier (light 1, standard 2, heavy 3)
 cost.<harness>/<model> = 2
 ```
 

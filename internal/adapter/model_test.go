@@ -93,12 +93,13 @@ var modelTierExamples = []struct {
 	tier   string
 	models []string
 }{
-	{TierHeavy, []string{"fable", "claude-fable-5-1[1m]", "provider/CLAUDE-FABLE-5-1[1M]", "gpt-6-astra", "gpt-6-astra-mini", "opus", "claude-opus-4", "anthropic/claude-opus-4[1m]", "o3-pro", "gpt-5-pro", "provider/CLAUDE-OPUS-4[1M]", "kimi-k3.1-pro", "k3.1-pro"}},
+	{TierHeavy, []string{"fable", "claude-fable-5-1[1m]", "provider/CLAUDE-FABLE-5-1[1M]", "gpt-6-astra", "gpt-6-astra-mini", "opus", "claude-opus-4", "anthropic/claude-opus-4[1m]", "o3-pro", "gpt-5-pro", "provider/CLAUDE-OPUS-4[1M]", "kimi-k3.1-pro", "k3.1-pro", "deepseek-v4-pro", "deepseek/deepseek-v4-pro"}},
 	{TierLight, []string{"gpt-6-luna", "gpt-5.6-luna", "provider/GPT-6-LUNA[1M]", "haiku", "claude-haiku-4", "gpt-5.4-mini", "o4-mini", "gemini-2.5-flash", "deepseek-flash", "opencode/space-bunny-free", "qwen-3-lite", "qwen-subscription/qwen3.8-flash", "gpt-5-nano", "provider/HAIKU[1m]", "zai-coding-plan/glm-5.3-flash", "mini-opus"}},
 	{TierStandard, []string{"gpt-6-sol", "gpt-5.6-terra", "gpt-6-astral", "gpt-6-lunar", "astra/provider/gpt-6-sol", "luna/provider/gpt-6-sol", "sonnet", "claude-sonnet-4[1m]", "gpt-6.1-sol", "gpt-5", "kimi-code/k3", "kimi-code/k3-256k", "k3", "zai-coding-plan/glm-5.3", "deepseek-v3", "default", "maximal-coder", "freedom-7", "pro/provider/gpt-5", "flash/provider/sonnet", "professional", "minify", "",
 		// No family row makes these heavy or light: pro is heavy only for
-		// openai and moonshot, and max, ultra and highspeed carry no tier.
-		"gemini-2.5-pro", "deepseek-v4-pro", "qwen-subscription/qwen3.8-max", "grok-4-max", "gpt-5-ultra",
+		// openai, moonshot and deepseek, and max, ultra and highspeed carry
+		// no tier.
+		"gemini-2.5-pro", "qwen-subscription/qwen3.8-max", "grok-4-max", "gpt-5-ultra",
 		"glm-5.3-highspeed", "zai-coding-plan/glm-5.3-highspeed", "kimi-code/kimi-for-coding-highspeed",
 		// A family's line word does not reach a name of unknown family.
 		"opusnext", "fablenext", "haikunext"}},
@@ -139,8 +140,8 @@ func TestAgentTierUsesHarnessFamily(t *testing.T) {
 	if got := AgentTier("kimi", "kimi-code/k3.1-pro"); got != TierHeavy {
 		t.Errorf("AgentTier(kimi) = %q, want heavy", got)
 	}
-	if got := AgentTier("opencode", "deepseek/deepseek-v4-pro"); got != TierStandard {
-		t.Errorf("AgentTier(opencode, deepseek-v4-pro) = %q, want standard", got)
+	if got := AgentTier("opencode", "deepseek/deepseek-v4-pro"); got != TierHeavy {
+		t.Errorf("AgentTier(opencode, deepseek-v4-pro) = %q, want heavy", got)
 	}
 }
 

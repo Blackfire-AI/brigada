@@ -190,12 +190,12 @@ func TestCapacitySnapshot(t *testing.T) {
 		quota, coolingUntil     string
 		cost                    int
 	}{
-		{sonnet, e.runner1, "claude", "sonnet", "work", 2, caps.LayerRunner, 1, quotaReady, "", 1},
+		{sonnet, e.runner1, "claude", "sonnet", "work", 2, caps.LayerRunner, 1, quotaReady, "", 2},
 		{opus, e.runner1, "codex", "opus", "work", 1, caps.LayerModel, 1, quotaReady, "", 2},
-		{k2, e.runner2, "kimi", "k2", "personal", 1, caps.LayerRunner, 1, quotaReady, "", 1},
+		{k2, e.runner2, "kimi", "k2", "personal", 1, caps.LayerRunner, 1, quotaReady, "", 2},
 		{opus2, e.runner2, "codex", "opus", "work", 1, caps.LayerRunner, 0, quotaReady, "", 2},
-		{cooling, e.runner1, "claude", "sonnet", "personal", 1, caps.LayerAccount, 0, quotaCooling, coolUntil, 1},
-		{broken, e.runner1, "claude", "sonnet", "personal", 1, caps.LayerAccount, 0, quotaBroken, "", 1},
+		{cooling, e.runner1, "claude", "sonnet", "personal", 1, caps.LayerAccount, 0, quotaCooling, coolUntil, 2},
+		{broken, e.runner1, "claude", "sonnet", "personal", 1, caps.LayerAccount, 0, quotaBroken, "", 2},
 	}
 	for _, want := range agents {
 		got := snapAgent(t, snap, want.id)
@@ -300,8 +300,8 @@ func TestCapacityUncappedAgent(t *testing.T) {
 	if got.Cap != nil || got.CapLayer != capLayerNone {
 		t.Errorf("uncapped agent's cap = %v (%s), want nil (none)", got.Cap, got.CapLayer)
 	}
-	if got.Cost != 1 {
-		t.Errorf("uncapped agent's cost = %d, want the default weight 1", got.Cost)
+	if got.Cost != 2 {
+		t.Errorf("uncapped agent's cost = %d, want the standard tier default 2", got.Cost)
 	}
 	if got.Quota != quotaReady {
 		t.Errorf("uncapped agent's quota = %s, want ready", got.Quota)

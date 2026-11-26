@@ -70,6 +70,7 @@ var modelTierTable = []struct {
 	{"anthropic", TierHeavy, []string{"fable", "opus"}, nil},
 	{"openai", TierHeavy, nil, []string{"astra", "pro"}},
 	{"moonshot", TierHeavy, nil, []string{"pro"}},
+	{"deepseek", TierHeavy, nil, []string{"pro"}},
 	{"anthropic", TierLight, []string{"haiku"}, nil},
 	{"openai", TierLight, nil, []string{"luna"}},
 	// Smaller or free-tier models across vendors.

@@ -144,11 +144,17 @@ func TestCostOf(t *testing.T) {
 	if got := limits.CostOf("claude", "heavy"); got != 2 {
 		t.Errorf("named cost = %d, want 2", got)
 	}
-	if got := limits.CostOf("claude", "sonnet"); got != 1 {
-		t.Errorf("unnamed cost = %d, want the default 1", got)
+	if got := limits.CostOf("claude", "sonnet"); got != 2 {
+		t.Errorf("unnamed standard cost = %d, want the tier default 2", got)
 	}
-	if got := (Limits{}).CostOf("claude", "heavy"); got != 1 {
-		t.Errorf("cost with no config = %d, want the default 1", got)
+	if got := limits.CostOf("claude", "haiku"); got != 1 {
+		t.Errorf("unnamed light cost = %d, want the tier default 1", got)
+	}
+	if got := (Limits{}).CostOf("claude", "opus"); got != 3 {
+		t.Errorf("cost with no config = %d, want the heavy tier default 3", got)
+	}
+	if got := (Limits{}).CostOf("codex", "default"); got != 2 {
+		t.Errorf("default model cost = %d, want the standard tier default 2", got)
 	}
 }
 
