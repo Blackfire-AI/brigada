@@ -78,15 +78,16 @@ type planReviewSkillView struct {
 }
 
 // planReviewTaskView is one task of the plan under review, as the input
-// names it: the spec verbatim, the check, the class, the tier and the
-// effort, the graph — deps by name, the base and the continued dep —
-// and the ordered skills the task named.
+// names it: the spec verbatim, the check, the state, the class, the tier
+// and the effort, the graph — deps by name, the base and the continued
+// dep — and the ordered skills the task named.
 type planReviewTaskView struct {
 	ID       int64
 	Name     string
 	Title    string
 	Spec     string
 	Check    string
+	State    string
 	Class    string
 	Tier     string
 	Effort   string
@@ -121,11 +122,12 @@ type otherPlanView struct {
 
 // composePlanReviewInput builds the plan review's input (§6.2): the
 // plan — every task with its spec verbatim, its check, class, tier,
-// effort and place in the graph — and a summary of the project's other
-// active plans' tasks and branches, so the reviewer sees what the plan
-// touches beside itself. A round past the first also carries the
-// previous round's verdict and findings. A pure function: the same views
-// render the same input.
+// effort and place in the graph, and its state whenever it is not one
+// that has yet to run — and a summary of the project's other active
+// plans' tasks and branches, so the reviewer sees what the plan touches
+// beside itself. A round past the first also carries the previous
+// round's verdict and findings. A pure function: the same views render
+// the same input.
 func composePlanReviewInput(round int, plan planReviewPlanView, others []otherPlanView, prevVerdict, prevFindings string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Plan review input, round %d of %d.\n", round, maxPlanReviewRounds)
@@ -154,7 +156,15 @@ func composePlanReviewInput(round int, plan planReviewPlanView, others []otherPl
 		if effort == "" {
 			effort = "default"
 		}
-		fmt.Fprintf(&b, "\n%s: class %s, tier %s, effort %s.\n", label, class, tier, effort)
+		// A round covers the plan's tasks whatever their state — an
+		// amendment of an active plan composes over done, running and
+		// settled tasks too — so a task that is not waiting to run
+		// names the state it is in and never reads as live work.
+		state := ""
+		if t.State != taskPending && t.State != taskReady {
+			state = ", state " + t.State
+		}
+		fmt.Fprintf(&b, "\n%s: class %s, tier %s, effort %s%s.\n", label, class, tier, effort, state)
 		if len(t.Deps) > 0 {
 			graph := "it waits on " + strings.Join(t.Deps, ", ")
 			if t.Base != "" {
@@ -260,16 +270,16 @@ func planReviewTierTx(tx *sql.Tx, cfg *Config, j *jobRow) (string, error) {
 }
 
 // planReviewPlanTx loads the plan under review as the input's views: its
-// title, and each task with the spec verbatim, the check, the class, the
-// tier and effort, the graph by name and the ordered skills the task
-// named (§5.10) — names and descriptions, the text never: the reviewer
-// opens the SKILL.md itself.
+// title, and each task with the spec verbatim, the check, the state, the
+// class, the tier and effort, the graph by name and the ordered skills
+// the task named (§5.10) — names and descriptions, the text never: the
+// reviewer opens the SKILL.md itself.
 func planReviewPlanTx(tx *sql.Tx, plan int64) (planReviewPlanView, error) {
 	var view planReviewPlanView
 	if err := tx.QueryRow("SELECT id, title FROM plans WHERE id = ?", plan).Scan(&view.ID, &view.Title); err != nil {
 		return planReviewPlanView{}, fmt.Errorf("read plan %d: %w", plan, err)
 	}
-	rows, err := tx.Query(`SELECT t.id, t.name, t.title, t.spec, COALESCE(t.check_cmd, ''), t.class,
+	rows, err := tx.Query(`SELECT t.id, t.name, t.title, t.spec, COALESCE(t.check_cmd, ''), t.state, t.class,
 			t.tier, COALESCE(NULLIF(t.effort, ''), 'default'), COALESCE(t.skills, '')
 		FROM tasks t WHERE t.plan_id = ? ORDER BY t.id`, plan)
 	if err != nil {
@@ -279,7 +289,7 @@ func planReviewPlanTx(tx *sql.Tx, plan int64) (planReviewPlanView, error) {
 	for rows.Next() {
 		var t planReviewTaskView
 		var rawSkills string
-		if err := rows.Scan(&t.ID, &t.Name, &t.Title, &t.Spec, &t.Check, &t.Class, &t.Tier, &t.Effort, &rawSkills); err != nil {
+		if err := rows.Scan(&t.ID, &t.Name, &t.Title, &t.Spec, &t.Check, &t.State, &t.Class, &t.Tier, &t.Effort, &rawSkills); err != nil {
 			rows.Close()
 			return planReviewPlanView{}, fmt.Errorf("read the tasks of plan %d: %w", plan, err)
 		}
