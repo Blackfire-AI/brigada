@@ -5,9 +5,9 @@
 plan: 16
 title: "Fix #53: redirect a running task without cancelling its dependents"
 repo: "github.com/Blackfire-AI/brigada"
-state: needs_foreman
+state: reviewing
 created: 2026-11-26T20:46:37.185268399Z
-updated: 2026-11-26T21:36:21.941950662Z
+updated: 2026-11-26T21:41:30.075542053Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -31,6 +31,46 @@ tasks:
     review_tier: standard
     review_effort: medium
     skills: ["schema-migration"]
+    state: cancelled
+    branch: ""
+    rounds: 0
+  - id: 36
+    name: "note-to-next-job"
+    title: "Note-to-next-job: tasks.note via plan_amend, delivered to the next job (Refs #53)"
+    class: "implement"
+    deps: []
+    base: ""
+    effort: medium
+    review_tier: standard
+    review_effort: medium
+    skills: ["schema-migration", "surface-parity"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 37
+    name: "stop-running-restart"
+    title: "stop_running restart: stop keeping the branch, fresh attempt seeded from it (Closes #53)"
+    class: "implement"
+    deps: ["note-to-next-job"]
+    base: "note-to-next-job"
+    continue: "note-to-next-job"
+    tier: heavy
+    effort: medium
+    review_tier: standard
+    review_effort: medium
+    skills: ["schema-migration", "surface-parity"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 38
+    name: "changelog-53"
+    title: "CHANGELOG entry for the #53 redirect work"
+    class: "implement"
+    deps: ["stop-running-restart"]
+    base: "stop-running-restart"
+    tier: light
+    effort: low
+    skills: ["docs-change"]
     state: pending
     branch: ""
     rounds: 0
