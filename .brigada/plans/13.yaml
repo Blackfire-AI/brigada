@@ -58,8 +58,8 @@ tasks:
     effort: medium
     skills: ["schema-migration"]
     state: running
-    branch: ""
-    rounds: 0
+    branch: "brigada/task-44"
+    rounds: 1
   - id: 45
     name: "grants-surfaces"
     title: "Per-task tool grants: MCP, CLI, API, status, history, plan file (Refs #123)"
