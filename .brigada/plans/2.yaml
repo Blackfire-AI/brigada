@@ -31,6 +31,6 @@ tasks:
     review_tier: light
     caps: {review_rounds: 2}
     skills: ["bugfix"]
-    state: needs_foreman
+    state: running
     branch: "brigada/task-6"
     rounds: 0
