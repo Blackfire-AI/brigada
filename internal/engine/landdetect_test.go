@@ -1,18 +1,65 @@
 package engine
 
 import (
+	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 )
 
+// The trailer landing's fixture (§7.1): the branch and head trailerOK
+// records for a task, which a matching LandedCommit candidate carries.
+const (
+	trailerBranch = "task/1-1"
+	trailerHead   = "9d3c2b1a09876543210987654321098765432109"
+)
+
+// trailerOK makes a trailer landing for the task validatable (§7.1):
+// the task's result branch is recorded — trailerBranch when the task
+// has none yet — and the task's last done author job's result names the
+// head, a minimal done work job inserted when the task has none, so a
+// candidate from trailerFor passes recordLandedTx's check.
+func (e *env) trailerOK(task int64) {
+	e.t.Helper()
+	if e.str("SELECT COALESCE(branch, '') FROM tasks WHERE id = ?", task) == "" {
+		e.exec("UPDATE tasks SET branch = ? WHERE id = ?", trailerBranch, task)
+	}
+	branch := e.str("SELECT branch FROM tasks WHERE id = ?", task)
+	res, err := json.Marshal(struct {
+		Result string `json:"result"`
+	}{`{"status":"done","summary":"s","branch":"` + branch + `","head":"` + trailerHead + `"}`})
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	if e.int(`SELECT COUNT(*) FROM jobs WHERE task_id = ? AND kind IN ('work', 'fix') AND status = 'done'`, task) > 0 {
+		e.exec(`UPDATE jobs SET result = ? WHERE id = (SELECT id FROM jobs WHERE task_id = ? AND kind IN ('work', 'fix') AND status = 'done' ORDER BY id DESC LIMIT 1)`,
+			string(res), task)
+		return
+	}
+	e.exec(`INSERT INTO jobs (project_id, task_id, kind, key, mode, prompt, status, result, created_at, updated_at)
+		VALUES (?, ?, 'work', ?, 'fresh', 'the prompt', 'done', ?, ?, ?)`,
+		e.project, task, fmt.Sprintf("task:%d", task), string(res), seedTS, seedTS)
+}
+
+// trailerFor is a candidate carrying a trailerOK'd task's own
+// branch@head: the branch the task records and the head its last done
+// author job's result names.
+func (e *env) trailerFor(task int64, commit string) LandedCommit {
+	e.t.Helper()
+	return LandedCommit{TaskID: task, Commit: commit,
+		Branch: e.str("SELECT COALESCE(branch, '') FROM tasks WHERE id = ?", task), Head: trailerHead}
+}
+
 // TestRecordLandedMarksTrailerTasks: a task whose Brigada-Task trailer is
 // reported on the project's default branch gets a landing record with the
-// commit, source 'trailer' and pushed, and a repeat report is a no-op.
+// commit and the trailer's branch and head, source 'trailer' and pushed,
+// and a repeat report is a no-op.
 func TestRecordLandedMarksTrailerTasks(t *testing.T) {
 	e := newEnv(t)
+	e.trailerOK(e.task)
 
 	err := e.eng.RecordLanded(e.ctx, "https://example.invalid/brigada.git", "main",
-		[]LandedCommit{{TaskID: e.task, Commit: "abc123"}})
+		[]LandedCommit{e.trailerFor(e.task, "abc123")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,10 +78,16 @@ func TestRecordLandedMarksTrailerTasks(t *testing.T) {
 	if got := e.str("SELECT target_branch FROM landings WHERE task_id = ?", e.task); got != "main" {
 		t.Errorf("target_branch = %q, want main", got)
 	}
+	if got := e.str("SELECT COALESCE(trailer_branch, '') FROM landings WHERE task_id = ?", e.task); got != trailerBranch {
+		t.Errorf("trailer_branch = %q, want %q", got, trailerBranch)
+	}
+	if got := e.str("SELECT COALESCE(trailer_head, '') FROM landings WHERE task_id = ?", e.task); got != trailerHead {
+		t.Errorf("trailer_head = %q, want %q", got, trailerHead)
+	}
 
 	// A repeat detection is idempotent: no second row, no error.
 	if err := e.eng.RecordLanded(e.ctx, "https://example.invalid/brigada.git", "main",
-		[]LandedCommit{{TaskID: e.task, Commit: "abc123"}}); err != nil {
+		[]LandedCommit{e.trailerFor(e.task, "abc123")}); err != nil {
 		t.Fatal(err)
 	}
 	if n := e.int("SELECT COUNT(*) FROM landings WHERE task_id = ?", e.task); n != 1 {
@@ -44,15 +97,16 @@ func TestRecordLandedMarksTrailerTasks(t *testing.T) {
 
 // TestRecordLandedIgnoresOtherProject: a trailer naming another project's
 // task id is not recorded — the engine matches the task to the project
-// the repo URL names.
+// the repo URL names, even for a candidate that would validate.
 func TestRecordLandedIgnoresOtherProject(t *testing.T) {
 	e := newEnv(t)
 	other := e.addProject("https://example.invalid/other.git")
 	otherPlan := e.addPlanState(other, "the other plan", "active", e.clock.Now())
 	otherTask := e.addTaskToPlan(otherPlan, "another task", "ready")
+	e.trailerOK(otherTask)
 
 	err := e.eng.RecordLanded(e.ctx, "https://example.invalid/brigada.git", "main",
-		[]LandedCommit{{TaskID: otherTask, Commit: "abc123"}})
+		[]LandedCommit{e.trailerFor(otherTask, "abc123")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +115,7 @@ func TestRecordLandedIgnoresOtherProject(t *testing.T) {
 	}
 	// A no-such task is ignored too.
 	if err := e.eng.RecordLanded(e.ctx, "https://example.invalid/brigada.git", "main",
-		[]LandedCommit{{TaskID: 999999, Commit: "abc123"}}); err != nil {
+		[]LandedCommit{{TaskID: 999999, Commit: "abc123", Branch: trailerBranch, Head: trailerHead}}); err != nil {
 		t.Fatal(err)
 	}
 	if n := e.int("SELECT COUNT(*) FROM landings WHERE task_id = 999999"); n != 0 {
@@ -69,12 +123,107 @@ func TestRecordLandedIgnoresOtherProject(t *testing.T) {
 	}
 }
 
+// TestRecordLandedRefusesMismatchedTrailer: an old commit whose
+// Brigada-Branch trailer does not name the task's recorded branch and
+// approved head — a reused id's ancient trailer on an unrelated commit —
+// is refused: no landing is recorded and the task is untouched. A
+// candidate with no Brigada-Branch trailer at all, and one with a
+// matching branch but an unapproved head, are refused with it.
+func TestRecordLandedRefusesMismatchedTrailer(t *testing.T) {
+	e := newEnv(t)
+	author := e.agented("author", "anthropic", "implement")
+	reviewer := e.agented("reviewer", "google", "implement", "review")
+	e.runToDone(author, reviewer)
+	e.trailerOK(e.task)
+
+	// The wedge's shape: an old main commit carrying the previous
+	// store's trailer for the reused id.
+	err := e.eng.RecordLanded(e.ctx, envRepo, "main", []LandedCommit{
+		{TaskID: e.task, Commit: "a7b61ba4", Branch: "brigada/task-4", Head: "0e31d17aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+		{TaskID: e.task, Commit: "b0r3n0tr"},
+		{TaskID: e.task, Commit: "c0ffee00", Branch: trailerBranch, Head: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := e.int("SELECT COUNT(*) FROM landings WHERE task_id = ?", e.task); n != 0 {
+		t.Errorf("landings rows = %d, want none for a mismatched trailer", n)
+	}
+	if state := e.str("SELECT state FROM tasks WHERE id = ?", e.task); state != taskDone {
+		t.Errorf("task state = %q, want done, untouched", state)
+	}
+}
+
+// TestRecordLandedLeavesRetiredTaskAlone: a retired task never lands by
+// any path (§6.2), so a candidate that would validate against the task's
+// own branch and approved head records nothing and the task stays retired.
+func TestRecordLandedLeavesRetiredTaskAlone(t *testing.T) {
+	e := newEnv(t)
+	e.trailerOK(e.task)
+	e.exec("UPDATE tasks SET state = ? WHERE id = ?", taskRetired, e.task)
+
+	if err := e.eng.RecordLanded(e.ctx, envRepo, "main",
+		[]LandedCommit{e.trailerFor(e.task, "8e37d19e")}); err != nil {
+		t.Fatal(err)
+	}
+	if n := e.int("SELECT COUNT(*) FROM landings WHERE task_id = ?", e.task); n != 0 {
+		t.Errorf("landings rows = %d, want none for a retired task", n)
+	}
+	if state := e.str("SELECT state FROM tasks WHERE id = ?", e.task); state != taskRetired {
+		t.Errorf("task state = %q, want retired", state)
+	}
+}
+
+// TestRecordLandedPicksTheMatchingNewestCandidate: a reused id's
+// candidates arrive newest first — the task's real work and an old false
+// one — and the candidate whose branch@head names the task's approved
+// work is recorded; the false one is refused, the record stays the real
+// one, and there is only ever one row.
+func TestRecordLandedPicksTheMatchingNewestCandidate(t *testing.T) {
+	e := newEnv(t)
+	author := e.agented("author", "anthropic", "implement")
+	reviewer := e.agented("reviewer", "google", "implement", "review")
+	e.runToDone(author, reviewer)
+	e.trailerOK(e.task)
+
+	falseOld := LandedCommit{TaskID: e.task, Commit: "a7b61ba4", Branch: "brigada/task-4", Head: "0e31d17aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+	newest := e.trailerFor(e.task, "8e37d19eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
+
+	if err := e.eng.RecordLanded(e.ctx, envRepo, "main", []LandedCommit{newest, falseOld}); err != nil {
+		t.Fatal(err)
+	}
+	if got := e.str("SELECT commit_sha FROM landings WHERE task_id = ?", e.task); got != newest.Commit {
+		t.Errorf("commit = %q, want the real newest %q", got, newest.Commit)
+	}
+	if n := e.int("SELECT COUNT(*) FROM landings WHERE task_id = ?", e.task); n != 1 {
+		t.Errorf("landings rows = %d, want 1", n)
+	}
+}
+
+// TestRecordLandedFalseOldestStillFindsTheReal: the false oldest walks
+// first and the real newest second: the mismatched candidate is refused
+// and the matching one is recorded all the same.
+func TestRecordLandedFalseOldestStillFindsTheReal(t *testing.T) {
+	e := newEnv(t)
+	e.trailerOK(e.task)
+
+	falseOld := LandedCommit{TaskID: e.task, Commit: "a7b61ba4", Branch: "brigada/task-4", Head: "0e31d17aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+	if err := e.eng.RecordLanded(e.ctx, envRepo, "main",
+		[]LandedCommit{falseOld, e.trailerFor(e.task, "8e37d19e")}); err != nil {
+		t.Fatal(err)
+	}
+	if got := e.str("SELECT commit_sha FROM landings WHERE task_id = ?", e.task); got != "8e37d19e" {
+		t.Errorf("commit = %q, want the real newest 8e37d19e", got)
+	}
+}
+
 // TestRecordLandedShownInStatus: a task with a landing record is marked
 // landed in the status's plan listing.
 func TestRecordLandedShownInStatus(t *testing.T) {
 	e := newEnv(t)
+	e.trailerOK(e.task)
 	if err := e.eng.RecordLanded(e.ctx, "https://example.invalid/brigada.git", "main",
-		[]LandedCommit{{TaskID: e.task, Commit: "abc123"}}); err != nil {
+		[]LandedCommit{e.trailerFor(e.task, "abc123")}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -98,6 +247,7 @@ func TestRecordLandedClearsLandConflict(t *testing.T) {
 	author := e.agented("author", "anthropic", "implement")
 	reviewer := e.agented("reviewer", "google", "implement", "review")
 	e.runToDone(author, reviewer)
+	e.trailerOK(e.task)
 	g := e.leaseGit(author)
 	if g == nil {
 		t.Fatal("the land job was not leased")
@@ -110,7 +260,7 @@ func TestRecordLandedClearsLandConflict(t *testing.T) {
 	}
 
 	if err := e.eng.RecordLanded(e.ctx, "https://example.invalid/brigada.git", "main",
-		[]LandedCommit{{TaskID: e.task, Commit: "abc123"}}); err != nil {
+		[]LandedCommit{e.trailerFor(e.task, "abc123")}); err != nil {
 		t.Fatal(err)
 	}
 	if state := e.str("SELECT state FROM tasks WHERE id = ?", e.task); state != taskDone {
@@ -132,6 +282,7 @@ func TestRecordLandedClearsRejectedPush(t *testing.T) {
 	author := e.agented("author", "anthropic", "implement")
 	reviewer := e.agented("reviewer", "google", "implement", "review")
 	e.runToDone(author, reviewer)
+	e.trailerOK(e.task)
 	g := e.leaseGit(author)
 	if g == nil {
 		t.Fatal("the land job was not leased")
@@ -154,7 +305,7 @@ func TestRecordLandedClearsRejectedPush(t *testing.T) {
 	}
 
 	if err := e.eng.RecordLanded(e.ctx, "https://example.invalid/brigada.git", "main",
-		[]LandedCommit{{TaskID: e.task, Commit: "f00dcafe"}}); err != nil {
+		[]LandedCommit{e.trailerFor(e.task, "f00dcafe")}); err != nil {
 		t.Fatal(err)
 	}
 	if state := e.str("SELECT state FROM tasks WHERE id = ?", e.task); state != taskDone {
@@ -185,6 +336,7 @@ func TestRecordLandedSettlesLocalLanding(t *testing.T) {
 	author := e.agented("author", "anthropic", "implement")
 	reviewer := e.agented("reviewer", "google", "implement", "review")
 	e.runToDone(author, reviewer)
+	e.trailerOK(e.task)
 	g := e.leaseGit(author)
 	if g == nil {
 		t.Fatal("the land job was not leased")
@@ -196,7 +348,7 @@ func TestRecordLandedSettlesLocalLanding(t *testing.T) {
 		t.Fatalf("needs-you entry = %+v (%t), want the push command", it, ok)
 	}
 	if err := e.eng.RecordLanded(e.ctx, "https://example.invalid/brigada.git", "main",
-		[]LandedCommit{{TaskID: e.task, Commit: "f00dcafe"}}); err != nil {
+		[]LandedCommit{e.trailerFor(e.task, "f00dcafe")}); err != nil {
 		t.Fatal(err)
 	}
 	if got := e.str("SELECT pushed FROM landings WHERE task_id = ?", e.task); got != "pushed" {
@@ -215,12 +367,13 @@ func TestRejectedPushOfLandedTaskRaisesNothing(t *testing.T) {
 	author := e.agented("author", "anthropic", "implement")
 	reviewer := e.agented("reviewer", "google", "implement", "review")
 	e.runToDone(author, reviewer)
+	e.trailerOK(e.task)
 	g := e.leaseGit(author)
 	if g == nil {
 		t.Fatal("the land job was not leased")
 	}
 	if err := e.eng.RecordLanded(e.ctx, "https://example.invalid/brigada.git", "main",
-		[]LandedCommit{{TaskID: e.task, Commit: "abc123"}}); err != nil {
+		[]LandedCommit{e.trailerFor(e.task, "abc123")}); err != nil {
 		t.Fatal(err)
 	}
 	if ans := e.complete(g, Completion{Error: "push e7db0c2 to main: ! [rejected] (non-fast-forward)"}); ans != AnsOK {
@@ -270,6 +423,7 @@ func TestPlanCloseWaitsForTheLastLanding(t *testing.T) {
 	// unsettled — a done, approved task with no record and no hold — and
 	// the close is still refused: the plan stays active, no plan_done.
 	e.runTaskToDone(second, author, reviewer)
+	e.trailerOK(second)
 	e.exec("UPDATE jobs SET status = 'done' WHERE task_id = ? AND kind = 'land'", second)
 	e.finishPlan(e.plan)
 	if got := e.str("SELECT state FROM plans WHERE id = ?", e.plan); got != "active" {
@@ -282,7 +436,7 @@ func TestPlanCloseWaitsForTheLastLanding(t *testing.T) {
 	// The landing recorded — its trailer found on the branch — is the
 	// outcome the close waited for: the plan closes naming both.
 	if err := e.eng.RecordLanded(e.ctx, envRepo, "main",
-		[]LandedCommit{{TaskID: second, Commit: "abc234"}}); err != nil {
+		[]LandedCommit{e.trailerFor(second, "abc234")}); err != nil {
 		t.Fatal(err)
 	}
 	if got := e.str("SELECT state FROM plans WHERE id = ?", e.plan); got != planDone {
@@ -319,6 +473,7 @@ func TestRecordLandedChainNoLandJobs(t *testing.T) {
 	// head's done releases the tail's work, which runs to done; its
 	// dependency has no landing, so it queues no land job either.
 	e.runToDone(author, reviewer)
+	e.trailerOK(head)
 	if n := e.int("SELECT COUNT(*) FROM land_holds WHERE task_id = ? AND state = 'held'", head); n != 1 {
 		t.Fatalf("head land holds = %d, want 1", n)
 	}
@@ -330,13 +485,14 @@ func TestRecordLandedChainNoLandJobs(t *testing.T) {
 		t.Fatalf("complete the tail's work: %s", ans)
 	}
 	e.runReview(reviewer, `{"verdict":"approve","findings":"`+substantiveFindings+`"}`)
+	e.trailerOK(tail)
 	if n := e.int("SELECT COUNT(*) FROM jobs WHERE task_id = ? AND kind = 'land'", tail); n != 0 {
 		t.Fatalf("tail land jobs before the detection = %d, want none", n)
 	}
 
 	// Both landed by hand: the default branch carries both trailers.
 	if err := e.eng.RecordLanded(e.ctx, envRepo, "main",
-		[]LandedCommit{{TaskID: head, Commit: "h1"}, {TaskID: tail, Commit: "t1"}}); err != nil {
+		[]LandedCommit{e.trailerFor(head, "h1"), e.trailerFor(tail, "t1")}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -360,6 +516,7 @@ func TestRecordLandedRejectedHoldStaysRejected(t *testing.T) {
 	author := e.agented("author", "anthropic", "implement")
 	reviewer := e.agented("reviewer", "google", "implement", "review")
 	e.landGateRun(author, reviewer, GateAsk)
+	e.trailerOK(e.task)
 
 	res, err := e.eng.LandReject(e.ctx, e.project, e.task)
 	if err != nil {
@@ -370,7 +527,7 @@ func TestRecordLandedRejectedHoldStaysRejected(t *testing.T) {
 	}
 
 	if err := e.eng.RecordLanded(e.ctx, envRepo, "main",
-		[]LandedCommit{{TaskID: e.task, Commit: "abc123"}}); err != nil {
+		[]LandedCommit{e.trailerFor(e.task, "abc123")}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -394,9 +551,10 @@ func TestLandApproveTrailerLandedQueuesNothing(t *testing.T) {
 	author := e.agented("author", "anthropic", "implement")
 	reviewer := e.agented("reviewer", "google", "implement", "review")
 	e.landGateRun(author, reviewer, GateAsk)
+	e.trailerOK(e.task)
 
 	if err := e.eng.RecordLanded(e.ctx, envRepo, "main",
-		[]LandedCommit{{TaskID: e.task, Commit: "abc123"}}); err != nil {
+		[]LandedCommit{e.trailerFor(e.task, "abc123")}); err != nil {
 		t.Fatal(err)
 	}
 

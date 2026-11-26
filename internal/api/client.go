@@ -228,9 +228,11 @@ func (c *Client) Release(ctx context.Context, jobID int64, leaseID, reason strin
 }
 
 // RecordLanded reports landings detected from the project's default
-// branch (§7.1): each entry names a task whose Brigada-Task trailer sits
-// on a commit of branch, landed outside the land job. The engine records
-// the ones that belong to repoURL's project and have no landing yet.
+// branch (§7.1): each entry is one candidate commit carrying a task's
+// Brigada-Task trailer, newest first per task, with the trailer's branch
+// and head. The engine records the ones that belong to repoURL's
+// project, match the task's own recorded branch and approved head, and
+// have no landing yet.
 func (c *Client) RecordLanded(ctx context.Context, repoURL, branch string, landed []engine.LandedCommit) error {
 	body := struct {
 		RepoURL string                `json:"repo_url"`

@@ -233,8 +233,10 @@ func TestRetireLandGateHeldTask(t *testing.T) {
 		t.Errorf("land holds after the land rule = %d, want none: a retired task is never re-held", n)
 	}
 	// The trailer path records nothing either: its commit on the branch
-	// is a fact of the repo, not a landing (§6.2).
-	if err := e.eng.RecordLanded(e.ctx, envRepo, "main", []LandedCommit{{TaskID: solo, Commit: "tr41l3r"}}); err != nil {
+	// is a fact of the repo, not a landing (§6.2) — even for a candidate
+	// whose branch@head names the task's own approved work.
+	e.trailerOK(solo)
+	if err := e.eng.RecordLanded(e.ctx, envRepo, "main", []LandedCommit{e.trailerFor(solo, "tr41l3r")}); err != nil {
 		t.Fatalf("record the trailers: %v", err)
 	}
 	if n := e.int("SELECT COUNT(*) FROM landings WHERE task_id = ?", solo); n != 0 {

@@ -9,24 +9,34 @@ import (
 	"time"
 )
 
-// LandedCommit is one landing the runner detected (§7.1): a commit on
-// the project's landing branch — the land target when one is set, else
-// the default branch — that carries the task's Brigada-Task
-// trailer, whatever made the commit.
+// LandedCommit is one landing candidate the runner detected (§7.1): a
+// commit on the project's landing branch — the land target when one is
+// set, else the default branch — that carries the task's Brigada-Task
+// trailer, whatever made the commit. Branch and Head are the commit's
+// Brigada-Branch trailer split at its last '@', the branch@head form
+// landing.Message writes; "" when the commit carries no such trailer.
 type LandedCommit struct {
 	TaskID int64  `json:"task_id"`
 	Commit string `json:"commit"`
+	Branch string `json:"branch,omitempty"`
+	Head   string `json:"head,omitempty"`
 }
 
 // RecordLanded records landings the runner detected from the landing
 // branch's trailers — the land target when one is set, else the default
 // branch (§7.1): a hand squash, or a brigada land in the
-// user's clone, whose commits the land job never made. Each entry whose
-// task belongs to the project repoURL names is written as a landing
-// record — the engine's "landed" mark, carrying the commit — unless one
-// already exists, so a task the land job landed is never recorded twice.
-// A landed record from either source counts: the land rule, a
-// dependent's wait and the status all read the one table.
+// user's clone, whose commits the land job never made. Each entry is one
+// candidate commit, reported newest first per task. A candidate is
+// recorded only when its Brigada-Branch trailer names the task's own
+// work: the task's recorded result branch and the head its last done
+// author job pushed — so a reused task id whose ancient trailer sits on
+// an unrelated commit records nothing. The first candidate of a task
+// that passes is written as the landing record — the engine's "landed"
+// mark, carrying the commit and the trailer — unless one already exists,
+// so a task the land job landed is never recorded twice; the task's
+// later candidates are refused. A landed record from either source
+// counts: the land rule, a dependent's wait and the status all read the
+// one table.
 func (e *Engine) RecordLanded(ctx context.Context, repoURL, branch string, landed []LandedCommit) error {
 	if repoURL == "" {
 		return fmt.Errorf("repo URL is required (product §5 rule 4: repos are addressed by URL)")
@@ -57,14 +67,20 @@ func (e *Engine) recordLandedTx(tx *sql.Tx, repoURL, branch string, landed []Lan
 	// rule on the tail, or the rule would queue a land job for a task
 	// that is already on the branch.
 	var newLanded []int64
+	// Candidates arrive newest first per task; once one of a task's
+	// candidates is acted on, the rest are refused (§7.1).
+	recorded := map[int64]bool{}
 	for _, lc := range landed {
 		if lc.TaskID <= 0 || lc.Commit == "" {
 			continue
 		}
+		if recorded[lc.TaskID] {
+			continue
+		}
 		var taskProject int64
-		var state string
-		err := tx.QueryRow(`SELECT p.project_id, t.state FROM tasks t JOIN plans p ON p.id = t.plan_id WHERE t.id = ?`,
-			lc.TaskID).Scan(&taskProject, &state)
+		var state, taskBranch string
+		err := tx.QueryRow(`SELECT p.project_id, t.state, COALESCE(t.branch, '') FROM tasks t JOIN plans p ON p.id = t.plan_id WHERE t.id = ?`,
+			lc.TaskID).Scan(&taskProject, &state, &taskBranch)
 		if errors.Is(err, sql.ErrNoRows) {
 			continue // no such task; a trailer for another project's id is not ours
 		}
@@ -80,6 +96,25 @@ func (e *Engine) recordLandedTx(tx *sql.Tx, repoURL, branch string, landed []Lan
 			// landing to record.
 			continue
 		}
+		// The candidate must be this task's own work (§7.1): its trailer
+		// branch is the task's recorded result branch and its trailer
+		// head is the head the task's last done author job pushed, both
+		// full shas compared exactly. A commit with no Brigada-Branch
+		// trailer, or a task with no recorded branch or approved head,
+		// cannot be validated and records nothing — a reused id's ancient
+		// trailer on an unrelated commit fails here, never wedging the
+		// task as landed over work that never reached the branch.
+		if lc.Branch == "" || lc.Head == "" || taskBranch == "" {
+			continue
+		}
+		approvedHead, err := approvedHeadTx(tx, lc.TaskID)
+		if err != nil {
+			return err
+		}
+		if approvedHead == "" || lc.Branch != taskBranch || lc.Head != approvedHead {
+			continue
+		}
+		recorded[lc.TaskID] = true
 		// A landing on the branch clears a held hold even when a record
 		// already exists: a hold left beside a record must not survive.
 		if err := e.clearLandHoldTx(tx, project, lc.TaskID, now); err != nil {
@@ -105,10 +140,12 @@ func (e *Engine) recordLandedTx(tx *sql.Tx, repoURL, branch string, landed []Lan
 		}
 		// The read above saw no record; the conflict clause keeps the
 		// write idempotent all the same, and a row it did not write is
-		// someone else's landing, settled by whoever wrote it.
-		r, err := tx.Exec(`INSERT INTO landings (task_id, project_id, target_branch, commit_sha, pushed, source, created_at)
-			VALUES (?, ?, ?, ?, 'pushed', 'trailer', ?) ON CONFLICT (task_id) DO NOTHING`,
-			lc.TaskID, project, branch, lc.Commit, fmtTime(now))
+		// someone else's landing, settled by whoever wrote it. The
+		// trailer's branch and head go with it, for the start-up repair
+		// pass to validate the record by (§7.1).
+		r, err := tx.Exec(`INSERT INTO landings (task_id, project_id, target_branch, commit_sha, pushed, source, trailer_branch, trailer_head, created_at)
+			VALUES (?, ?, ?, ?, 'pushed', 'trailer', ?, ?, ?) ON CONFLICT (task_id) DO NOTHING`,
+			lc.TaskID, project, branch, lc.Commit, lc.Branch, lc.Head, fmtTime(now))
 		if err != nil {
 			return fmt.Errorf("record the landing of task %d: %w", lc.TaskID, err)
 		}

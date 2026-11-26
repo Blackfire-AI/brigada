@@ -79,6 +79,7 @@ const (
 	evTaskLandRecheckReleased = "task_land_recheck_released" // the engine released a land_ready hold itself (issue #142): the gate passed on the re-check, or the landing settled beside the hold; distinct from the user's release
 	evTaskLandRejected        = "task_land_rejected"         // the user rejected the landing; the branch stays, nothing recorded (§6.3)
 	evTaskLanded              = "task_landed"                // the task's landing succeeded (§7.1); Branch, Commit and Pushed name it
+	evTaskLandingRepaired     = "task_landing_repaired"      // the start-up repair pass (§7.1) dropped a trailer landing whose stored trailer names no approved work of the task — a reused id's ancient commit, or a record with no trailer to validate; Commit names the dropped commit, Reason the mismatch, and the task's land rule re-ran. The task stays done and no foreman is woken
 	evTaskPushed              = "task_pushed"                // the push phase pushed a waiting landing (§7.1)
 	evPushApproved            = "push_approved"              // the user released the push gate for waiting landings (§6.3)
 	evTaskLandFailed          = "task_land_failed"           // a conflict or a failed check on the landed result; the task parks (§7.1)

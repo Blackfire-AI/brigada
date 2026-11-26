@@ -2,7 +2,7 @@
 
 Single instance (a lock on the store); started by any `brigada` command when not running; shuts down after `idle_minutes` with no live jobs, no attached chat and no open requests; crash or reboot recovery through lease expiry and fencing, then pending foreman wake-ups are re-evaluated.
 
-Start-up runs the reopen pass of §6.2 first: a plan closed `done` while it still held live work — tasks parked at `needs_foreman`, their dependents waiting to land — returns to active once, its ids logged at info level, so the tools the guards gate read it again; a failure of the pass fails start-up as the neighbouring recovery calls do.
+Start-up runs the §7.1 trailer-landing repair pass first: a landing record the trailer scan wrote whose stored trailer names no approved work of its task is dropped, the task's land rule re-runs, and the repaired ids are logged at info level. Then the reopen pass of §6.2: a plan closed `done` while it still held live work — tasks parked at `needs_foreman`, their dependents waiting to land — returns to active once, its ids logged at info level, so the tools the guards gate read it again; a plan that closed over a dropped false landing reopens here. A failure of either pass fails start-up as the neighbouring recovery calls do.
 
 Start-up runs on a context the caller's cancellation does not reach. A cancel during start-up is observed by the main loop, so it ends as a normal stop: no start-up transaction is rolled back by the caller, and the socket, store and single-instance lock are released without an error.
 

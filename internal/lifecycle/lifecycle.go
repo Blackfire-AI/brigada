@@ -193,6 +193,19 @@ func Run(ctx context.Context, cfg Config) error {
 	if err := eng.RecordInstance(startupCtx, int64(os.Getpid()), started); err != nil {
 		return fmt.Errorf("engine: %w", err)
 	}
+	// The §7.1 trailer-landing repair pass, before the #137 reopen pass
+	// below: landings recorded from a Brigada-Task trailer that names no
+	// approved work of their task — a reused id's ancient commit, or a
+	// record from before the trailer was stored — are dropped and their
+	// tasks' land rules re-run first, so a plan that closed done over a
+	// false landing reopens through the existing pass.
+	repaired, err := eng.RepairFalseTrailerLandings(startupCtx)
+	if err != nil {
+		return fmt.Errorf("engine: %w", err)
+	}
+	if len(repaired) > 0 {
+		log.InfoContext(startupCtx, "dropped trailer landings that matched no approved work", "tasks", repaired)
+	}
 	// The #137 reopen pass, before the wake recovery and before the API
 	// serves a soul: plans the engine closed done before #133's
 	// live-work rule, still holding parked tasks and their dependents,

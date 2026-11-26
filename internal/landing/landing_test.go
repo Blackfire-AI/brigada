@@ -409,13 +409,14 @@ func TestLandedBranchHead(t *testing.T) {
 }
 
 // TestLandedCommits: a branch's history maps each task id a commit
-// carries as a Brigada-Task trailer to that commit's full sha — the
-// engine's way to recognize tasks landed outside the land job.
+// carries as a Brigada-Task trailer to that commit — its full sha and
+// its Brigada-Branch trailer's branch and head: the engine's way to
+// recognize tasks landed outside the land job.
 func TestLandedCommits(t *testing.T) {
 	dir := newRepo(t)
 	write(t, dir, "a.txt", "a\n")
 	git(t, dir, "add", "-A")
-	git(t, dir, "commit", "-qm", "task seven\n\nBrigada-Task: 7")
+	git(t, dir, "commit", "-qm", "task seven\n\nBrigada-Task: 7\nBrigada-Branch: task/7@aaaa1111")
 	seven := head(t, dir)
 	write(t, dir, "b.txt", "b\n")
 	git(t, dir, "add", "-A")
@@ -429,14 +430,55 @@ func TestLandedCommits(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got[7] != seven {
-		t.Errorf("task 7 = %q, want %q", got[7], seven)
+	want := map[int64][]Candidate{
+		7: {{SHA: seven, Branch: "task/7", Head: "aaaa1111"}},
+		9: {{SHA: nine}}, // no Brigada-Branch trailer: empty branch and head
 	}
-	if got[9] != nine {
-		t.Errorf("task 9 = %q, want %q", got[9], nine)
+	if len(got) != len(want) {
+		t.Fatalf("LandedCommits = %v, want exactly tasks 7 and 9", got)
 	}
-	if len(got) != 2 {
-		t.Errorf("LandedCommits = %v, want exactly tasks 7 and 9", got)
+	for id, cs := range want {
+		if len(got[id]) != len(cs) {
+			t.Fatalf("task %d candidates = %v, want %v", id, got[id], cs)
+		}
+		for i := range cs {
+			if got[id][i] != cs[i] {
+				t.Errorf("task %d candidate %d = %+v, want %+v", id, i, got[id][i], cs[i])
+			}
+		}
+	}
+}
+
+// TestLandedCommitsReusedID: a history that carries the same task id on
+// an old and on a new commit — a store rebuild reusing ids over the
+// previous store's trailers — reports both candidates for the id,
+// newest first, each with its own branch@head trailer.
+func TestLandedCommitsReusedID(t *testing.T) {
+	dir := newRepo(t)
+	write(t, dir, "old.txt", "old\n")
+	git(t, dir, "add", "-A")
+	git(t, dir, "commit", "-qm", "the previous store's task four\n\nBrigada-Task: 4\nBrigada-Branch: brigada/task-4@0e31d17a")
+	old := head(t, dir)
+	write(t, dir, "new.txt", "new\n")
+	git(t, dir, "add", "-A")
+	git(t, dir, "commit", "-qm", "this store's task four\n\nBrigada-Task: 4\nBrigada-Branch: brigada/task-4-r4@8e37d19e")
+	newer := head(t, dir)
+
+	got, err := LandedCommits(context.Background(), dir, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Candidate{
+		{SHA: newer, Branch: "brigada/task-4-r4", Head: "8e37d19e"},
+		{SHA: old, Branch: "brigada/task-4", Head: "0e31d17a"},
+	}
+	if len(got[4]) != len(want) {
+		t.Fatalf("task 4 candidates = %v, want %v", got[4], want)
+	}
+	for i := range want {
+		if got[4][i] != want[i] {
+			t.Errorf("candidate %d = %+v, want %+v (newest first)", i, got[4][i], want[i])
+		}
 	}
 }
 
