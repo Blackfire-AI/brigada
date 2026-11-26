@@ -47,8 +47,8 @@ tasks:
     review_tier: standard
     review_effort: medium
     skills: ["bugfix"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-19-r1"
     rounds: 0
   - id: 20
     name: "placement-outcomes"
