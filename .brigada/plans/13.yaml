@@ -5,9 +5,9 @@
 plan: 13
 title: "Fix #123: per-task tool grants"
 repo: "github.com/Blackfire-AI/brigada"
-state: reviewing
+state: active
 created: 2026-11-26T20:46:37.109826591Z
-updated: 2026-11-26T21:46:58.377982139Z
+updated: 2026-11-26T21:56:36.263641325Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -57,7 +57,7 @@ tasks:
     tier: heavy
     effort: medium
     skills: ["schema-migration"]
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 45
