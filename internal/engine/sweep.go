@@ -519,7 +519,11 @@ func (e *Engine) sweepPolledTx(tx *sql.Tx, now time.Time, polling int64) (rep Sw
 						state += ": " + why
 					}
 				} else if err == nil {
-					if layer := zeroCapLayer(e.cfg.Caps, Kind(x.kind), account, model); layer != "" {
+					foreman, ferr := foremanAccountSetTx(tx, e.cfg.Caps, x.project)
+					if ferr != nil {
+						return rep, ferr
+					}
+					if layer := zeroCapLayer(e.cfg.Caps, foreman, Kind(x.kind), account, model); layer != "" {
 						state = "capped at 0 at the " + layer + " layer"
 					}
 				}

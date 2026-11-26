@@ -87,10 +87,15 @@ func reviewAuthorKnownFamilyTx(tx *sql.Tx, j *jobRow) (int64, string, error) {
 // any review-class agent but the author's own. A pinned job (a
 // re-review on its reviewer's session) has its agent for the winning
 // step whatever its family. runner 0 ranks over every registered agent.
-// A reviewer whose model or account is capped at exactly 0 is never
-// placed, as in qualifyingAgentsTx (issue #195).
+// A reviewer whose model or account is capped at exactly 0 — configured,
+// or headroom-zeroed for a task job (§8.2) — is never placed, as in
+// qualifyingAgentsTx (issue #195).
 func preferReviewAgentsTx(tx *sql.Tx, cfg *Config, rnd func() float64, runner int64, j *jobRow, class, now string, unavailable bool) ([]agentCand, error) {
 	author, authorFamily, err := reviewAuthorKnownFamilyTx(tx, j)
+	if err != nil {
+		return nil, err
+	}
+	foreman, err := foremanAccountSetTx(tx, cfg.Caps, j.ProjectID)
 	if err != nil {
 		return nil, err
 	}
@@ -98,10 +103,11 @@ func preferReviewAgentsTx(tx *sql.Tx, cfg *Config, rnd func() float64, runner in
 	if err != nil {
 		return nil, err
 	}
-	// A reviewer capped at exactly 0 can never take the review (issue
-	// #195): it is left out before the steps are drawn, so a step of
-	// such reviewers alone is no step to wait on, and no candidate.
-	rows = dropZeroCapped(cfg.Caps, j.Kind, rows)
+	// A reviewer capped at exactly 0 — configured, or headroom-zeroed for
+	// a task job (§8.2) — can never take the review (issue #195): it is
+	// left out before the steps are drawn, so a step of such reviewers
+	// alone is no step to wait on, and no candidate.
+	rows = dropZeroCapped(cfg.Caps, foreman, j.Kind, rows)
 	steps := reviewFamilySteps(rows, author, authorFamily)
 	winning, first := -1, -1
 	for i, step := range steps {
@@ -111,7 +117,7 @@ func preferReviewAgentsTx(tx *sql.Tx, cfg *Config, rnd func() float64, runner in
 		if first < 0 {
 			first = i
 		}
-		if stepAvailable(cfg.Caps, step, now) {
+		if stepAvailable(cfg.Caps, foreman, step, now) {
 			winning = i
 			break
 		}
@@ -137,7 +143,7 @@ func preferReviewAgentsTx(tx *sql.Tx, cfg *Config, rnd func() float64, runner in
 	}
 	served := ""
 	if j.RequireAgent == 0 && asked != "" {
-		served = tierServedRows(cfg.Caps, step, asked, now)
+		served = tierServedRows(cfg.Caps, foreman, step, asked, now)
 	}
 	var cands []agentCand
 	for _, c := range step {
@@ -188,11 +194,12 @@ func reviewFamilySteps(rows []agentCand, author int64, authorFamily string) [][]
 }
 
 // stepAvailable reports whether any agent of one family step is available
-// now — ready, not cooling and not capped at 0, the meaning the tier
-// fallback's ready set already has (§8).
-func stepAvailable(limits caps.Limits, step []agentCand, now string) bool {
+// now — ready, not cooling and not capped at 0 (configured or
+// headroom-zeroed, §8.2), the meaning the tier fallback's ready set
+// already has (§8).
+func stepAvailable(limits caps.Limits, foreman map[string]bool, step []agentCand, now string) bool {
 	for _, a := range step {
-		if a.health == "ready" && a.cooling <= now && !cappedAtZero(limits, a.account, a.model) {
+		if a.health == "ready" && a.cooling <= now && !cappedAtZero(limits, foreman, a.account, a.model) {
 			return true
 		}
 	}

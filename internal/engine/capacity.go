@@ -491,7 +491,7 @@ func capacityTx(tx *sql.Tx, cfg Config, projectID int64, now time.Time) (Capacit
 	// pin whose agent row cannot be found is skipped: the foreign key
 	// nulls a deleted agent's pins, so this is only a defensive guard.
 	pinQuery := `SELECT j.id, j.kind, COALESCE(j.task_id, 0), j.require_agent,
-			COALESCE(j.cap_held_layer, ''), COALESCE(j.cap_held_key, '')
+			COALESCE(j.cap_held_layer, ''), COALESCE(j.cap_held_key, ''), j.project_id
 		FROM jobs j WHERE j.status = 'queued' AND j.require_agent IS NOT NULL`
 	var pargs []any
 	if projectID != 0 {
@@ -502,14 +502,18 @@ func capacityTx(tx *sql.Tx, cfg Config, projectID int64, now time.Time) (Capacit
 	if err != nil {
 		return CapacitySnapshot{}, fmt.Errorf("list pinned jobs: %w", err)
 	}
-	var pinned []CapacityPin
+	type pinnedJob struct {
+		pin     CapacityPin
+		project int64
+	}
+	var pinned []pinnedJob
 	for rows.Next() {
-		var p CapacityPin
-		if err := rows.Scan(&p.JobID, &p.Kind, &p.TaskID, &p.AgentID, &p.HeldLayer, &p.HeldKey); err != nil {
+		var pj pinnedJob
+		if err := rows.Scan(&pj.pin.JobID, &pj.pin.Kind, &pj.pin.TaskID, &pj.pin.AgentID, &pj.pin.HeldLayer, &pj.pin.HeldKey, &pj.project); err != nil {
 			rows.Close()
 			return CapacitySnapshot{}, fmt.Errorf("list pinned jobs: %w", err)
 		}
-		pinned = append(pinned, p)
+		pinned = append(pinned, pj)
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()
@@ -520,15 +524,28 @@ func capacityTx(tx *sql.Tx, cfg Config, projectID int64, now time.Time) (Capacit
 	for _, a := range agents {
 		byID[a.id] = a
 	}
-	for _, p := range pinned {
+	// The foreman accounts per project, resolved once each as the headroom
+	// loop above does: a pin on a headroom-zeroed agent reads capped_at_0,
+	// matching the sweep's park reason. A foreman-kind pin is unaffected.
+	foremanByProject := map[int64]map[string]bool{}
+	for _, pj := range pinned {
+		p := pj.pin
 		a, ok := byID[p.AgentID]
 		if !ok {
 			continue
 		}
 		p.Harness, p.Model = a.harness, a.model
 		quota, until := quotaState(a.health, a.coolingUntil, nowStr)
+		foreman, ok := foremanByProject[pj.project]
+		if !ok {
+			foreman, err = foremanAccountSetTx(tx, cfg.Caps, pj.project)
+			if err != nil {
+				return CapacitySnapshot{}, err
+			}
+			foremanByProject[pj.project] = foreman
+		}
 		switch {
-		case zeroCapLayer(cfg.Caps, Kind(p.Kind), a.account, a.model) != "":
+		case zeroCapLayer(cfg.Caps, foreman, Kind(p.Kind), a.account, a.model) != "":
 			p.State = PinCappedAtZero
 		case quota == quotaBroken:
 			p.State = PinBroken

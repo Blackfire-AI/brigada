@@ -108,3 +108,25 @@ func foremanAccountsTx(tx *sql.Tx, project int64) ([]string, error) {
 	}
 	return accounts, rows.Err()
 }
+
+// foremanAccountSetTx is foremanAccountsTx as the set the zero-cap rules
+// read (§8.2): nil with headroom off, so a headroom-zeroed account counts
+// as capped at 0 for task jobs exactly as caps.Room sees it. The job's
+// kind gates the rule at the call site, not here.
+func foremanAccountSetTx(tx *sql.Tx, limits caps.Limits, project int64) (map[string]bool, error) {
+	if limits.NoHeadroom {
+		return nil, nil
+	}
+	accounts, err := foremanAccountsTx(tx, project)
+	if err != nil {
+		return nil, err
+	}
+	if len(accounts) == 0 {
+		return nil, nil
+	}
+	set := make(map[string]bool, len(accounts))
+	for _, account := range accounts {
+		set[account] = true
+	}
+	return set, nil
+}

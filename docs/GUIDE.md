@@ -1252,7 +1252,7 @@ The foreman can look at the capacity it has when it plans (per agent: the tier, 
 
 ### Headroom
 
-With `headroom = true` (the default), task workers on the account that serves your foreman's harness see that account's cap lowered by one (never below zero), so a slot stays free for the foreman. This is about parallel slots; it does not stop a vendor quota from running out. It acts only where a `caps.account.<label>` cap is set; with a cap of 1 on that account, task workers do not run there at all. Set `headroom = false` to let workers use every slot.
+With `headroom = true` (the default), task workers on the account that serves your foreman's harness see that account's cap lowered by one (never below zero), so a slot stays free for the foreman. This is about parallel slots; it does not stop a vendor quota from running out. It acts only where a `caps.account.<label>` cap is set; with a cap of 1 on that account, task workers do not run there at all. An account lowered to 0 this way counts as capped at 0 for task jobs: a task whose only agents sit on it falls back to another tier or account instead of waiting forever, and if nothing else can serve it, the queue TTL parks it rather than holding it indefinitely. A cap that is merely full (lowered from 2 to 1, say) still waits for a slot, and the foreman's own turns ignore headroom and use the full cap. Set `headroom = false` to let workers use every slot.
 
 ## 9. The record and stats
 
