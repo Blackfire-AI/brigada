@@ -5,9 +5,9 @@
 plan: 15
 title: "Fix #94: Linux .deb and .rpm packages on each release"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: reviewing
 created: 2026-11-26T20:46:37.159498266Z
-updated: 2026-11-26T21:51:49.408443659Z
+updated: 2026-11-26T22:00:45.306170947Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -30,16 +30,16 @@ tasks:
     effort: medium
     review_tier: standard
     review_effort: medium
-    state: running
+    state: cancelled
     branch: ""
     rounds: 0
   - id: 39
     name: "packages-container"
     title: "Container install-and-run check for the packages (Closes #94)"
     class: "implement"
-    deps: ["t94"]
-    base: "t94"
-    continue: "t94"
+    deps: ["packages-94"]
+    base: "packages-94"
+    continue: "packages-94"
     effort: medium
     state: pending
     branch: ""
@@ -53,6 +53,16 @@ tasks:
     tier: light
     effort: low
     skills: ["docs-change"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 54
+    name: "packages-94"
+    title: "nfpm packages in the release workflow, sums + attestation, README (Closes #94)"
+    class: "implement"
+    deps: []
+    base: ""
+    effort: medium
     state: pending
     branch: ""
     rounds: 0
