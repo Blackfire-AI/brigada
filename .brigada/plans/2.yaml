@@ -3,11 +3,11 @@
 # here are overwritten. It holds the graph, the task states, the branches
 # and the open questions — never transcripts.
 plan: 2
-title: "#26 Mode A: the session in the repo is the foreman after brigada init"
+title: "Fix #260: opencode adapter effort as #variant model suffix"
 repo: "github.com/Blackfire-AI/brigada"
-state: done
-created: 2026-10-19T15:23:19.367636Z
-updated: 2026-10-20T08:38:37.018277Z
+state: reviewing
+created: 2026-11-26T16:40:06.252574689Z
+updated: 2026-11-26T16:40:06.252574689Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -21,72 +21,15 @@ updated: 2026-10-20T08:38:37.018277Z
 # override the task's fix_rounds, review_rounds and restart budgets (§6.1);
 # skills name the project's skills the task carries, in order (§5.10).
 tasks:
-  - id: 5
-    name: "router"
-    title: "Router block in AGENTS.md, rules in .brigada/foreman.md, retire the skill (#26 items 1, 2, 4)"
-    class: "implement"
-    deps: []
-    base: ""
-    tier: heavy
-    state: cancelled
-    branch: "brigada/task-5-r1"
-    rounds: 2
   - id: 6
-    name: "codex"
-    title: "Codex parity: foreman bridge in Codex project config (#26 item 3)"
-    class: "implement"
-    deps: ["router-4"]
-    base: "router-4"
-    state: done
-    branch: "brigada/task-6"
-    rounds: 0
-  - id: 7
-    name: "docs"
-    title: "Docs for mode A wiring (#26 item 5)"
-    class: "implement"
-    deps: ["codex"]
-    base: "codex"
-    state: done
-    branch: "brigada/task-7"
-    rounds: 0
-  - id: 8
-    name: "release-check"
-    title: "Scripted release check for mode A (#26 tests)"
-    class: "implement"
-    deps: ["codex"]
-    base: "codex"
-    state: done
-    branch: "brigada/task-8-r2"
-    rounds: 0
-  - id: 12
-    name: "router-2"
-    title: "Router block in AGENTS.md, rules in .brigada/foreman.md, retire the skill (#26 items 1, 2, 4), always-import design"
+    name: "variant-fix"
+    title: "opencode adapter: effort as #variant model suffix (Closes #260)"
     class: "implement"
     deps: []
     base: ""
-    tier: heavy
-    state: cancelled
-    branch: "brigada/task-12"
-    rounds: 2
-  - id: 13
-    name: "router-3"
-    title: "Router block in AGENTS.md, rules in .brigada/foreman.md, retire the skill (#26 items 1, 2, 4), finish from task 12"
-    class: "implement"
-    deps: []
-    base: ""
-    tier: heavy
-    state: cancelled
+    effort: medium
+    review_tier: standard
+    skills: ["bugfix"]
+    state: pending
     branch: ""
     rounds: 0
-    extra_repos: [["prior", "github.com/Blackfire-AI/brigada", "brigada/task-12"]]
-  - id: 14
-    name: "router-4"
-    title: "Router block in AGENTS.md, rules in .brigada/foreman.md, retire the skill (#26 items 1, 2, 4), finish from task 12"
-    class: "implement"
-    deps: []
-    base: ""
-    tier: heavy
-    state: done
-    branch: "brigada/task-14"
-    rounds: 0
-    extra_repos: [["prior", "github.com/Blackfire-AI/brigada", "7bb722ae55919880567e2dbd770fb2253509a76e"]]
