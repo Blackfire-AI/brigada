@@ -32,7 +32,7 @@ tasks:
     review_tier: standard
     review_effort: medium
     skills: ["schema-migration", "bugfix"]
-    state: reviewing
+    state: needs_foreman
     branch: "brigada/task-17-r1"
     rounds: 0
   - id: 18
