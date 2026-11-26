@@ -7,7 +7,7 @@ title: "Fix #262: headroom-zeroed account counts as cap-0 for task jobs (held un
 repo: "github.com/Blackfire-AI/brigada"
 state: reviewing
 created: 2026-11-26T19:37:47.592978568Z
-updated: 2026-11-26T21:21:15.816388577Z
+updated: 2026-11-26T21:24:11.729015767Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -114,6 +114,18 @@ tasks:
     tier: heavy
     effort: medium
     skills: ["bugfix", "surface-parity"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 35
+    name: "changelog-263"
+    title: "CHANGELOG entry for the placement rework (#262, #263)"
+    class: "implement"
+    deps: ["placement-observability"]
+    base: "placement-observability"
+    tier: light
+    effort: low
+    skills: ["docs-change"]
     state: pending
     branch: ""
     rounds: 0
