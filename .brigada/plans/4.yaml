@@ -5,9 +5,9 @@
 plan: 4
 title: "Fix #262: headroom-zeroed account counts as cap-0 for task jobs (held until #261 is live)"
 repo: "github.com/Blackfire-AI/brigada"
-state: needs_foreman
+state: reviewing
 created: 2026-11-26T19:37:47.592978568Z
-updated: 2026-11-26T21:17:11.779579928Z
+updated: 2026-11-26T21:21:15.816388577Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -41,11 +41,12 @@ tasks:
     class: "implement"
     deps: ["fix-262"]
     base: "fix-262"
+    continue: "fix-262"
     tier: heavy
     effort: medium
     review_tier: standard
     review_effort: medium
-    skills: ["refactor"]
+    skills: ["bugfix"]
     state: pending
     branch: ""
     rounds: 0
@@ -61,6 +62,58 @@ tasks:
     review_tier: standard
     review_effort: medium
     skills: ["bugfix"]
+    state: cancelled
+    branch: ""
+    rounds: 0
+  - id: 30
+    name: "attempt-exclusions"
+    title: "Per-attempt exclusion sets and bounded stage retries (Refs #263)"
+    class: "implement"
+    deps: ["placement-pipeline"]
+    base: "placement-pipeline"
+    continue: "placement-pipeline"
+    tier: heavy
+    effort: medium
+    skills: ["schema-migration", "bugfix"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 31
+    name: "outcome-accounting"
+    title: "Representative outcome accounting and class-scoped reliability cooldown (Refs #263)"
+    class: "implement"
+    deps: ["attempt-exclusions"]
+    base: "attempt-exclusions"
+    continue: "attempt-exclusions"
+    tier: heavy
+    effort: medium
+    skills: ["schema-migration", "bugfix"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 32
+    name: "waiting-terminal"
+    title: "Bounded waiting and terminal placement behavior (Refs #263)"
+    class: "implement"
+    deps: ["outcome-accounting"]
+    base: "outcome-accounting"
+    continue: "outcome-accounting"
+    tier: heavy
+    effort: medium
+    skills: ["bugfix"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 33
+    name: "placement-observability"
+    title: "Placement observability and the acceptance sweep (Refs #263)"
+    class: "implement"
+    deps: ["waiting-terminal"]
+    base: "waiting-terminal"
+    continue: "waiting-terminal"
+    tier: heavy
+    effort: medium
+    skills: ["bugfix", "surface-parity"]
     state: pending
     branch: ""
     rounds: 0
