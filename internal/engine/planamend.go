@@ -72,6 +72,9 @@ type PlanRespec struct {
 	Spec   string
 	Mode   string
 	Skills []string
+	// ToolGrants replaces the task's tool grants (§6.1) — nil keeps
+	// them, a list (even empty) replaces them.
+	ToolGrants []string
 }
 
 // PlanCancel names one task an amendment cancels (§6.2): Task accepts a
@@ -281,6 +284,9 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 		if err := validateTaskCaps(t.Caps); err != nil {
 			return AmendPlanResult{}, fmt.Errorf("added task %d %q: %w", i+1, t.Name, err)
 		}
+		if err := validateToolGrants(t.ToolGrants); err != nil {
+			return AmendPlanResult{}, fmt.Errorf("added task %d %q: %w", i+1, t.Name, err)
+		}
 		if t.Spec == "" {
 			return AmendPlanResult{}, fmt.Errorf("added task %d: spec is required: the worker's task, verbatim (§1.4)", i+1)
 		}
@@ -461,6 +467,7 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 	var respecced []int
 	respecText := map[int]string{}
 	respecSkills := map[int][]string{}
+	respecGrants := map[int][]string{}
 	for _, rs := range am.Respec {
 		i, err := resolve(rs.Task)
 		if err != nil {
@@ -486,8 +493,12 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 		default:
 			return AmendPlanResult{}, fmt.Errorf("respec %s: mode %q is not replace or append", nodes[i].label(), rs.Mode)
 		}
+		if err := validateToolGrants(rs.ToolGrants); err != nil {
+			return AmendPlanResult{}, fmt.Errorf("respec %s: %w", nodes[i].label(), err)
+		}
 		respecText[i] = rs.Spec
 		respecSkills[i] = rs.Skills
+		respecGrants[i] = rs.ToolGrants
 		respecced = append(respecced, i)
 	}
 	// Dependencies resolve after the cancels, against the whole amended
@@ -756,6 +767,12 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 		if err := reresolveTaskInstructionsTx(tx, proj, nodes[i].id, nodes[i].label(), respecSkills[i], now); err != nil {
 			return AmendPlanResult{}, fmt.Errorf("respec %s: %w", nodes[i].label(), err)
 		}
+		if respecGrants[i] != nil {
+			if _, err := tx.Exec(`UPDATE tasks SET tool_grants = ?, updated_at = ? WHERE id = ?`,
+				taskToolGrantsJSON(respecGrants[i]), nowStr, nodes[i].id); err != nil {
+				return AmendPlanResult{}, fmt.Errorf("respec %s: %w", nodes[i].label(), err)
+			}
+		}
 		res.Respecced = append(res.Respecced, nodes[i].id)
 	}
 	setupRec, err := taskProjectSetupTx(tx, proj)
@@ -768,9 +785,9 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 		if addedHold[k] != "" {
 			taskState = taskNeedsForeman
 		}
-		r, err := tx.Exec(`INSERT INTO tasks (plan_id, name, title, spec, check_cmd, class, state, base_ref, caps, setup, extra_repos, tier, effective_tier, effort, effective_effort, review_tier, review_effort, created_at, updated_at)
-			VALUES (?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?)`,
-			plan, nodes[i].name, nodes[i].title, nodes[i].spec, nodes[i].check, nodes[i].class, taskState, baseRef, taskCapsJSON(am.Add[k].Caps), setupRec, nodes[i].extraRec, taskTier(am.Add[k].Tier), taskTier(am.Add[k].Tier), am.Add[k].Effort, am.Add[k].Effort, am.Add[k].ReviewTier, am.Add[k].ReviewEffort, nowStr, nowStr)
+		r, err := tx.Exec(`INSERT INTO tasks (plan_id, name, title, spec, check_cmd, class, state, base_ref, caps, setup, extra_repos, tier, effective_tier, effort, effective_effort, review_tier, review_effort, tool_grants, created_at, updated_at)
+			VALUES (?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			plan, nodes[i].name, nodes[i].title, nodes[i].spec, nodes[i].check, nodes[i].class, taskState, baseRef, taskCapsJSON(am.Add[k].Caps), setupRec, nodes[i].extraRec, taskTier(am.Add[k].Tier), taskTier(am.Add[k].Tier), am.Add[k].Effort, am.Add[k].Effort, am.Add[k].ReviewTier, am.Add[k].ReviewEffort, taskToolGrantsJSON(am.Add[k].ToolGrants), nowStr, nowStr)
 		if err != nil {
 			return AmendPlanResult{}, fmt.Errorf("create the task: %w", err)
 		}

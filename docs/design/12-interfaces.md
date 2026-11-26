@@ -40,7 +40,7 @@ Task jobs are keyed `task:<id>`: one live job per key makes duplicate job creati
 
 **Project foreman set.**
 
-- `plan_create` · `plan_amend` (both take a task's `skills`, §5.10; each `cancel` entry is a task by name or id, or `{task, reason}`)
+- `plan_create` · `plan_amend` (both take a task's `skills`, §5.10, and `tool_grants`, §6.1; each `cancel` entry is a task by name or id, or `{task, reason}`)
 - `plan_accept` (accept a plan its review parked, with a reason)
 - `task_restart`
 - `task_cancel` (takes an optional `reason`; a reason is expected on every cancel, from either tool, and is recorded verbatim on the task's `task_cancelled_by_amend` event, a cancel without one recorded as "no reason given", §6.2)
