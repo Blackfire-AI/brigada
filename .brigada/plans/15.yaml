@@ -3,11 +3,11 @@
 # here are overwritten. It holds the graph, the task states, the branches
 # and the open questions — never transcripts.
 plan: 15
-title: "AGENTS.md: list the files brigada init manages today"
+title: "Fix #94: Linux .deb and .rpm packages on each release"
 repo: "github.com/Blackfire-AI/brigada"
-state: done
-created: 2026-10-20T14:33:11.523997Z
-updated: 2026-10-20T15:05:12.154427Z
+state: reviewing
+created: 2026-11-26T20:46:37.159498266Z
+updated: 2026-11-26T20:46:37.159498266Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -21,14 +21,16 @@ updated: 2026-10-20T15:05:12.154427Z
 # override the task's fix_rounds, review_rounds and restart budgets (§6.1);
 # skills name the project's skills the task carries, in order (§5.10).
 tasks:
-  - id: 51
-    name: "agents-managed-files"
-    title: "AGENTS.md: correct the \"Files brigada manages\" section"
+  - id: 28
+    name: "t94"
+    title: "nfpm packages in the release workflow, sums + attestation, README (Closes #94)"
     class: "implement"
     deps: []
     base: ""
-    tier: light
-    effort: low
-    state: cancelled
-    branch: "brigada/task-51-r1"
+    effort: medium
+    review_tier: standard
+    review_effort: medium
+    skills: ["dependency"]
+    state: pending
+    branch: ""
     rounds: 0
