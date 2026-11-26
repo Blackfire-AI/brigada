@@ -177,6 +177,7 @@ func TestTrailerHoldsDependentAndKeepsPlanOpen(t *testing.T) {
 	base, top := res.Tasks[0].TaskID, res.Tasks[1].TaskID
 	e.runTaskToDone(base, author, reviewer)
 	e.runTaskToDone(top, author, reviewer)
+	e.trailerOK(base)
 	if got := e.str("SELECT state FROM plans WHERE id = ?", res.PlanID); got != "active" {
 		t.Fatalf("plan state = %q, want active: top's landing is still to come", got)
 	}
@@ -188,7 +189,7 @@ func TestTrailerHoldsDependentAndKeepsPlanOpen(t *testing.T) {
 	// hold and releases top's landing, which the tier holds at the
 	// gate — a hold the release just made, which keeps the plan open.
 	if err := e.eng.RecordLanded(e.ctx, envRepo, "main",
-		[]LandedCommit{{TaskID: base, Commit: "h1d1"}}); err != nil {
+		[]LandedCommit{e.trailerFor(base, "h1d1")}); err != nil {
 		t.Fatal(err)
 	}
 	if n := e.int("SELECT COUNT(*) FROM land_holds WHERE task_id = ? AND state = 'held'", top); n != 1 {
@@ -313,6 +314,7 @@ func TestLandGateHeldTaskClosesOnTheTrailerLanding(t *testing.T) {
 	solo := res.Tasks[0].TaskID
 
 	e.runTaskToDone(solo, author, reviewer)
+	e.trailerOK(solo)
 	if n := e.int("SELECT COUNT(*) FROM land_holds WHERE task_id = ? AND state = 'held'", solo); n != 1 {
 		t.Fatalf("solo land holds = %d, want 1: the heavy tier holds its landing", n)
 	}
@@ -326,7 +328,7 @@ func TestLandGateHeldTaskClosesOnTheTrailerLanding(t *testing.T) {
 	// The trailer on the branch is the landing's outcome: the hold
 	// clears, the record settles, and the plan closes.
 	if err := e.eng.RecordLanded(e.ctx, envRepo, "main",
-		[]LandedCommit{{TaskID: solo, Commit: "s0l0"}}); err != nil {
+		[]LandedCommit{e.trailerFor(solo, "s0l0")}); err != nil {
 		t.Fatal(err)
 	}
 	if n := e.int("SELECT COUNT(*) FROM land_holds WHERE task_id = ?", solo); n != 0 {
@@ -360,6 +362,7 @@ func TestLandRejectClosesThePlan(t *testing.T) {
 	solo := res.Tasks[0].TaskID
 
 	e.runTaskToDone(solo, author, reviewer)
+	e.trailerOK(solo)
 	if n := e.int("SELECT COUNT(*) FROM land_holds WHERE task_id = ? AND state = 'held'", solo); n != 1 {
 		t.Fatalf("solo land holds = %d, want 1: the heavy tier holds its landing", n)
 	}
@@ -498,6 +501,7 @@ func TestPushPhaseHoldLetsThePlanClose(t *testing.T) {
 	plan := res.PlanID
 	e.runTaskToDone(base, author, reviewer)
 	e.runTaskToDone(top, author, reviewer)
+	e.trailerOK(base)
 
 	// The user releases base: its landing records waiting at the push
 	// gate, and the release holds top at the land gate — the plan

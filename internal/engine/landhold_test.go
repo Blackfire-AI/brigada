@@ -14,11 +14,12 @@ func TestRecordLandedClearsHoldBesideLanding(t *testing.T) {
 	author := e.agented("author", "anthropic", "implement")
 	reviewer := e.agented("reviewer", "google", "implement", "review")
 	e.landGateRun(author, reviewer, GateAsk)
+	e.trailerOK(e.task)
 	e.exec("INSERT INTO landings (task_id, project_id, target_branch, commit_sha, pushed, source, created_at) VALUES (?, ?, 'main', 'abc123', 'pushed', 'trailer', ?)",
 		e.task, e.project, fmtTime(e.clock.Now()))
 
 	if err := e.eng.RecordLanded(e.ctx, envRepo, "main",
-		[]LandedCommit{{TaskID: e.task, Commit: "abc123"}}); err != nil {
+		[]LandedCommit{e.trailerFor(e.task, "abc123")}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -38,12 +39,13 @@ func TestRecordLandedClearsHeldHold(t *testing.T) {
 	author := e.agented("author", "anthropic", "implement")
 	reviewer := e.agented("reviewer", "google", "implement", "review")
 	e.landGateRun(author, reviewer, GateAsk)
+	e.trailerOK(e.task)
 	if it, ok := e.needsYouTask(e.task); !ok || !strings.Contains(it.Reason, "held by rule") {
 		t.Fatalf("before the detection: needs-you = %+v, ok %v, want a held-by-rule line", it, ok)
 	}
 
 	if err := e.eng.RecordLanded(e.ctx, envRepo, "main",
-		[]LandedCommit{{TaskID: e.task, Commit: "abc123"}}); err != nil {
+		[]LandedCommit{e.trailerFor(e.task, "abc123")}); err != nil {
 		t.Fatal(err)
 	}
 

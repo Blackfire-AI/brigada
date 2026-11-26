@@ -11,12 +11,14 @@ import (
 
 // ReportLanded scans the branch a freshly refreshed foreman checkout
 // reads — the land target when one is set, else the default branch — for
-// Brigada-Task trailers and reports each task it finds to the
-// engine as landed (§7.1): a landing made outside the land job — a hand
-// squash, or a brigada land in the user's clone. It is called from a
-// headless turn and from attach, the two places the checkout is
-// refreshed; a failure to scan or report is returned, and the callers
-// treat it as a warning, never a turn or attach failure.
+// Brigada-Task trailers and reports every commit carrying one to the
+// engine, newest first per task, each with its Brigada-Branch trailer's
+// branch and head (§7.1): a landing made outside the land job — a hand
+// squash, or a brigada land in the user's clone. The engine validates
+// each candidate against the task's own work before it records anything.
+// It is called from a headless turn and from attach, the two places the
+// checkout is refreshed; a failure to scan or report is returned, and the
+// callers treat it as a warning, never a turn or attach failure.
 func ReportLanded(ctx context.Context, client *api.Client, repoURL, branch string, checkout foreman.Checkout) error {
 	landed, err := landing.LandedCommits(ctx, checkout.Path, "HEAD")
 	if err != nil {
@@ -26,8 +28,10 @@ func ReportLanded(ctx context.Context, client *api.Client, repoURL, branch strin
 		return nil
 	}
 	recs := make([]engine.LandedCommit, 0, len(landed))
-	for id, sha := range landed {
-		recs = append(recs, engine.LandedCommit{TaskID: id, Commit: sha})
+	for id, candidates := range landed {
+		for _, c := range candidates {
+			recs = append(recs, engine.LandedCommit{TaskID: id, Commit: c.SHA, Branch: c.Branch, Head: c.Head})
+		}
 	}
 	return client.RecordLanded(ctx, repoURL, branch, recs)
 }
