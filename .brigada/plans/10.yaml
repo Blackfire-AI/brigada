@@ -5,9 +5,9 @@
 plan: 10
 title: "Fix #264: quota-scope cooling for multi-provider opencode"
 repo: "github.com/Blackfire-AI/brigada"
-state: needs_foreman
+state: reviewing
 created: 2026-11-26T20:42:36.102423361Z
-updated: 2026-11-26T21:19:40.76557Z
+updated: 2026-11-26T21:23:57.146231369Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -45,7 +45,19 @@ tasks:
     effort: medium
     review_tier: standard
     review_effort: medium
-    skills: ["bugfix"]
+    skills: ["bugfix", "surface-parity"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 34
+    name: "changelog-264"
+    title: "CHANGELOG entry for quota-scope cooling (#264)"
+    class: "implement"
+    deps: ["scope-cooling"]
+    base: "scope-cooling"
+    tier: light
+    effort: low
+    skills: ["docs-change"]
     state: pending
     branch: ""
     rounds: 0
