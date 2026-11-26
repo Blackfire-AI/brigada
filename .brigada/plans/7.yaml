@@ -5,9 +5,9 @@
 plan: 7
 title: "Fix #254: flaky lifecycle test seeds example.com"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: done
 created: 2026-11-26T20:42:36.030416107Z
-updated: 2026-11-26T20:58:28.066985013Z
+updated: 2026-11-26T21:55:26.792984775Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
