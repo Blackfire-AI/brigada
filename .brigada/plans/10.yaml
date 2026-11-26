@@ -3,11 +3,11 @@
 # here are overwritten. It holds the graph, the task states, the branches
 # and the open questions — never transcripts.
 plan: 10
-title: "Experimental DeepSeek Harness (dsh) adapter: worker and reviewer (#37)"
+title: "Fix #264: quota-scope cooling for multi-provider opencode"
 repo: "github.com/Blackfire-AI/brigada"
-state: done
-created: 2026-10-20T08:49:34.581969Z
-updated: 2026-10-20T17:50:35.185604Z
+state: reviewing
+created: 2026-11-26T20:42:36.102423361Z
+updated: 2026-11-26T20:42:36.102423361Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -21,34 +21,31 @@ updated: 2026-10-20T17:50:35.185604Z
 # override the task's fix_rounds, review_rounds and restart budgets (§6.1);
 # skills name the project's skills the task carries, in order (§5.10).
 tasks:
-  - id: 38
-    name: "dsh-adapter"
-    title: "dsh adapter: headless work, fix and review runs (#37)"
+  - id: 17
+    name: "scope-identity"
+    title: "Quota-scope identity: agent key, advert, migration and inherited-cooling reset (Refs #264)"
     class: "implement"
     deps: []
     base: ""
-    effort: high
-    state: done
-    branch: "brigada/task-38-r2"
-    rounds: 0
-  - id: 39
-    name: "dsh-init"
-    title: "brigada init offers dsh agents (#37)"
-    class: "implement"
-    deps: ["dsh-adapter"]
-    base: "dsh-adapter"
+    tier: heavy
     effort: medium
-    state: cancelled
+    review_tier: standard
+    review_effort: medium
+    skills: ["schema-migration", "bugfix"]
+    state: pending
     branch: ""
     rounds: 0
-  - id: 46
-    name: "dsh-init-2"
-    title: "brigada init offers dsh agents (#37), finish from task 39"
+  - id: 18
+    name: "scope-cooling"
+    title: "coolUntilTx groups by quota scope; cooling events and renderers name it (Closes #264)"
     class: "implement"
-    deps: []
-    base: ""
+    deps: ["scope-identity"]
+    base: "scope-identity"
+    continue: "scope-identity"
     effort: medium
-    state: done
-    branch: "brigada/task-46-r1"
+    review_tier: standard
+    review_effort: medium
+    skills: ["bugfix"]
+    state: pending
+    branch: ""
     rounds: 0
-    extra_repos: [["prior", "github.com/Blackfire-AI/brigada", "brigada/task-39"]]
