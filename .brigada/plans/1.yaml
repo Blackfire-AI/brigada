@@ -5,9 +5,9 @@
 plan: 1
 title: "Issue #259 first slice: guidance, plan monitoring, landing barrier, amendment envelope, done-report actuals"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: done
 created: 2026-11-26T16:13:28.485100341Z
-updated: 2026-11-26T19:30:24.413622748Z
+updated: 2026-11-26T19:32:58.998353677Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -30,7 +30,7 @@ tasks:
     effort: high
     caps: {restart: 9}
     skills: ["schema-migration"]
-    state: ready
+    state: cancelled
     branch: ""
     rounds: 0
   - id: 2
@@ -42,7 +42,7 @@ tasks:
     effort: medium
     review_tier: standard
     skills: ["cli-flag", "surface-parity"]
-    state: pending
+    state: cancelled
     branch: ""
     rounds: 0
   - id: 3
@@ -54,7 +54,7 @@ tasks:
     continue: "barrier"
     effort: medium
     review_tier: standard
-    state: pending
+    state: cancelled
     branch: ""
     rounds: 0
   - id: 4
@@ -75,6 +75,6 @@ tasks:
     deps: ["barrier"]
     base: "barrier"
     effort: medium
-    state: pending
+    state: cancelled
     branch: ""
     rounds: 0
