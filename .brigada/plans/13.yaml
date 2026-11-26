@@ -5,9 +5,9 @@
 plan: 13
 title: "Fix #123: per-task tool grants"
 repo: "github.com/Blackfire-AI/brigada"
-state: needs_foreman
+state: reviewing
 created: 2026-11-26T20:46:37.109826591Z
-updated: 2026-11-26T21:41:15.873991872Z
+updated: 2026-11-26T21:46:58.377982139Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -31,19 +31,68 @@ tasks:
     review_tier: standard
     review_effort: medium
     skills: ["schema-migration", "surface-parity"]
-    state: pending
+    state: cancelled
     branch: ""
     rounds: 0
   - id: 26
     name: "tools-enforcement"
     title: "Grant rides the lease to the adapter; runner refuses an unfinished merge (Closes #123)"
     class: "implement"
-    deps: ["tools-field"]
-    base: "tools-field"
-    continue: "tools-field"
+    deps: ["grants-approval"]
+    base: "grants-approval"
+    continue: "grants-approval"
+    tier: heavy
     effort: medium
     review_tier: standard
     review_effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 44
+    name: "grants-core"
+    title: "Per-task tool grants: the field, the allowlist, validation (Refs #123)"
+    class: "implement"
+    deps: []
+    base: ""
+    tier: heavy
+    effort: medium
+    skills: ["schema-migration"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 45
+    name: "grants-surfaces"
+    title: "Per-task tool grants: MCP, CLI, API, status, history, plan file (Refs #123)"
+    class: "implement"
+    deps: ["grants-core"]
+    base: "grants-core"
+    continue: "grants-core"
+    effort: medium
+    skills: ["surface-parity"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 46
+    name: "grants-approval"
+    title: "Per-task tool grants: approval trigger, setting, plan-review view (Refs #123)"
+    class: "implement"
+    deps: ["grants-surfaces"]
+    base: "grants-surfaces"
+    continue: "grants-surfaces"
+    effort: medium
+    skills: ["config-setting", "surface-parity"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 47
+    name: "grants-changelog"
+    title: "CHANGELOG entry for per-task tool grants (#123)"
+    class: "implement"
+    deps: ["tools-enforcement"]
+    base: "tools-enforcement"
+    tier: light
+    effort: low
+    skills: ["docs-change"]
     state: pending
     branch: ""
     rounds: 0
