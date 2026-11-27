@@ -5,9 +5,9 @@
 plan: 14
 title: "Fix #110: issue_read for Gitea-API forges"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: reviewing
 created: 2026-11-26T20:46:37.136764596Z
-updated: 2026-11-27T18:15:30.035411371Z
+updated: 2026-11-27T19:25:57.467143489Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -67,6 +67,18 @@ tasks:
     base: "gitea-fetcher"
     continue: "gitea-fetcher"
     effort: medium
-    state: reviewing
+    state: cancelled
     branch: "brigada/task-73"
+    rounds: 0
+  - id: 74
+    name: "tracker-docs-v2"
+    title: "Tracker docs, instruction surfaces and defaults 1.4.0 (Closes #110)"
+    class: "implement"
+    deps: ["gitea-fetcher"]
+    base: "gitea-fetcher"
+    continue: "gitea-fetcher"
+    effort: medium
+    skills: ["docs-change"]
+    state: pending
+    branch: ""
     rounds: 0
