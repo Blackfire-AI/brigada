@@ -78,8 +78,8 @@ tasks:
     continue: "publish-lease"
     effort: medium
     skills: ["bugfix"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-83"
     rounds: 0
   - id: 87
     name: "publish-retry"
