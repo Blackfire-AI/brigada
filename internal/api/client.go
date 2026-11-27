@@ -299,6 +299,7 @@ type HistoryQuery struct {
 	ProjectID int64
 	TaskID    int64
 	JobID     int64
+	PlanID    int64
 	Since     string
 	Limit     int
 	Last      bool
@@ -319,6 +320,7 @@ func (c *Client) History(ctx context.Context, q HistoryQuery) (history.Page, err
 	add("project", q.ProjectID)
 	add("task", q.TaskID)
 	add("job", q.JobID)
+	add("plan", q.PlanID)
 	if q.Since != "" {
 		vals.Set("since", q.Since)
 	}

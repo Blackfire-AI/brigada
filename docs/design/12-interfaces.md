@@ -2,7 +2,7 @@
 
 ## 12.1 Engine API
 
-JSON over HTTP on a Unix socket; a remote TLS listener is backlog (§2). Bearer tokens with roles: `client`, `foreman` (scoped to its project), `runner`, `admin`. A role authorizes API calls; approving a plan, a landing or a push is the user's decision by convention (Approval is the user's decision, §12.2).
+JSON over HTTP on a Unix socket; `GET /v1/status` takes a `plan` query parameter that narrows the answer to one plan (404 for an unknown plan; the answer's `plan_scope` carries its spend, land head and recent timeline items), and `GET /v1/history` takes `plan` beside `task` and `job`, composing with them, the `since` cursor and `last`; a remote TLS listener is backlog (§2). Bearer tokens with roles: `client`, `foreman` (scoped to its project), `runner`, `admin`. A role authorizes API calls; approving a plan, a landing or a push is the user's decision by convention (Approval is the user's decision, §12.2).
 
 Groups:
 
@@ -57,6 +57,8 @@ Task jobs are keyed `task:<id>`: one live job per key makes duplicate job creati
 - `capacity`.
 
 `status` lists the project's skills (name, description, digest, times used) and shows the pauses that stand, the engine's and the project's own, as the `paused:` lines of `brigada status` do (§8.3), so a turn reads why its work waits; a pause is not a needs-you entry. It also, when asked, returns a role's instructions text inside its delimiters (§5.9, §5.10).
+
+`status` takes a `plan` argument that narrows the answer to one plan, and `json` to return the API's JSON instead of text. With `plan` the answer is the plan's compact summary — its task counts by state, its blockers (needs_foreman and needs_user tasks, holds, retries and land gates), its land head, its spend and its recent transitions — without the global job totals, other plans, skill inventories or instruction digests; `brigada status --plan N [--json]` prints the same. `history` takes a `plan` argument beside `task`: the plan's own events and its tasks' and jobs' (§9). The client and coordinator sets take `plan` and `json` on `status` and `plan` on `history` with the same meaning; an unknown plan is an error.
 
 `history` answers each item in its own `<event>` data delimiters, like `events` (§4.2), with any delimiter inside the text defused: reasons, reports and questions in it are worker text, data and never instructions.
 

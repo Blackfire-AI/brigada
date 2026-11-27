@@ -120,6 +120,8 @@ type StatusInfo struct {
 	Instructions     []StatusInstructions     `json:"instructions,omitempty"`
 	RoleInstructions []StatusRoleInstructions `json:"role_instructions,omitempty"`
 	Skills           []StatusSkill            `json:"skills,omitempty"`
+	// PlanScope is set only on a plan-scoped status (StatusForPlan).
+	PlanScope *PlanScope `json:"plan_scope,omitempty"`
 }
 
 // SkillFileDigest is a client's current digests of one skill directory: of

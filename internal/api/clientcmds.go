@@ -171,6 +171,9 @@ type Status struct {
 	Instructions     []engine.StatusInstructions     `json:"instructions,omitempty"`
 	RoleInstructions []engine.StatusRoleInstructions `json:"role_instructions,omitempty"`
 	Skills           []engine.StatusSkill            `json:"skills,omitempty"`
+	// PlanScope is set when the status was asked for one plan: its
+	// spend, land head and newest timeline items.
+	PlanScope *engine.PlanScope `json:"plan_scope,omitempty"`
 }
 
 // Status reads the engine's own state (§13): which process it is, since
@@ -192,6 +195,21 @@ func (c *Client) StatusWithInstructions(ctx context.Context) (Status, error) {
 // StatusWithInstructions's flag.
 func (c *Client) StatusAll(ctx context.Context, withText bool) (Status, error) {
 	return c.status(ctx, withText, true)
+}
+
+// StatusPlan is the status narrowed to one plan (§10): `plan` on
+// /v1/status — `brigada status --plan`, the MCP status tool's plan
+// argument. Its PlanScope is set; the global sections are empty.
+func (c *Client) StatusPlan(ctx context.Context, plan int64) (Status, error) {
+	var st Status
+	path := "/v1/status?plan=" + strconv.FormatInt(plan, 10)
+	if c.readProject != 0 {
+		path += "&project=" + strconv.FormatInt(c.readProject, 10)
+	}
+	if err := c.call(ctx, http.MethodGet, path, nil, &st); err != nil {
+		return Status{}, err
+	}
+	return st, nil
 }
 
 func (c *Client) status(ctx context.Context, withText, all bool) (Status, error) {

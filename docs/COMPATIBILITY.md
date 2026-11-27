@@ -21,14 +21,14 @@ What brigada 1.0 promises until 2.0.
 - `pause`, `resume`: `--repo`, `--no-start`. An empty `--repo` (and its absence) is the engine's scope.
 - `stop`: `--engine`, `--drain` (which needs `--engine`: pause the engine and wait out its running jobs before stopping).
 - `mcp`: `--coordinator`, `--client`, `--socket`.
-- `status`: `--line`, `--all`, `--no-start`.
+- `status`: `--line`, `--all`, `--plan`, `--json`, `--no-start`.
 - `task submit`: `--repo`, `--base`, `--spec`, `--check`, `--title`, `--harness`, `--no-start`.
 - `task retire`: `--reason` (required), `--no-start`.
 - `project foreman`: `--repo`, `--harness`, `--model`, `--effort`, `--no-start`.
 - `project list`: `--no-start`.
 - `project set` and `project show`: `--repo`, `--no-start`.
 - `project import`: `--repo`, `--file`, `--yes`, `--no-start`.
-- `history`: `--task`, `--job`, `--limit`, `--all`, `--raw`, `--no-start`.
+- `history`: `--plan`, `--task`, `--job`, `--limit`, `--all`, `--raw`, `--no-start`.
 - `stats`: `--no-start`.
 - `capacity`: `--project`, `--no-start`.
 - `top`: `--interval`, `--project`, `--no-start`.
@@ -70,8 +70,8 @@ Within schema 1, new keys are added as optional keys. A file that worked before 
 - `land_retry` (experimental): `task` (required).
 - `check_log` (experimental): `job` (required), `offset` and `limit`.
 - `ask_user`: `text` (required).
-- `status`: `instructions` and `all`, both booleans.
-- `history`: `task` and `limit`.
+- `status`: `instructions`, `all` and `json`, all booleans, and `plan`, a plan id.
+- `history`: `plan`, `task` and `limit`.
 - `issue_read` (experimental): `number` (required) and `comments`, a boolean; it reads the project's own repository alone, never one the call names.
 - `events` (experimental): `wait_seconds`.
 - `capacity`: no arguments.
@@ -80,15 +80,15 @@ Within schema 1, new keys are added as optional keys. A file that worked before 
 **The client's MCP tools.** `brigada mcp --client` offers these tools to any harness acting for the user — a coding session, a coordinator — with these arguments:
 
 - `ask_foreman`: `text` (required) and `repo_url`.
-- `status`: `all`, a boolean.
-- `history`: `task` and `limit`.
+- `status`: `all` and `json`, both booleans, and `plan`, a plan id.
+- `history`: `plan`, `task` and `limit`.
 
 **The coordinator's MCP tools** (experimental). `brigada mcp --coordinator` offers these tools over several projects, with these arguments:
 
 - `list_projects`: no arguments.
 - `ask_foreman`: `repo_url` and `text` (both required).
-- `status`: `repo_url` and `all`.
-- `history`: `repo_url`, `task` and `limit`.
+- `status`: `repo_url`, `all`, `json` and `plan`.
+- `history`: `repo_url`, `plan`, `task` and `limit`.
 - `plan_approve`: `repo_url`, `plan` and `version` (all required), and `and_stop_asking`.
 - `plan_reject`: `repo_url`, `plan` and `version` (all required).
 

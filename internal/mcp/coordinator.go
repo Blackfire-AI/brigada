@@ -59,6 +59,14 @@ var CoordinatorTools = []Tool{
 					"type":        "boolean",
 					"description": "list every finished plan, not only the three most recent; the default counts the older ones in one summary line",
 				},
+				"plan": map[string]any{
+					"type":        "integer",
+					"description": "show one plan only: its task counts by state, blockers, land head, spend and recent transitions, without the global sections",
+				},
+				"json": map[string]any{
+					"type":        "boolean",
+					"description": "return the status as JSON (plan-scoped with plan) instead of text",
+				},
 			},
 		},
 		Call: callCoordinatorStatus,
@@ -72,6 +80,10 @@ var CoordinatorTools = []Tool{
 				"repo_url": map[string]any{
 					"type":        "string",
 					"description": "one project's canonical repo URL; omit for every project",
+				},
+				"plan": map[string]any{
+					"type":        "integer",
+					"description": "show one plan's timeline only: its own events and its tasks' and jobs'",
 				},
 				"task": map[string]any{
 					"type":        "integer",
@@ -220,6 +232,8 @@ func callCoordinatorStatus(ctx context.Context, c *api.Client, args json.RawMess
 	var a struct {
 		RepoURL string `json:"repo_url"`
 		All     bool   `json:"all"`
+		Plan    int64  `json:"plan"`
+		JSON    bool   `json:"json"`
 	}
 	if len(args) > 0 {
 		if err := json.Unmarshal(args, &a); err != nil {
@@ -231,13 +245,21 @@ func callCoordinatorStatus(ctx context.Context, c *api.Client, args json.RawMess
 		return "", err
 	}
 	var st api.Status
-	if a.All {
+	switch {
+	case a.Plan < 0:
+		return "", fmt.Errorf("arguments: plan must be a non-negative id")
+	case a.Plan != 0:
+		st, err = sc.StatusPlan(ctx, a.Plan)
+	case a.All:
 		st, err = sc.StatusAll(ctx, false)
-	} else {
+	default:
 		st, err = sc.Status(ctx)
 	}
 	if err != nil {
 		return "", err
+	}
+	if a.JSON || a.Plan != 0 {
+		return statusAnswer(st, a.Plan, a.JSON)
 	}
 	text := statusText(st)
 	var b strings.Builder

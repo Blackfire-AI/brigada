@@ -2,11 +2,13 @@ package api
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
 
 	"github.com/Blackfire-AI/brigada/internal/engine"
+	"github.com/Blackfire-AI/brigada/internal/history"
 )
 
 // StatusSections renders one status answer's running jobs, plans,
@@ -475,4 +477,94 @@ func latestDonePlan(plans []engine.StatusPlan) *engine.StatusPlan {
 		}
 	}
 	return latest
+}
+
+// PlanStatusSections renders a plan-scoped status (§10) as the compact
+// summary of one plan: its line, its task counts by state, the blockers
+// — tasks and the plan itself parked for a person or the foreman, held
+// jobs, waiting retries and land gates — the land head, the spend, the
+// jobs running and the newest transitions of its timeline. The global
+// job totals, other plans, skill inventories and instruction digests
+// are not in a plan-scoped status and never render here. The client's
+// `status --plan` and the MCP status tool's plan argument share it.
+func PlanStatusSections(st Status, now time.Time) string {
+	if len(st.Plans) == 0 {
+		return "plan: none"
+	}
+	p := st.Plans[0]
+	state := p.State
+	if state == "reviewing" || state == "needs_foreman" {
+		state = fmt.Sprintf("%s (round %d)", state, p.ReviewRound)
+	}
+	lines := []string{fmt.Sprintf("plan #%d %s %s", p.ID, state, p.Title)}
+
+	counts := map[string]int{}
+	for _, t := range p.Tasks {
+		counts[t.State]++
+	}
+	states := make([]string, 0, len(counts))
+	for s := range counts {
+		states = append(states, s)
+	}
+	sort.Strings(states)
+	parts := make([]string, 0, len(states))
+	for _, s := range states {
+		parts = append(parts, fmt.Sprintf("%s %d", s, counts[s]))
+	}
+	if len(parts) == 0 {
+		parts = append(parts, "none")
+	}
+	lines = append(lines, fmt.Sprintf("tasks (%d): %s", len(p.Tasks), strings.Join(parts, ", ")))
+
+	var blockers []string
+	for _, n := range append(append([]engine.NeedsYouItem{}, st.NeedsYou...), st.ForemanHolds...) {
+		line := fmt.Sprintf("%s #%d %s", n.Kind, n.ID, n.State)
+		if n.Reason != "" {
+			line += ": " + n.Reason
+		}
+		blockers = append(blockers, line)
+	}
+	for _, h := range st.Held {
+		what := fmt.Sprintf("job #%d", h.ID)
+		if h.TaskID != 0 {
+			what = fmt.Sprintf("task #%d", h.TaskID)
+		}
+		blockers = append(blockers, fmt.Sprintf("held: %s %s: %s", what, h.Kind, HeldWait(h)))
+	}
+	for _, r := range st.Retries {
+		blockers = append(blockers, "waiting: "+RetryLine(r, now))
+	}
+	for _, t := range p.Tasks {
+		if t.LandReady != "" && t.LandReady != "ready" {
+			blockers = append(blockers, fmt.Sprintf("gate: task #%d %s", t.ID, t.LandReady))
+		}
+	}
+	if len(blockers) == 0 {
+		lines = append(lines, "blockers: none")
+	} else {
+		lines = append(lines, "blockers:")
+		for _, b := range blockers {
+			lines = append(lines, "  "+b)
+		}
+	}
+
+	if sc := st.PlanScope; sc != nil {
+		head := sc.LandHead
+		if head == "" {
+			head = "none"
+		}
+		lines = append(lines, "land head: "+head)
+		lines = append(lines, fmt.Sprintf("spend: %d tokens, $%.2f", sc.Tokens, sc.CostUSD))
+	}
+	lines = append(lines, runningLines(st.Running, now)...)
+	if sc := st.PlanScope; sc != nil && len(sc.Recent) > 0 {
+		lines = append(lines, "recent:")
+		var b strings.Builder
+		if err := history.RenderReadable(&b, sc.Recent, now.Location()); err == nil {
+			for _, ln := range strings.Split(strings.TrimRight(b.String(), "\n"), "\n") {
+				lines = append(lines, "  "+ln)
+			}
+		}
+	}
+	return strings.Join(lines, "\n")
 }

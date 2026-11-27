@@ -408,6 +408,14 @@ var tools = []Tool{
 					"type":        "boolean",
 					"description": "list every finished plan, not only the three most recent; the default counts the older ones in one summary line",
 				},
+				"plan": map[string]any{
+					"type":        "integer",
+					"description": "show one plan only: its task counts by state, blockers, land head, spend and recent transitions, without the global sections",
+				},
+				"json": map[string]any{
+					"type":        "boolean",
+					"description": "return the status as JSON (plan-scoped with plan) instead of text",
+				},
 			},
 		},
 		Call: callStatus,
@@ -418,6 +426,10 @@ var tools = []Tool{
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
+				"plan": map[string]any{
+					"type":        "integer",
+					"description": "show one plan's timeline only: its own events and its tasks' and jobs'",
+				},
 				"task": map[string]any{
 					"type":        "integer",
 					"description": "show one task's timeline only",
@@ -534,8 +546,10 @@ func toolByName(offer []Tool, name string) (Tool, bool) {
 // where the default counts the older ones (§10).
 func callStatus(ctx context.Context, c *api.Client, args json.RawMessage) (string, error) {
 	var in struct {
-		Instructions bool `json:"instructions"`
-		All          bool `json:"all"`
+		Instructions bool  `json:"instructions"`
+		All          bool  `json:"all"`
+		Plan         int64 `json:"plan"`
+		JSON         bool  `json:"json"`
 	}
 	if len(args) > 0 {
 		if err := json.Unmarshal(args, &in); err != nil {
@@ -545,6 +559,10 @@ func callStatus(ctx context.Context, c *api.Client, args json.RawMessage) (strin
 	var st api.Status
 	var err error
 	switch {
+	case in.Plan < 0:
+		return "", fmt.Errorf("status: plan must be a non-negative id")
+	case in.Plan != 0:
+		st, err = c.StatusPlan(ctx, in.Plan)
 	case in.All:
 		st, err = c.StatusAll(ctx, in.Instructions)
 	case in.Instructions:
@@ -554,6 +572,24 @@ func callStatus(ctx context.Context, c *api.Client, args json.RawMessage) (strin
 	}
 	if err != nil {
 		return "", err
+	}
+	return statusAnswer(st, in.Plan, in.JSON)
+}
+
+// statusAnswer renders a status as the status tools answer it: the JSON
+// the API sent when asked for (the same `brigada status --json` prints),
+// the compact plan summary for a plan-scoped one, the global text
+// otherwise.
+func statusAnswer(st api.Status, plan int64, asJSON bool) (string, error) {
+	switch {
+	case asJSON:
+		out, err := json.MarshalIndent(st, "", "  ")
+		if err != nil {
+			return "", fmt.Errorf("status: %w", err)
+		}
+		return string(out), nil
+	case plan != 0:
+		return api.PlanStatusSections(st, time.Now()), nil
 	}
 	return statusText(st), nil
 }
@@ -606,6 +642,7 @@ func parseStartedAt(s string) time.Time {
 // sees its own project whatever it asks.
 func callHistory(ctx context.Context, c *api.Client, args json.RawMessage) (string, error) {
 	var a struct {
+		Plan  *int64 `json:"plan"`
 		Task  *int64 `json:"task"`
 		Limit int    `json:"limit"`
 	}
@@ -615,6 +652,9 @@ func callHistory(ctx context.Context, c *api.Client, args json.RawMessage) (stri
 		}
 	}
 	q := api.HistoryQuery{Limit: a.Limit, Last: true}
+	if a.Plan != nil {
+		q.PlanID = *a.Plan
+	}
 	if a.Task != nil {
 		q.TaskID = *a.Task
 	}

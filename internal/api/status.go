@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -15,7 +16,9 @@ import (
 // by, and a client or admin reads every project. One of the two places
 // a client learns the engine is alive besides /v1/health, and the one
 // with content. The plans list keeps every live plan and the newest
-// finished ones; `all` lists every finished plan (§10).
+// finished ones; `all` lists every finished plan (§10). `plan` narrows
+// the answer to one plan: its tasks and what belongs to them, with its
+// spend, land head and recent timeline, and none of the global sections.
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request, id identity) {
 	if !requireMethod(w, r, http.MethodGet) {
 		return
@@ -30,6 +33,26 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request, id identit
 			return
 		}
 		project = id.project
+	}
+	plan, err := queryInt64(w, r, "plan")
+	if err != nil {
+		return
+	}
+	if plan != 0 {
+		st, err := s.eng.StatusForPlan(r.Context(), project, plan)
+		if errors.Is(err, engine.ErrNoPlan) {
+			writeError(w, http.StatusNotFound, codeNotFound, err.Error())
+			return
+		}
+		if err != nil {
+			s.writeInternal(w, r, "read plan status", err)
+			return
+		}
+		if id.role != roleForeman {
+			st.SplitForemanHolds()
+		}
+		writeJSON(w, http.StatusOK, st)
+		return
 	}
 	withText := r.URL.Query().Get("instructions") != ""
 	all := r.URL.Query().Get("all") != ""

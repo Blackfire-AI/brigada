@@ -46,6 +46,14 @@ var ClientTools = []Tool{
 					"type":        "boolean",
 					"description": "list every finished plan, not only the three most recent; the default counts the older ones in one summary line",
 				},
+				"plan": map[string]any{
+					"type":        "integer",
+					"description": "show one plan only: its task counts by state, blockers, land head, spend and recent transitions, without the global sections",
+				},
+				"json": map[string]any{
+					"type":        "boolean",
+					"description": "return the status as JSON (plan-scoped with plan) instead of text",
+				},
 			},
 		},
 		Call: callStatus,
@@ -56,6 +64,10 @@ var ClientTools = []Tool{
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
+				"plan": map[string]any{
+					"type":        "integer",
+					"description": "show one plan's timeline only: its own events and its tasks' and jobs'",
+				},
 				"task": map[string]any{
 					"type":        "integer",
 					"description": "show one task's timeline only",
