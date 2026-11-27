@@ -81,7 +81,7 @@ tasks:
     tier: heavy
     effort: medium
     skills: ["schema-migration", "surface-parity"]
-    state: ready
+    state: running
     branch: "brigada/task-50-r2"
     rounds: 0
   - id: 51
