@@ -106,6 +106,6 @@ tasks:
     effort: medium
     caps: {restart: 5}
     skills: ["schema-migration"]
-    state: ready
+    state: running
     branch: "brigada/task-56-r4"
     rounds: 0
