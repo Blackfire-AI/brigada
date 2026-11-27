@@ -2,6 +2,9 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/Blackfire-AI/brigada/internal/engine"
@@ -47,5 +50,33 @@ func TestLandBatchGrantCarriesGateReleases(t *testing.T) {
 		if g.LandRecheck != lg.LandRecheck || (lg.LandBatch && !g.LandMembers[0].SkipLandReady) {
 			t.Errorf("grant = %+v, want the re-check mark %v and every member's release", g, lg.LandRecheck)
 		}
+	}
+}
+
+// TestLandProgressEndpoint: the runner's progress report answers as the
+// lease does — lost for another lease — and a report the engine refuses
+// as the caller's mistake, here progress for a job that is no batch, is a
+// bad request naming it.
+func TestLandProgressEndpoint(t *testing.T) {
+	e := newEnv(t)
+	e.register("r1")
+	e.submitWork()
+	_, data := e.lease("r1", 0)
+	grant := decode[struct {
+		Job *jobGrant `json:"job"`
+	}](t, data)
+	if grant.Job == nil {
+		t.Fatalf("lease answered no job: %s", data)
+	}
+	g := grant.Job
+	body := fmt.Sprintf(`{"job_id":%d,"lease_id":%q,"members":[{"task_id":%d,"outcome":"dropped"}]}`, g.JobID, "not-the-lease", e.task)
+	code, _, data := e.do(http.MethodPost, "/v1/runner/land-progress", "r1", "", []byte(body))
+	if code != http.StatusOK || decode[answerBody](t, data).Answer != "lost" {
+		t.Errorf("another lease's report: %d %s, want 200 lost", code, data)
+	}
+	body = fmt.Sprintf(`{"job_id":%d,"lease_id":%q,"members":[{"task_id":%d,"outcome":"dropped"}]}`, g.JobID, g.LeaseID, e.task)
+	code, _, data = e.do(http.MethodPost, "/v1/runner/land-progress", "r1", "", []byte(body))
+	if code != http.StatusBadRequest || !strings.Contains(string(data), "no land batch") {
+		t.Errorf("a work job's report: %d %s, want 400 naming it no land batch", code, data)
 	}
 }
