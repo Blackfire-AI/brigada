@@ -236,6 +236,6 @@ tasks:
     continue: "batch-progress"
     tier: heavy
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-78"
     rounds: 0
