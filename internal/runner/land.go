@@ -75,6 +75,15 @@ type pushRecordJSON struct {
 type landHeldJSON struct {
 	Outcome string `json:"outcome"` // 'held'
 	Line    string `json:"line"`    // the command's first output line
+	// Suspects is the suspect line the gate evidence words (§7.1), empty
+	// while the runner names none.
+	Suspects string `json:"suspects,omitempty"`
+}
+
+// landReadyJSON is the record a re-check's pass carries (§7.1
+// "Deciding a batch hold"): the command said yes, and nothing landed.
+type landReadyJSON struct {
+	Outcome string `json:"outcome"` // 'ready'
 }
 
 // landNotReadyJSON is the record a land job's not-ready outcome carries
@@ -164,6 +173,13 @@ func (r *jobRun) runLandSquashPhase(ctx context.Context) {
 	// The land_ready gate (issue #87) runs before anything lands; its
 	// answer completes the job here and the landing never starts.
 	if !r.runLandReady(ctx, dir) {
+		return
+	}
+	// The engine's re-check of a held member (§7.1 "Deciding a batch
+	// hold") lands nothing: the command's yes releases the member into
+	// the next batch, with its gate skipped there.
+	if grant.LandRecheck {
+		r.finishLandOutcome(ctx, outcomeLandReady, landReadyJSON{Outcome: outcomeLandReady})
 		return
 	}
 	// The landing check sees what a work's check sees (§5.7, §5.8): the
@@ -711,20 +727,32 @@ func (r *jobRun) runLandReady(ctx context.Context, dir string) bool {
 	if grant.LandReady == "" || grant.SkipLandReady {
 		return true
 	}
+	held, notReady := r.landReadyAnswer(ctx, dir)
+	switch {
+	case held != nil:
+		r.finishLandOutcome(ctx, outcomeLandHeld, *held)
+		return false
+	case notReady != nil:
+		r.finishLandOutcome(ctx, outcomeLandNotReady, *notReady)
+		return false
+	}
+	return true
+}
+
+// landReadyAnswer runs the land_ready command once and words its answer:
+// both nil for exit 0, the held record for exit 1, the not-ready record
+// for every other way it could not say yes.
+func (r *jobRun) landReadyAnswer(ctx context.Context, dir string) (held *landHeldJSON, notReady *landNotReadyJSON) {
 	timeout := r.cfg.CheckTimeout
 	if timeout <= 0 {
 		timeout = defaultCheckTimeout
 	}
-	res := runCheckIn(ctx, dir, grant.LandReady, timeout, r.cfg.commandEnv())
+	res := runCheckIn(ctx, dir, r.grant.LandReady, timeout, r.cfg.commandEnv())
 	if !res.Failed() {
-		return true
+		return nil, nil
 	}
 	if res.ExitCode == 1 && !res.TimedOut {
-		r.finishLandOutcome(ctx, outcomeLandHeld, landHeldJSON{
-			Outcome: outcomeLandHeld,
-			Line:    firstLineOf(res.Output),
-		})
-		return false
+		return &landHeldJSON{Outcome: outcomeLandHeld, Line: firstLineOf(res.Output)}, nil
 	}
 	reason := ""
 	switch {
@@ -733,12 +761,7 @@ func (r *jobRun) runLandReady(ctx context.Context, dir string) bool {
 	case res.ExitCode < 0:
 		reason = "the command did not run"
 	}
-	r.finishLandOutcome(ctx, outcomeLandNotReady, landNotReadyJSON{
-		Outcome: outcomeLandNotReady,
-		Exit:    res.ExitCode,
-		Reason:  reason,
-	})
-	return false
+	return nil, &landNotReadyJSON{Outcome: outcomeLandNotReady, Exit: res.ExitCode, Reason: reason}
 }
 
 // finishLandOutcome completes the land job with a land_ready gate

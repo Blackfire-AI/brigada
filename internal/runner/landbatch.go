@@ -38,6 +38,10 @@ const (
 	landMemberLanded  = "landed"
 	landMemberParked  = "parked"
 	landMemberDropped = "dropped"
+	// A mixed batch's gate answer for a member subject to it (§7.1
+	// "Deciding a batch hold").
+	landMemberHeld     = engine.OutcomeLandHeld
+	landMemberNotReady = engine.OutcomeLandNotReady
 )
 
 // landBatchJSON is a batch land job's completion (§12.3): every granted
@@ -57,6 +61,9 @@ type landMemberJSON struct {
 	Record    *landRecordJSON `json:"record,omitempty"`
 	Reason    string          `json:"reason,omitempty"`
 	BlockedBy int64           `json:"blocked_by,omitempty"`
+	Line      string          `json:"line,omitempty"`
+	Suspects  string          `json:"suspects,omitempty"`
+	Exit      int             `json:"exit,omitempty"`
 }
 
 // isLandBatch reports whether the grant is a batch land job's squash
@@ -110,8 +117,10 @@ func (r *jobRun) runLandBatch(ctx context.Context) {
 	}
 	// land_ready runs once per land job, before the first squash (§7.1),
 	// never again for a rejected push's retries; its answer covers the
-	// whole batch.
-	if !r.runLandReady(ctx, dir) {
+	// members subject to it — every member but those whose gate an
+	// approval or a re-check released.
+	settled := map[int64]landMemberJSON{}
+	if !r.runLandBatchReady(ctx, dir, settled) {
 		return
 	}
 	defer r.cleanupSetup()
@@ -122,23 +131,58 @@ func (r *jobRun) runLandBatch(ctx context.Context) {
 		}
 		return
 	}
-	settled, errMsg, kind := r.landBatchLoop(ctx, dir)
+	errMsg, kind := r.landBatchLoop(ctx, dir, settled)
 	r.finishLandBatch(ctx, settled, errMsg, kind)
+}
+
+// runLandBatchReady runs the batch's land_ready gate (§7.1 "Deciding a
+// batch hold"). With every member subject to the command its answer is
+// the batch's, completing the job as a one-task landing's does; with
+// every member's gate released nothing runs. A mixed batch runs the
+// command once: exit 0 lets every member go on, and a refusal settles
+// only the members subject to it — each its own hold with the same line,
+// or its own retry — while the released members go on in this batch,
+// the dependents of a member it held dropping to wait. false when the
+// gate completed the job.
+func (r *jobRun) runLandBatchReady(ctx context.Context, dir string, settled map[int64]landMemberJSON) bool {
+	grant := r.grant
+	var subject []int64
+	for _, m := range grant.LandMembers {
+		if !m.SkipLandReady {
+			subject = append(subject, m.TaskID)
+		}
+	}
+	if len(subject) == len(grant.LandMembers) {
+		return r.runLandReady(ctx, dir)
+	}
+	if grant.LandReady == "" || grant.SkipLandReady || len(subject) == 0 {
+		return true
+	}
+	held, notReady := r.landReadyAnswer(ctx, dir)
+	for _, id := range subject {
+		switch {
+		case held != nil:
+			settled[id] = landMemberJSON{TaskID: id, Outcome: landMemberHeld, Line: held.Line, Suspects: held.Suspects}
+		case notReady != nil:
+			settled[id] = landMemberJSON{TaskID: id, Outcome: landMemberNotReady, Exit: notReady.Exit, Reason: notReady.Reason}
+		}
+	}
+	return true
 }
 
 // landBatchLoop runs the batch's attempts in the prepared clone (§7.1)
 // and returns every member's settled outcome and, when the batch stopped
 // partway, the error and its kind that settle the rest.
-func (r *jobRun) landBatchLoop(ctx context.Context, dir string) (settled map[int64]landMemberJSON, errMsg, kind string) {
+func (r *jobRun) landBatchLoop(ctx context.Context, dir string, settled map[int64]landMemberJSON) (errMsg, kind string) {
 	grant := r.grant
 	pause := landRetryPause
 	if r.cfg.landRetryPause != nil {
 		pause = r.cfg.landRetryPause
 	}
-	// settled holds every member's final outcome as it is reached: a
-	// content failure parks for good, its dependents drop for good, and a
-	// published member is landed — a retry re-squashes only the rest.
-	settled = map[int64]landMemberJSON{}
+	// settled holds every member's final outcome as it is reached — the
+	// gate's hold of a member subject to it, a content failure's park, a
+	// dropped dependent, a published member — so a retry re-squashes only
+	// the rest.
 	for attempt := 1; ; attempt++ {
 		res, err := r.landBatchAttempt(ctx, dir, settled)
 		// The attempt writes each member's outcome into settled as it is
@@ -152,7 +196,7 @@ func (r *jobRun) landBatchLoop(ctx context.Context, dir string) (settled map[int
 			if errors.As(err, &setup) {
 				kind = engine.ErrorKindSetup
 			}
-			return settled, err.Error(), kind
+			return err.Error(), kind
 		}
 		if !res.rejected {
 			break
@@ -172,10 +216,10 @@ func (r *jobRun) landBatchLoop(ctx context.Context, dir string) (settled map[int
 		case <-time.After(pause(attempt)):
 		case <-ctx.Done():
 			r.gone(ctx, "waiting to retry the land batch's push")
-			return settled, "the run was no longer ours while the land batch waited to retry its push", ""
+			return "the run was no longer ours while the land batch waited to retry its push", ""
 		}
 	}
-	return settled, "", ""
+	return "", ""
 }
 
 // finishLandBatch completes the batch with every settled member in batch

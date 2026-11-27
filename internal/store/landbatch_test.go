@@ -26,3 +26,17 @@ func TestLandBatchMigration(t *testing.T) {
 		t.Errorf("work job without a task: err = %v; want the pairing CHECK to stand", err)
 	}
 }
+
+// TestLandSkipReadyMigration pins 0091: tasks gain land_skip_ready, 0 for
+// every existing task — none carries a released land_ready gate — and
+// settable to 1.
+func TestLandSkipReadyMigration(t *testing.T) {
+	f := newFixture(t)
+	if got := queryInt(t, f.db, "SELECT land_skip_ready FROM tasks WHERE id = ?", f.task); got != 0 {
+		t.Errorf("land_skip_ready of an existing task = %d, want 0", got)
+	}
+	exec(t, f.db, "UPDATE tasks SET land_skip_ready = 1 WHERE id = ?", f.task)
+	if got := queryInt(t, f.db, "SELECT land_skip_ready FROM tasks WHERE id = ?", f.task); got != 1 {
+		t.Errorf("land_skip_ready = %d, want 1", got)
+	}
+}
