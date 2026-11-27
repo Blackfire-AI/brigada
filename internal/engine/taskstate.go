@@ -1159,12 +1159,13 @@ func agentFamilyTx(tx *sql.Tx, agent int64) (string, error) {
 // reviewCompletedTx applies a review job's verdict block (§7):
 // a substantive approve finishes the task; changes asks for a fix round
 // on the author's session with the findings as the feedback (§3), or
-// parks the task when the review rounds are spent; anything else — no
-// block, a malformed one, an approve without substantive findings, a run
-// that ended in an error — is no verdict: a stall, a missing result or a
-// malformed one records a reliability failure on the review class, and
-// the review goes to another agent of the cycle, up to the bound of
-// distinct agents, before the task parks waiting for the foreman.
+// parks the task when the review rounds are spent. Both substantive
+// verdicts count as successful reviews on the outcome record; anything
+// else — no block, a malformed one, an approve without substantive
+// findings, a run that ended in an error — is no verdict and records a
+// reliability failure on the review class, and the review goes to another
+// agent of the cycle, up to the bound of distinct agents, before the task
+// parks waiting for the foreman.
 func (e *Engine) reviewCompletedTx(tx *sql.Tx, job *jobRow, c Completion, now time.Time) error {
 	var v verdictBlock
 	haveVerdict := json.Unmarshal([]byte(c.Result), &v) == nil &&
@@ -1176,6 +1177,11 @@ func (e *Engine) reviewCompletedTx(tx *sql.Tx, job *jobRow, c Completion, now ti
 		}
 		return e.taskDoneTx(tx, job, now)
 	case haveVerdict && v.Verdict == verdictChanges:
+		// A substantive changes verdict is a successful review too (§8):
+		// the reviewer answered the contract, whatever it judged.
+		if err := recordOutcomeTx(tx, job, now); err != nil {
+			return err
+		}
 		// The findings are the fix round's feedback (§3) and the event's
 		// own payload (§9): the review's words are kept whatever follows.
 		placement, err := jobPlacementTx(tx, job.ID)
@@ -1204,13 +1210,11 @@ func (e *Engine) reviewCompletedTx(tx *sql.Tx, job *jobRow, c Completion, now ti
 		case haveVerdict:
 			reason = "approve without substantive findings"
 		}
-		if !haveVerdict {
-			// A stall, a missing result or a malformed block is a
-			// reliability failure of the review class (§7, §11); a thin
-			// approve answered, and stays off the record.
-			if err := recordReviewFailureTx(tx, job, now); err != nil {
-				return err
-			}
+		// A stall, a missing result, a malformed block or a thin approve
+		// is a reliability failure of the review class (§7, §8, §11):
+		// none of them answered the contract with a usable verdict.
+		if err := recordReviewFailureTx(tx, job, now); err != nil {
+			return err
 		}
 		return e.queueReviewRetryTx(tx, job, reason, now)
 	}
@@ -1444,18 +1448,23 @@ type verdictBlock struct {
 	Findings string `json:"findings"`
 }
 
-// recordOutcomeTx counts a substantive approve on the outcome record
-// (§7, §11): the reviewer's agent, on the review class, one attempt and
-// one success — success is what a review is, which is why the lazy
-// approval next to it reads as no verdict instead. A review that ran
-// with no agent — an agent-less runner — has nobody to score and
-// records nothing.
+// recordOutcomeTx counts a substantive verdict — an approve with
+// substantive findings or a changes verdict — on the outcome record
+// (§7, §8, §11): the reviewer's agent, on the review class, one attempt
+// and one success. Answering the contract is what a successful review
+// is, which is why the lazy approval next to it reads as a failure
+// instead. The valid completion also resets the agent's class-scoped
+// reliability cooldown. A review that ran with no agent — an agent-less
+// runner — has nobody to score and records nothing.
 func recordOutcomeTx(tx *sql.Tx, job *jobRow, now time.Time) error {
 	if job.AgentID == 0 {
 		return nil
 	}
 	skills, err := taskSkillCountTx(tx, job.TaskID)
 	if err != nil {
+		return err
+	}
+	if err := resetClassCooldownTx(tx, job.AgentID, string(KindReview)); err != nil {
 		return err
 	}
 	_, err = tx.Exec(`INSERT INTO outcomes (project_id, agent_id, class, skills, attempts, successes, updated_at)
@@ -1470,11 +1479,14 @@ func recordOutcomeTx(tx *sql.Tx, job *jobRow, now time.Time) error {
 }
 
 // recordReviewFailureTx counts an unusable review on the outcome record
-// (§7, §11): the reviewer's agent, on the review class, one attempt and
-// no success — a stall, a missing result or a malformed verdict is a
-// reliability failure of the review, not a judgment of the change. A
-// thin approve is none of those: it parsed and answered, and §7 keeps
-// it off the record. A review that ran with no agent — an agent-less
+// (§7, §8, §11): the reviewer's agent, on the review class, one attempt
+// and no success — a stall, a missing result, a malformed verdict or an
+// approve without substantive findings is a reliability failure of the
+// review, not a judgment of the change. The failure also advances the
+// agent's class-scoped reliability cooldown, which repeated contract
+// failures grow into a short quarantine. Quota, auth, setup and
+// infrastructure failures never come here: they are availability events,
+// not quality history. A review that ran with no agent — an agent-less
 // runner — has nobody to score and records nothing.
 func recordReviewFailureTx(tx *sql.Tx, job *jobRow, now time.Time) error {
 	if job.AgentID == 0 {
@@ -1482,6 +1494,9 @@ func recordReviewFailureTx(tx *sql.Tx, job *jobRow, now time.Time) error {
 	}
 	skills, err := taskSkillCountTx(tx, job.TaskID)
 	if err != nil {
+		return err
+	}
+	if err := recordClassFailureTx(tx, job.AgentID, string(KindReview), now); err != nil {
 		return err
 	}
 	_, err = tx.Exec(`INSERT INTO outcomes (project_id, agent_id, class, skills, attempts, successes, updated_at)

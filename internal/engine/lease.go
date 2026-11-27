@@ -970,7 +970,10 @@ type agentCand struct {
 	runner int64
 
 	// Filled for every lookup, but read only for the agents that cannot
-	// take the job yet (qualifyingAgentsTx): model, health, cooling_until.
+	// take the job yet (qualifyingAgentsTx): model, health, and the
+	// cooling deadline — the later of the agent's account cooling_until
+	// and its class-scoped reliability cooldown for the job's class
+	// (class_cooldown, §8), so a quarantined agent reads as cooling.
 	model   string
 	health  string
 	cooling string
@@ -1052,10 +1055,14 @@ func eligibleAgentsTx(tx *sql.Tx, cfg *Config, rnd func() float64, runner int64,
 // headroom-zeroed for a task job (§8.2), can never take the job, so it is
 // not a candidate, an automatic retry's pin or what the cooling hold waits
 // on; a merely full cap is the lease's cap gate, as before. Current
-// availability next: broken, auth-failed and cooling agents are left out of
-// the pick. The capability floor then fixes the served tier — the asked
-// tier is a minimum, climbed but never stepped down — and the declared
-// preference orders the candidates within it: a prefer review's family
+// availability next: broken, auth-failed, cooling and class-quarantined
+// agents are left out of the pick — the reliability cooldown on the job's
+// class reads as cooling (§8), so a quarantined agent never wins a lease
+// whatever its cost weight, yet stays in the unavailable lookup the
+// cooling hold and the park reasons read. The capability floor then
+// fixes the served tier — the asked tier is a minimum, climbed but never
+// stepped down — and the declared preference orders the candidates
+// within it: a prefer review's family
 // groups (issue #126), else the cost-weighted sampling alone. Capacity is
 // the lease's cap gate over the ordered candidates.
 //
@@ -1299,11 +1306,12 @@ func qualifyingAgentRowsTx(tx *sql.Tx, reviewFamily string, runner int64, j *job
 		}
 		harness, model = pair.harness, pair.model
 	}
-	query := `SELECT a.id, a.family, a.harness, a.classes, a.model, a.health, COALESCE(a.cooling_until, ''), COALESCE(o.attempts, 0), COALESCE(o.successes, 0), a.adapter, a.account, a.runner_id
+	query := `SELECT a.id, a.family, a.harness, a.classes, a.model, a.health, COALESCE(a.cooling_until, ''), COALESCE(o.attempts, 0), COALESCE(o.successes, 0), a.adapter, a.account, a.runner_id, COALESCE(cc.cooling_until, '')
 		FROM agents a LEFT JOIN (SELECT agent_id, SUM(attempts) AS attempts, SUM(successes) AS successes
 			FROM outcomes WHERE project_id = ? AND class = ? GROUP BY agent_id) o ON o.agent_id = a.id
+		LEFT JOIN class_cooldown cc ON cc.agent_id = a.id AND cc.class = ?
 		WHERE 1 = 1`
-	args := []any{j.ProjectID, class}
+	args := []any{j.ProjectID, class, class}
 	if runner != 0 {
 		query += " AND a.runner_id = ?"
 		args = append(args, runner)
@@ -1335,10 +1343,17 @@ func qualifyingAgentRowsTx(tx *sql.Tx, reviewFamily string, runner int64, j *job
 	for rows.Next() {
 		var id int64
 		var attempts, successes int
-		var family, harness, classes, model, health, cooling, adapterName, account string
+		var family, harness, classes, model, health, cooling, adapterName, account, classCooling string
 		var runnerID int64
-		if err := rows.Scan(&id, &family, &harness, &classes, &model, &health, &cooling, &attempts, &successes, &adapterName, &account, &runnerID); err != nil {
+		if err := rows.Scan(&id, &family, &harness, &classes, &model, &health, &cooling, &attempts, &successes, &adapterName, &account, &runnerID, &classCooling); err != nil {
 			return nil, fmt.Errorf("pick the agent of runner %d: %w", runner, err)
+		}
+		// The class-scoped reliability cooldown (§8) reads as cooling:
+		// the agent cannot take this class until the later of its
+		// account reset and its quarantine expiry, and the hold waits
+		// for exactly that deadline.
+		if classCooling > cooling {
+			cooling = classCooling
 		}
 		// Ordinary work and fix leases use the implement class. A pinned
 		// work restart already qualified against the task's class when
