@@ -570,6 +570,12 @@ Only you can say these: the foreman has no tool to pass a gate.
 
 When `land_target` is set off the default branch, a **sync** keeps it current: a job of its own, no task, that merges the default branch into the target as a true merge commit. It runs before a landing's squash and before a task leases the target as a base, and those leases wait while it is pending, so no task starts from or lands onto a stale target. The merge follows the push gate: `auto` pushes it; `ask` and `never` leave it waiting on `refs/brigada/land/<target>` with a needs-you line, and `brigada push approve` releases an `ask` merge. A conflict holds the gate with a needs-you line naming the files; merge the default branch into the target by hand and push, and the next attempt opens the gate. While landings wait at the push gate the sync merges nothing and queues behind them. `brigada status` shows `land target is <n> commits behind <default>` while the target lags.
 
+### Batch landing
+
+One land job lands a batch: every ready landing of the project's target, in dependency order (tasks with no order between them by task id), up to `land_batch_max` members, squashed as one stack and pushed once. The landings past the bound wait for the next batch. Each member is checked and settles by its own outcome: it lands, parks with its own conflict or failed check, or is dropped to wait because a dependency in the batch parked or dropped, and it joins the next batch once that dependency lands. A member's reservation holds its landing like a live job, so `brigada land approve` on it reports the batch job and queues nothing, and the foreman's `land_retry` and `task_restart` are refused naming the batch job.
+
+`land_ready` runs once for the batch, before anything lands. Exit 1 holds each member without an approval on its own needs-you line, and `brigada land approve <task>` releases that one landing into the next batch with the command skipped. At the push phase a hold on the push also holds the waiting landings beneath the held commit. A lost runner does not redo settled work: the next lease reads each member's recorded progress and the remote's `Brigada-Task` trailers, records what already landed, and retries the rest in order. `brigada status` does not show a member's position in its batch.
+
 ### Conflicts and failed checks
 
 A landing lands the head the review approved: a branch that gained a commit after its approving review is refused, nothing squashed or pushed, and the task parks at `needs_foreman` naming both heads, for the foreman to restart it so the new head is checked and reviewed.
@@ -671,6 +677,7 @@ The file is flat: `key: value` lines, no nesting except the `instructions` map o
 | `land_target` | branch name | the project's default branch | Where approved work lands: the default branch, or a staging branch such as `brigada/landed`. A new task's work builds on it too ([section 5](#5-finishing-the-land-job)). |
 | `after_land` | command | none | A repo-relative command the runner runs after a successful land; its failure is reported, never undone. |
 | `land_ready` | command | none | A repo-relative command path the land job runs before landing and the push phase runs before its push: exit 0 lands, exit 1 holds and is re-checked every 10 minutes until the command exits 0 or `brigada land approve` releases it, anything else waits and retries. `scripts/land-ready.sh` is one for the staging branch's CI. |
+| `land_batch_max` | integer from 1 to 20 | `5` | The most landings one land job lands as a stack with one push ([section 5](#5-finishing-the-land-job)). `1` lands one task per job. |
 | `setup` | command | none | The environment step run before the worker and the check ([section 7](#7-plans-checks-and-reviews)). |
 | `setup_cache_key_files` | list of repo-relative files | none (no cache) | Files whose contents key the setup cache. |
 | `setup_timeout_minutes` | positive integer | `15` | How long `setup` may run. |
@@ -1509,6 +1516,7 @@ Every key that `brigada project set` and `project show` know, with each default 
 | `land_target` | the project's default branch | yes |
 | `after_land` | `none` | yes |
 | `land_ready` | `none` | yes |
+| `land_batch_max` | `5` | yes |
 | `default_check` | `none` | yes |
 | `worker_tools` | `agent default` | yes |
 | `setup` | `none` | yes |
