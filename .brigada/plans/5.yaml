@@ -81,7 +81,7 @@ tasks:
     tier: heavy
     effort: medium
     skills: ["schema-migration", "surface-parity"]
-    state: reviewing
+    state: done
     branch: "brigada/task-50-r3"
     rounds: 0
   - id: 51
@@ -104,7 +104,7 @@ tasks:
     base: "wl-field"
     effort: medium
     skills: ["cli-flag", "surface-parity"]
-    state: done
+    state: needs_foreman
     branch: "brigada/task-52"
     rounds: 0
   - id: 53
@@ -126,6 +126,6 @@ tasks:
     base: "wl-field"
     tier: heavy
     effort: high
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
