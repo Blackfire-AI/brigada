@@ -87,3 +87,24 @@ func TestCoolingGroupsByScope(t *testing.T) {
 		t.Errorf("agent %d on another scope cooled too: %q", a3, cool)
 	}
 }
+
+// TestCoolingEventNamesScope: the agent_cooling payload carries the
+// cooled agent's quota scope beside its account, and omits it for an
+// agent with no scope.
+func TestCoolingEventNamesScope(t *testing.T) {
+	e := newEnv(t)
+	e.addAgent(e.runner1, "opencode", "zai-coding-plan/glm-5.4", "work")
+	e.exec("UPDATE agents SET quota_scope = 'opencode/zai-coding-plan'")
+	until := e.clock.Now().Add(time.Hour)
+	e.runPinned(e.runner1, "opencode", Completion{
+		Error: "worker CLI failed (limit): quota", ErrorKind: "limit", LimitUntil: until.Format(time.RFC3339)})
+	var found bool
+	for _, r := range e.eventRows() {
+		if r.kind == evAgentCooling && r.payload.Account == "work" && r.payload.QuotaScope == "opencode/zai-coding-plan" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("no agent_cooling event naming scope opencode/zai-coding-plan")
+	}
+}

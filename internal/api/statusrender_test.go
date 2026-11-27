@@ -365,3 +365,20 @@ func TestOneLineCutsOnARune(t *testing.T) {
 		}
 	}
 }
+
+// TestStatusSectionsCoolingNamesScope: the cooling line names the quota
+// scope when the agent has one and the account when it has none.
+func TestStatusSectionsCoolingNamesScope(t *testing.T) {
+	got := StatusSections(Status{Cooling: []engine.CoolingAgent{
+		{ID: 1, Harness: "opencode", Model: "zai-coding-plan/glm-5.4", Account: "work", QuotaScope: "opencode/zai-coding-plan", Until: "U1"},
+		{ID: 2, Harness: "claude", Model: "sonnet", Account: "work", Until: "U2"},
+	}})
+	for _, want := range []string{
+		"cooling: opencode/zai-coding-plan/glm-5.4 until U1 (scope opencode/zai-coding-plan)",
+		"cooling: claude/sonnet until U2 (account work)",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("status = %q, want the line %q", got, want)
+		}
+	}
+}

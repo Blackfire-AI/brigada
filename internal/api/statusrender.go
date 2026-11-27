@@ -31,7 +31,11 @@ func StatusSections(st Status) string {
 		lines = append(lines, drainLine(len(st.Running)))
 	}
 	for _, a := range st.Cooling {
-		lines = append(lines, fmt.Sprintf("cooling: %s/%s until %s (account %s)", a.Harness, a.Model, a.Until, a.Account))
+		pool := "account " + a.Account
+		if a.QuotaScope != "" {
+			pool = "scope " + a.QuotaScope
+		}
+		lines = append(lines, fmt.Sprintf("cooling: %s/%s until %s (%s)", a.Harness, a.Model, a.Until, pool))
 	}
 	for _, sl := range st.Slots {
 		if sl.State == engine.SlotFree {

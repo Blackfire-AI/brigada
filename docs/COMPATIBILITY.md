@@ -120,3 +120,5 @@ Before 2.0, a breaking change is a bug, unless a security fix requires it. Depre
 **Breaks, as security fixes** (issue #228):
 
 - A worker can no longer push its own branch. A task worktree carries no push URL, so the runner is the only path to the remote and the affordance the runner's worker-push test pinned is gone.
+
+**Cooling follows the quota scope** (issue #264). A limit cools the agents sharing the cooled agent's quota scope instead of every agent on its account, so a limit on one opencode provider no longer cools the others. An agent with an empty scope still cools by account, as before. Concurrency caps and foreman headroom stay per account. The `agent_cooling` event gains `quota_scope`, the status `cooling:` line and the capacity `agent` line name the scope, and events recorded earlier keep rendering by account.

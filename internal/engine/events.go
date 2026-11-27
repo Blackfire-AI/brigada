@@ -167,15 +167,16 @@ type eventPayload struct {
 	Model       string `json:"model,omitempty"`
 	FromHarness string `json:"from_harness,omitempty"` // a moved foreman turn's old pair; Harness and Model name the new one
 	FromModel   string `json:"from_model,omitempty"`
-	Effort      string `json:"effort,omitempty"`  // a foreman setting's reasoning-effort level
-	Account     string `json:"account,omitempty"` // the quota account a cooling names (§8)
-	Until       string `json:"until,omitempty"`   // a deadline, RFC3339: a foreman limit's reset, a probe's next attempt; absent when unknown (§4.4)
-	Job         int64  `json:"job,omitempty"`     // a job the event names besides its own job_id column
-	Hold        int64  `json:"hold,omitempty"`    // the attach hold the event names (§4.2)
-	Cause       string `json:"cause,omitempty"`   // a land cause key: the error class and the shared resource every task it fails parks under (issue #116)
-	Count       int64  `json:"count,omitempty"`   // how many of something the event counts (§4.2, §4.3)
-	Path        string `json:"path,omitempty"`    // a snapshot's file (§6.4)
-	Bytes       int64  `json:"bytes,omitempty"`   // a snapshot's size (§6.4)
+	Effort      string `json:"effort,omitempty"`      // a foreman setting's reasoning-effort level
+	Account     string `json:"account,omitempty"`     // the quota account a cooling names (§8)
+	QuotaScope  string `json:"quota_scope,omitempty"` // the quota scope a cooling names, when the agent has one (§8)
+	Until       string `json:"until,omitempty"`       // a deadline, RFC3339: a foreman limit's reset, a probe's next attempt; absent when unknown (§4.4)
+	Job         int64  `json:"job,omitempty"`         // a job the event names besides its own job_id column
+	Hold        int64  `json:"hold,omitempty"`        // the attach hold the event names (§4.2)
+	Cause       string `json:"cause,omitempty"`       // a land cause key: the error class and the shared resource every task it fails parks under (issue #116)
+	Count       int64  `json:"count,omitempty"`       // how many of something the event counts (§4.2, §4.3)
+	Path        string `json:"path,omitempty"`        // a snapshot's file (§6.4)
+	Bytes       int64  `json:"bytes,omitempty"`       // a snapshot's size (§6.4)
 	// The agent pick's why (§8): the agent, its score, how the rank
 	// chose it (pickSampled), its cost weight and draw, every ranked
 	// candidate's weight and draw in rank order, and the better-ranked

@@ -206,7 +206,7 @@ func (e *Engine) coolUntilTx(tx *sql.Tx, job *jobRow, until, now time.Time) erro
 		return fmt.Errorf("cool quota scope %q: %w", key, err)
 	}
 	_, err := appendEventTx(tx, evAgentCooling, job.ProjectID, job.TaskID, job.ID,
-		eventPayload{Account: account, Until: untilStr}, now)
+		eventPayload{Account: account, QuotaScope: scope, Until: untilStr}, now)
 	return err
 }
 
@@ -479,13 +479,16 @@ type CoolingAgent struct {
 	Harness string `json:"harness"`
 	Model   string `json:"model"`
 	Account string `json:"account"`
-	Until   string `json:"until"`
+	// QuotaScope is the pool the cooling spans; empty when the agent has
+	// none and cools with its account.
+	QuotaScope string `json:"quota_scope,omitempty"`
+	Until      string `json:"until"`
 }
 
 // statusCoolingTx lists the agents cooling at now that are not broken
 // (a broken agent is in the needs-you queue instead).
 func statusCoolingTx(tx *sql.Tx, now time.Time) ([]CoolingAgent, error) {
-	rows, err := tx.Query(`SELECT id, harness, model, account, cooling_until FROM agents
+	rows, err := tx.Query(`SELECT id, harness, model, account, quota_scope, cooling_until FROM agents
 		WHERE health = 'ready' AND cooling_until > ? ORDER BY id`, fmtTime(now))
 	if err != nil {
 		return nil, fmt.Errorf("list the cooling agents: %w", err)
@@ -494,7 +497,7 @@ func statusCoolingTx(tx *sql.Tx, now time.Time) ([]CoolingAgent, error) {
 	out := []CoolingAgent{}
 	for rows.Next() {
 		var a CoolingAgent
-		if err := rows.Scan(&a.ID, &a.Harness, &a.Model, &a.Account, &a.Until); err != nil {
+		if err := rows.Scan(&a.ID, &a.Harness, &a.Model, &a.Account, &a.QuotaScope, &a.Until); err != nil {
 			return nil, fmt.Errorf("list the cooling agents: %w", err)
 		}
 		out = append(out, a)
