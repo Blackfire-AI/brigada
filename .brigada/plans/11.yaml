@@ -73,7 +73,7 @@ tasks:
     review_tier: standard
     review_effort: medium
     caps: {restart: 4}
-    state: ready
+    state: running
     branch: "brigada/task-58-r2"
     rounds: 0
   - id: 59
