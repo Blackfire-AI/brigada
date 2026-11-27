@@ -171,8 +171,8 @@ tasks:
     continue: "batch-holds"
     tier: heavy
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-66"
     rounds: 0
   - id: 67
     name: "batch-recovery"
