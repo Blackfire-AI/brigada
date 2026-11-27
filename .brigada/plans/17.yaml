@@ -63,8 +63,8 @@ tasks:
     base: ""
     effort: medium
     skills: ["bugfix"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-82"
     rounds: 0
   - id: 83
     name: "publish-kind"
