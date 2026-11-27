@@ -67,6 +67,6 @@ tasks:
     base: "gitea-fetcher"
     continue: "gitea-fetcher"
     effort: medium
-    state: ready
+    state: running
     branch: ""
     rounds: 0
