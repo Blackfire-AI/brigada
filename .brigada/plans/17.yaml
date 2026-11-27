@@ -5,9 +5,9 @@
 plan: 17
 title: "Bug: a hand-landed task parked by its reviews never settles"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: reviewing
 created: 2026-11-27T19:40:56.756096144Z
-updated: 2026-11-27T19:44:05.288936008Z
+updated: 2026-11-27T19:59:35.267325712Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -31,4 +31,27 @@ tasks:
     skills: ["bugfix"]
     state: reviewing
     branch: "brigada/task-79"
+    rounds: 1
+  - id: 80
+    name: "publish-rewrite"
+    title: "A rewritten task branch publishes with a lease, and publish failures never count against the agent (Refs #275)"
+    class: "implement"
+    deps: ["settle-hand-landed"]
+    base: "settle-hand-landed"
+    effort: medium
+    skills: ["bugfix"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 81
+    name: "publish-rewrite-docs"
+    title: "Worker prompt, §5/§7 docs and CHANGELOG for rewritten task branches (Closes #275)"
+    class: "implement"
+    deps: ["publish-rewrite"]
+    base: "publish-rewrite"
+    continue: "publish-rewrite"
+    effort: medium
+    skills: ["bugfix"]
+    state: pending
+    branch: ""
     rounds: 0
