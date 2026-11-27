@@ -7,7 +7,7 @@ title: "Issue #259 first slice (re-created): landing barrier, plan monitoring, a
 repo: "github.com/Blackfire-AI/brigada"
 state: active
 created: 2026-11-26T20:28:37.793635647Z
-updated: 2026-11-27T14:31:56.038611741Z
+updated: 2026-11-27T14:52:36.159007054Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -125,7 +125,8 @@ tasks:
     deps: ["wl-field"]
     base: "wl-field"
     tier: heavy
-    effort: high
+    effort: medium
+    caps: {restart: 5}
     state: needs_foreman
     branch: ""
     rounds: 0
