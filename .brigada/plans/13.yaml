@@ -48,7 +48,7 @@ tasks:
     effort: medium
     review_tier: standard
     review_effort: medium
-    state: needs_foreman
+    state: retired
     branch: "brigada/task-26-r1"
     rounds: 1
   - id: 44
@@ -86,7 +86,7 @@ tasks:
     effort: medium
     caps: {restart: 10}
     skills: ["config-setting", "surface-parity"]
-    state: needs_foreman
+    state: retired
     branch: "brigada/task-46-r10"
     rounds: 0
   - id: 47
@@ -99,7 +99,7 @@ tasks:
     effort: low
     caps: {restart: 10}
     skills: ["docs-change"]
-    state: done
+    state: retired
     branch: "brigada/task-47-r5"
     rounds: 0
   - id: 56
