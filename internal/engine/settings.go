@@ -79,6 +79,15 @@ const (
 	// retired task's branches are kept after it settled, before the
 	// reconcile sweep deletes them; 0 deletes them at once.
 	SettingBranchRetentionDays = "branch_retention_days"
+	// The batch bound (§6.3, §7.1): at most this many landings in one land
+	// job; 1 lands one task per job.
+	SettingLandBatchMax = "land_batch_max"
+)
+
+// The land_batch_max bounds and default (§6.3).
+const (
+	defaultLandBatchMax = 5
+	maxLandBatchMax     = 20
 )
 
 // defaultBranchRetentionDays is branch_retention_days' default (§13.2):
@@ -106,7 +115,7 @@ const (
 // SettingKeys are the editable keys, in the order show prints them.
 var SettingKeys = []string{SettingApprovalMaxTasks, SettingApprovalBudget, SettingApprovalClasses, SettingApprovalProtectedPaths,
 	SettingGatePlan, SettingGateLand, SettingGatePush, SettingPlanReview, SettingPlanReviewTier, SettingPlanReviewEffort,
-	SettingApprovalTiers, SettingApprovalRestarted, SettingLandTarget, SettingAfterLand, SettingLandReady,
+	SettingApprovalTiers, SettingApprovalRestarted, SettingLandTarget, SettingAfterLand, SettingLandReady, SettingLandBatchMax,
 	SettingDefaultCheck, SettingWorkerTools, SettingSetup, SettingSetupCacheKeyFiles, SettingSetupTimeout,
 	SettingExtraRepos, SettingForemanRotateTokens, SettingForemanWakesPerDay, SettingPlanFiles, SettingPlanFileBranch,
 	SettingBranchRetentionDays, SettingInstructions}
@@ -219,7 +228,7 @@ func parseSettingValue(key, value string) (json.RawMessage, error) {
 	switch key {
 	case SettingApprovalMaxTasks, SettingApprovalBudget, SettingApprovalClasses, SettingApprovalProtectedPaths,
 		SettingGatePlan, SettingGateLand, SettingGatePush, SettingPlanReview, SettingPlanReviewTier, SettingPlanReviewEffort,
-		SettingApprovalTiers, SettingApprovalRestarted, SettingLandTarget, SettingAfterLand, SettingLandReady,
+		SettingApprovalTiers, SettingApprovalRestarted, SettingLandTarget, SettingAfterLand, SettingLandReady, SettingLandBatchMax,
 		SettingDefaultCheck, SettingWorkerTools,
 		SettingSetup, SettingSetupCacheKeyFiles, SettingSetupTimeout, SettingExtraRepos, SettingForemanRotateTokens, SettingForemanWakesPerDay, SettingPlanFiles, SettingPlanFileBranch,
 		SettingBranchRetentionDays, SettingInstructions:
@@ -359,6 +368,14 @@ func parseKnownValue(key, value string) (json.RawMessage, error) {
 		if err != nil || n < 0 {
 			return nil, fmt.Errorf("%w: %s takes a whole number of days (0 = delete at once), got %q",
 				ErrInvalidSetting, key, value)
+		}
+		return json.RawMessage(strconv.Itoa(n)), nil
+	}
+	if key == SettingLandBatchMax {
+		n, err := strconv.Atoi(strings.TrimSpace(value))
+		if err != nil || n < 1 || n > maxLandBatchMax {
+			return nil, fmt.Errorf("%w: %s takes a whole number from 1 to %d, got %q",
+				ErrInvalidSetting, key, maxLandBatchMax, value)
 		}
 		return json.RawMessage(strconv.Itoa(n)), nil
 	}
@@ -584,6 +601,11 @@ func settingsViewTx(tx *sql.Tx, project int64, repo string, wakeBudgetDefault in
 		case SettingForemanRotateTokens:
 			// 0 is a value of its own (never rotate), not the default.
 			sv.Value = strconv.Itoa(defaultForemanRotateTokens)
+			if n, ok := rawInt(cur); has && ok {
+				sv.Value = strconv.Itoa(n)
+			}
+		case SettingLandBatchMax:
+			sv.Value = strconv.Itoa(defaultLandBatchMax)
 			if n, ok := rawInt(cur); has && ok {
 				sv.Value = strconv.Itoa(n)
 			}

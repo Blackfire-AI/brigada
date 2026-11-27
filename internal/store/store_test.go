@@ -1023,6 +1023,7 @@ func TestSchemaEditsMatchTheirMigrations(t *testing.T) {
 		71: "task_retired",
 		79: "task_branch_sweep",
 		84: "land_sync",
+		89: "land_batch",
 	}
 	migs, err := allMigrations()
 	if err != nil {
@@ -1054,14 +1055,12 @@ func TestSchemaEditsMatchTheirMigrations(t *testing.T) {
 // landing record and the gate hold.
 func TestLandJobMigration(t *testing.T) {
 	f := newFixture(t)
-	// A land job always belongs to a task, so the pairing CHECK holds for
-	// it without change; a land job without a task is refused.
+	// A land job belongs to a task; 0089 also admits the task-less batch
+	// land job (§7.1), so a land job without a task is accepted too.
 	exec(t, f.db, `INSERT INTO jobs (project_id, task_id, kind, key, mode, prompt, status, created_at, updated_at)
 		VALUES (?, ?, 'land', 'land-key', 'fresh', '', 'queued', ?, ?)`, f.project, f.task, ts, ts)
-	if _, err := f.db.Exec(`INSERT INTO jobs (project_id, task_id, kind, key, mode, prompt, status, created_at, updated_at)
-		VALUES (?, NULL, 'land', 'land-without-task', 'fresh', '', 'queued', ?, ?)`, f.project, ts, ts); err == nil || !strings.Contains(err.Error(), "CHECK") {
-		t.Errorf("land job without a task: err = %v; want a CHECK failure", err)
-	}
+	exec(t, f.db, `INSERT INTO jobs (project_id, task_id, kind, key, mode, prompt, status, created_at, updated_at)
+		VALUES (?, NULL, 'land', 'land-batch:1', 'fresh', '', 'queued', ?, ?)`, f.project, ts, ts)
 
 	exec(t, f.db, `INSERT INTO landings (task_id, project_id, target_branch, commit_sha, pushed, created_at)
 		VALUES (?, ?, 'main', 'abc123', 'pushed', ?)`, f.task, f.project, ts)

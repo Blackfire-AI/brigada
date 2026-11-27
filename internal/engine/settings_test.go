@@ -102,6 +102,7 @@ func TestProjectSettingsView(t *testing.T) {
 		{Key: SettingLandTarget, Value: "main", Default: true, Source: SourceDefault},
 		{Key: SettingAfterLand, Value: "none", Default: true, Source: SourceDefault},
 		{Key: SettingLandReady, Value: "none", Default: true, Source: SourceDefault},
+		{Key: SettingLandBatchMax, Value: "5", Default: true, Source: SourceDefault},
 		{Key: SettingDefaultCheck, Value: "none", Default: true, Source: SourceDefault},
 		{Key: SettingWorkerTools, Value: "agent default", Default: true, Source: SourceDefault},
 		{Key: SettingSetup, Value: "none", Default: true, Source: SourceDefault},
@@ -165,6 +166,11 @@ func TestSetProjectSettingsRefusals(t *testing.T) {
 		{SettingForemanWakesPerDay: strconv.Itoa(MaxForemanWakesPerDay + 1)},
 		{SettingBranchRetentionDays: "-1"},
 		{SettingBranchRetentionDays: "soon"},
+		{SettingLandBatchMax: "0"},
+		{SettingLandBatchMax: "21"},
+		{SettingLandBatchMax: "-1"},
+		{SettingLandBatchMax: "2.5"},
+		{SettingLandBatchMax: "many"},
 	} {
 		_, err := e.eng.SetProjectSettings(e.ctx, envRepo, values)
 		if !errors.Is(err, ErrInvalidSetting) {
@@ -250,6 +256,31 @@ func TestBranchRetentionDaysRoundTrip(t *testing.T) {
 	got = e.set(map[string]string{SettingBranchRetentionDays: ""})
 	if s := settingOf(t, got, SettingBranchRetentionDays); s.Value != "7" || !s.Default {
 		t.Errorf("branch_retention_days after reset = %+v, want the 7 default", s)
+	}
+}
+
+// land_batch_max takes 1 to 20, defaults to 5, and a refused value names
+// the key and leaves the prior setting in place.
+func TestLandBatchMaxValidation(t *testing.T) {
+	e := newEnv(t)
+	for _, v := range []string{"1", "20", "7"} {
+		got := e.set(map[string]string{SettingLandBatchMax: v})
+		if s := settingOf(t, got, SettingLandBatchMax); s.Value != v || s.Default || s.Source != SourceLocal {
+			t.Errorf("land_batch_max %s = %+v, want a local %s", v, s, v)
+		}
+	}
+	for _, v := range []string{"0", "21", "-1", "2.5", "many"} {
+		_, err := e.eng.SetProjectSettings(e.ctx, envRepo, map[string]string{SettingLandBatchMax: v})
+		if !errors.Is(err, ErrInvalidSetting) || !strings.Contains(err.Error(), SettingLandBatchMax) {
+			t.Errorf("land_batch_max %s: err = %v, want ErrInvalidSetting naming the key", v, err)
+		}
+	}
+	if raw := e.str("SELECT settings FROM projects WHERE id = ?", e.project); !strings.Contains(raw, `"land_batch_max":7`) {
+		t.Errorf("stored settings %s lost the prior land_batch_max 7", raw)
+	}
+	got := e.set(map[string]string{SettingLandBatchMax: ""})
+	if s := settingOf(t, got, SettingLandBatchMax); s.Value != "5" || !s.Default {
+		t.Errorf("land_batch_max after reset = %+v, want the 5 default", s)
 	}
 }
 

@@ -23,6 +23,7 @@ approval_protected_paths:
   - infra/**
   - 'db/*.sql'
 branch_retention_days: 0
+land_batch_max: 20
 `
 	cases := []struct {
 		name    string
@@ -55,6 +56,11 @@ branch_retention_days: 0
 		{"max tasks not an integer", string(cfgFile("approval_max_tasks: many\n")), "approval_max_tasks takes an integer"},
 		{"max tasks quoted", string(cfgFile("approval_max_tasks: \"3\"\n")), "approval_max_tasks (line 3) must be an integer"},
 		{"max tasks list", string(cfgFile("approval_max_tasks: [3]\n")), "must be an integer"},
+		{"batch max one", string(cfgFile("land_batch_max: 1\n")), ""},
+		{"batch max zero", string(cfgFile("land_batch_max: 0\n")), "land_batch_max"},
+		{"batch max over", string(cfgFile("land_batch_max: 21\n")), "land_batch_max"},
+		{"batch max junk", string(cfgFile("land_batch_max: 2.5\n")), "land_batch_max"},
+		{"batch max quoted", string(cfgFile("land_batch_max: \"5\"\n")), "must be an integer"},
 		{"retention zero", string(cfgFile("branch_retention_days: 0\n")), ""},
 		{"retention negative", string(cfgFile("branch_retention_days: -1\n")), "branch_retention_days takes a whole number of days"},
 		{"retention junk", string(cfgFile("branch_retention_days: soon\n")), "branch_retention_days takes a whole number of days"},
@@ -114,6 +120,7 @@ branch_retention_days: 0
 			SettingApprovalClasses:        `["implement","review"]`,
 			SettingApprovalProtectedPaths: `["infra/**","db/*.sql"]`,
 			SettingBranchRetentionDays:    `0`,
+			SettingLandBatchMax:           `20`,
 		}
 		for k, w := range want {
 			if got := string(cfg.Values[k]); got != w {

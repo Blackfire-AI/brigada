@@ -133,7 +133,7 @@ var yamlKeyRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 // list, never SettingKeys: a setting added for the local store (the wake
 // budget, for one) does not become shared-file policy by being editable.
 var configSettingKeys = []string{SettingApprovalMaxTasks, SettingApprovalBudget, SettingApprovalClasses, SettingApprovalProtectedPaths,
-	SettingGatePlan, SettingGateLand, SettingGatePush, SettingApprovalTiers, SettingApprovalRestarted, SettingLandTarget, SettingAfterLand, SettingLandReady,
+	SettingGatePlan, SettingGateLand, SettingGatePush, SettingApprovalTiers, SettingApprovalRestarted, SettingLandTarget, SettingAfterLand, SettingLandReady, SettingLandBatchMax,
 	SettingDefaultCheck, SettingWorkerTools, SettingSetup, SettingSetupCacheKeyFiles, SettingSetupTimeout,
 	SettingExtraRepos, SettingForemanRotateTokens, SettingPlanFiles, SettingPlanFileBranch, SettingBranchRetentionDays}
 
@@ -320,7 +320,7 @@ func settingText(key string, v yamlValue) (string, error) {
 		return "", configErr("%s (line %d) has no value; omit the key to leave it at its default", key, v.line)
 	}
 	switch key {
-	case SettingApprovalMaxTasks, SettingSetupTimeout, SettingForemanRotateTokens, SettingBranchRetentionDays:
+	case SettingApprovalMaxTasks, SettingSetupTimeout, SettingForemanRotateTokens, SettingBranchRetentionDays, SettingLandBatchMax:
 		if v.isList || v.quoted {
 			return "", configErr("%s (line %d) must be an integer", key, v.line)
 		}

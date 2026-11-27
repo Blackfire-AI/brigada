@@ -49,7 +49,7 @@ Family detection: the job record; for `brigada review --branch` without a job, t
 
 ## 7.1 Landing approved work: the `land` job, and `brigada land` by hand
 
-**Not implemented: batch landing and the checked-head suspects in this section.** brigada lands one task per land job — `land_batch_max` (§6.3) is refused as an unknown key — a `land_ready` hold carries the command's first output line with no suspect attribution. The batch paragraphs below — one job lands a batch, the batch holds, acceptance, running — and the checked head and suspects describe the design; the land-target sync below is implemented.
+**Not implemented: batch landing and the checked-head suspects in this section.** brigada lands one task per land job — `land_batch_max` (§6.3) is accepted and validated (1 to 20, default 5) but not yet acted on — a `land_ready` hold carries the command's first output line with no suspect attribution. The batch paragraphs below — one job lands a batch, the batch holds, acceptance, running — and the checked head and suspects describe the design; the land-target sync below is implemented.
 
 ### The land job
 

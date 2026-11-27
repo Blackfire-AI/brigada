@@ -164,6 +164,7 @@ var schemaEdits = map[int]func(ctx context.Context, tx *sql.Tx) error{
 	71: widenTaskStates,
 	79: widenTaskBranchSweepChecks,
 	84: widenLandSyncChecks,
+	89: widenLandBatchCheck,
 }
 
 // jobsPairingCheck is the CHECK 0001 put on jobs: foreman jobs have no
@@ -299,6 +300,15 @@ func widenLandSyncChecks(ctx context.Context, tx *sql.Tx) error {
 		return err
 	}
 	return editTableCheckEither(ctx, tx, "jobs", []string{jobsPairingCheckSweep, jobsPairingCheckPlanReview, jobsPairingCheckRelaxed, jobsPairingCheck}, jobsPairingCheckSync)
+}
+
+// The pairing CHECK 0089 widens for the batch landing job (§7.1): a batch
+// job belongs to a project but to no one task, so a land job may go
+// without a task too.
+const jobsPairingCheckBatch = "CHECK ((kind = 'foreman') = (task_id IS NULL) OR kind IN ('review', 'plan_review', 'sweep', 'sync', 'land'))"
+
+func widenLandBatchCheck(ctx context.Context, tx *sql.Tx) error {
+	return editTableCheckEither(ctx, tx, "jobs", []string{jobsPairingCheckSync, jobsPairingCheckSweep, jobsPairingCheckPlanReview, jobsPairingCheckRelaxed, jobsPairingCheck}, jobsPairingCheckBatch)
 }
 
 // editTableCheckEither is editTableCheck over the wordings an earlier

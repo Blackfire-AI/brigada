@@ -61,7 +61,7 @@ const tailDefaults = "setup=none (default)\n" + "setup_cache_key_files=none (def
 const gateDefaults = "gate_plan=auto (default)\n" + "gate_land=auto (default)\n" + "gate_push=auto (default)\n" +
 	"plan_review=true (default)\n" + "plan_review.tier=standard (default)\n" + "plan_review.effort=medium (default)\n" +
 	"approval_tiers=none (default)\n" + "approval_restarted=false (default)\n" +
-	"land_target=main (default)\n" + "after_land=none (default)\n" + "land_ready=none (default)\n"
+	"land_target=main (default)\n" + "after_land=none (default)\n" + "land_ready=none (default)\n" + "land_batch_max=5 (default)\n"
 
 // guidanceDefaults is the per-role block and skills line `project show`
 // prints after the settings (§5.9) for a project that configured none of
@@ -74,7 +74,7 @@ const guidanceDefaults = "instructions.foreman: not configured, file none\n" +
 	"instructions.reviewer: not configured, file none\n" +
 	"skills: none imported\n"
 
-const validSettingKeys = "approval_max_tasks, approval_budget, approval_classes, approval_protected_paths, gate_plan, gate_land, gate_push, plan_review, plan_review.tier, plan_review.effort, approval_tiers, approval_restarted, land_target, after_land, land_ready, default_check, worker_tools, setup, setup_cache_key_files, setup_timeout_minutes, extra_repos, foreman_rotate_tokens, foreman_wakes_per_day, plan_files, plan_file_branch, branch_retention_days, instructions"
+const validSettingKeys = "approval_max_tasks, approval_budget, approval_classes, approval_protected_paths, gate_plan, gate_land, gate_push, plan_review, plan_review.tier, plan_review.effort, approval_tiers, approval_restarted, land_target, after_land, land_ready, land_batch_max, default_check, worker_tools, setup, setup_cache_key_files, setup_timeout_minutes, extra_repos, foreman_rotate_tokens, foreman_wakes_per_day, plan_files, plan_file_branch, branch_retention_days, instructions"
 
 // TestProjectSettingsGolden covers project set and show: the defaults,
 // one override, the reset, and the usage errors for a bad key and value.
