@@ -127,6 +127,6 @@ tasks:
     tier: heavy
     effort: medium
     caps: {restart: 5}
-    state: running
+    state: reviewing
     branch: "brigada/task-69-r4"
     rounds: 1
