@@ -47,7 +47,7 @@ tasks:
     review_effort: medium
     state: reviewing
     branch: "brigada/task-26-r1"
-    rounds: 0
+    rounds: 1
   - id: 44
     name: "grants-core"
     title: "Per-task tool grants: the field, the allowlist, validation (Refs #123)"
@@ -83,7 +83,7 @@ tasks:
     effort: medium
     caps: {restart: 10}
     skills: ["config-setting", "surface-parity"]
-    state: reviewing
+    state: done
     branch: "brigada/task-46-r10"
     rounds: 0
   - id: 47
