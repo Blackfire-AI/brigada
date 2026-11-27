@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/Blackfire-AI/brigada/internal/foreman"
 )
 
 // The land-target sync (§7.1): a land target set off the default branch
@@ -838,10 +840,16 @@ func statusSyncTx(tx *sql.Tx, project int64) ([]NeedsYouItem, error) {
 			it.Reason = fmt.Sprintf("land target is %d commits behind %s and the merge conflicts in %s: merge %s into %s by hand and push, or clear land_target",
 				behind, def, strings.Join(paths, ", "), def, target)
 		case syncStateWaiting:
+			// The count rides on the line (§7.1): the merge waiting at the
+			// gate is a lag brigada cannot clear alone.
+			lag := ""
+			if behind > 0 {
+				lag = fmt.Sprintf("land target is %d commits behind %s: ", behind, def)
+			}
 			if pushed == "local" {
-				it.Reason = "push by hand: " + cmd
+				it.Reason = lag + "push by hand: " + cmd
 			} else {
-				it.Reason = fmt.Sprintf("waits to push: merge %s into %s at %s; release: brigada push approve", def, target, merge)
+				it.Reason = lag + fmt.Sprintf("waits to push: merge %s into %s at %s; release: brigada push approve", def, target, merge)
 			}
 		}
 		it.Reason = oneLine(it.Reason, needsYouReasonLimit)
@@ -936,4 +944,83 @@ func (e *Engine) settleSyncPushTx(tx *sql.Tx, project int64, rec *landSyncRow, c
 	_, err := appendEventTx(tx, evSyncPushed, project, 0, 0,
 		eventPayload{Branch: rec.TargetBranch, Commit: commit, Pushed: "pushed"}, now)
 	return err
+}
+
+// StatusLandSync is one project's land-target lag as status shows it
+// (§7.1): the count of default-branch commits the remote land target does
+// not hold, as the last sync kept it, with the heads that sync recorded.
+type StatusLandSync struct {
+	ProjectID     int64  `json:"project_id"`
+	DefaultBranch string `json:"default_branch"`
+	TargetBranch  string `json:"target_branch"`
+	Behind        int    `json:"behind"`
+	DefaultHead   string `json:"default_head,omitempty"`
+	TargetHead    string `json:"target_head,omitempty"`
+}
+
+// LandSyncLine words the lag line status prints on the project's line
+// (§7.1); the CLI and the MCP status tool both render it.
+func LandSyncLine(ls StatusLandSync) string {
+	return fmt.Sprintf("land target is %d commits behind %s (project #%d)", ls.Behind, ls.DefaultBranch, ls.ProjectID)
+}
+
+// statusLandSyncsTx lists the projects with a land target set off the
+// default branch whose kept count is above zero (§7.1). A project with no
+// land target, or whose record names a target since cleared, lists nothing.
+func statusLandSyncsTx(tx *sql.Tx, project int64) ([]StatusLandSync, error) {
+	query := `SELECT s.project_id, s.behind, s.default_branch, s.target_branch, s.default_head, s.target_head
+		FROM land_syncs s JOIN projects p ON p.id = s.project_id
+		WHERE p.archived_at IS NULL AND s.behind > 0`
+	args := []any{}
+	if project != 0 {
+		query += " AND s.project_id = ?"
+		args = append(args, project)
+	}
+	rows, err := tx.Query(query+" ORDER BY s.project_id", args...)
+	if err != nil {
+		return nil, fmt.Errorf("list the land target lags: %w", err)
+	}
+	var recs []StatusLandSync
+	for rows.Next() {
+		var r StatusLandSync
+		if err := rows.Scan(&r.ProjectID, &r.Behind, &r.DefaultBranch, &r.TargetBranch, &r.DefaultHead, &r.TargetHead); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("list the land target lags: %w", err)
+		}
+		recs = append(recs, r)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	rows.Close()
+	var out []StatusLandSync
+	for _, r := range recs {
+		wanted, target, def, err := syncTargetTx(tx, r.ProjectID)
+		if err != nil {
+			return nil, err
+		}
+		if !wanted {
+			continue
+		}
+		r.TargetBranch, r.DefaultBranch = target, def
+		out = append(out, r)
+	}
+	return out, nil
+}
+
+// landHeadsTx reads the foreman prompt's two heads; nil when no land
+// target is set off the default branch.
+func landHeadsTx(tx *sql.Tx, project int64) (*foreman.LandHeads, error) {
+	wanted, target, def, err := syncTargetTx(tx, project)
+	if err != nil || !wanted {
+		return nil, err
+	}
+	h := &foreman.LandHeads{Default: def, Target: target}
+	if r, err := landSyncTx(tx, project); err != nil {
+		return nil, err
+	} else if r != nil {
+		h.DefaultHead, h.TargetHead, h.Behind = r.DefaultHead, r.TargetHead, r.Behind
+	}
+	return h, nil
 }

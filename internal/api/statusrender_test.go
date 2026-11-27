@@ -399,3 +399,18 @@ func TestStatusSectionsCoolingNamesScope(t *testing.T) {
 		}
 	}
 }
+
+// TestStatusSectionsLandTargetLag: the lag line (§7.1) rides on status
+// only for a project that reports one — the engine lists a project only
+// with a land target set and a count above zero — and reads the same on
+// the CLI and the MCP tool, which share StatusSections.
+func TestStatusSectionsLandTargetLag(t *testing.T) {
+	line := "land target is 3 commits behind main (project #1)"
+	lag := Status{LandSyncs: []engine.StatusLandSync{{ProjectID: 1, DefaultBranch: "main", TargetBranch: "brigada/landed", Behind: 3}}}
+	if got := StatusSections(lag); !strings.Contains(got, line) {
+		t.Errorf("status sections = %q, want the line %q", got, line)
+	}
+	if got := StatusSections(Status{}); strings.Contains(got, "commits behind") {
+		t.Errorf("status without a lag = %q, want no lag line", got)
+	}
+}

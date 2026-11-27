@@ -538,3 +538,68 @@ func TestSyncStaleRefDropForgetsWaitingMerge(t *testing.T) {
 		t.Errorf("stale-ref marks = %d, want the drop to clear them", n)
 	}
 }
+
+// TestSyncLagStatusAndPrompt: the count a sync keeps (§7.1) shows on
+// status while it is above zero and a land target is set; it is a
+// needs-you entry, carrying the number, exactly for the merge waiting at
+// the gate or conflicting — not while the sync queues behind a stack —
+// and the foreman's opening prompt names both heads and the count.
+func TestSyncLagStatusAndPrompt(t *testing.T) {
+	e := landTargetEnv(t)
+	e.set(map[string]string{SettingGatePush: GateAsk})
+	if _, err := e.eng.CreatePlan(e.ctx, e.project, "lag", []PlanTask{{Name: "root", Spec: "the work", Class: "answer"}}); err != nil {
+		t.Fatalf("create plan: %v", err)
+	}
+	lags := func() []StatusLandSync {
+		info, err := e.eng.Status(e.ctx, 0)
+		if err != nil {
+			t.Fatalf("status: %v", err)
+		}
+		return info.LandSyncs
+	}
+	s1 := e.leaseGit(e.runner1)
+	if s1 == nil || s1.Kind != KindSync {
+		t.Fatalf("sync grant = %+v", s1)
+	}
+	if ans := e.complete(s1, Completion{Result: `{"outcome":"merged","behind":2,"merge_commit":"m1","pushed":"waiting","default_head":"def-head","target_head":"tgt-head"}`}); ans != AnsOK {
+		t.Fatalf("complete the waiting merge: %s", ans)
+	}
+	if l := lags(); len(l) != 1 || l[0].Behind != 2 || l[0].DefaultBranch != "main" {
+		t.Errorf("status lag at the gate = %+v, want 2 behind main", l)
+	}
+	if items := e.syncNeedsYou(); len(items) != 1 || !strings.Contains(items[0].Reason, "land target is 2 commits behind main") {
+		t.Errorf("gate-wait needs-you = %+v, want the count", items)
+	}
+	var prompt string
+	if err := e.st.Update(e.ctx, func(tx *sql.Tx) error {
+		var err error
+		prompt, err = foremanPromptTx(tx, "", e.project, ForemanInbox{}, e.clock.Now())
+		return err
+	}); err != nil {
+		t.Fatalf("foreman prompt: %v", err)
+	}
+	for _, want := range []string{`"main" at def-head`, `"brigada/landed" at tgt-head`, "2 commits behind"} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("foreman prompt lacks %q", want)
+		}
+	}
+	// Behind a waiting stack: the count is kept and shown, nothing needs the user.
+	e.exec("UPDATE land_syncs SET state = ? WHERE project_id = ?", syncStateBehindStack, e.project)
+	if l := lags(); len(l) != 1 {
+		t.Errorf("status lag behind a stack = %+v, want the kept count", l)
+	}
+	if items := e.syncNeedsYou(); len(items) != 0 {
+		t.Errorf("behind-stack needs-you = %+v, want none", items)
+	}
+	// Current: count zero, nothing shown.
+	e.exec("UPDATE land_syncs SET state = ?, behind = 0 WHERE project_id = ?", syncStateCurrent, e.project)
+	if l := lags(); len(l) != 0 {
+		t.Errorf("status lag when current = %+v, want none", l)
+	}
+	// No land target set: a stale record shows nothing.
+	e.exec("UPDATE land_syncs SET behind = 5 WHERE project_id = ?", e.project)
+	e.set(map[string]string{SettingLandTarget: ""})
+	if l := lags(); len(l) != 0 {
+		t.Errorf("status lag with no land target = %+v, want none", l)
+	}
+}

@@ -171,6 +171,9 @@ type Status struct {
 	Instructions     []engine.StatusInstructions     `json:"instructions,omitempty"`
 	RoleInstructions []engine.StatusRoleInstructions `json:"role_instructions,omitempty"`
 	Skills           []engine.StatusSkill            `json:"skills,omitempty"`
+	// LandSyncs lists the projects whose land target lags the default
+	// branch (§7.1), rendered on the project's line.
+	LandSyncs []engine.StatusLandSync `json:"land_syncs,omitempty"`
 	// PlanScope is set when the status was asked for one plan: its
 	// spend, land head and newest timeline items.
 	PlanScope *engine.PlanScope `json:"plan_scope,omitempty"`

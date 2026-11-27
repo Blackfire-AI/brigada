@@ -309,3 +309,22 @@ func TestCoordinatorInstructionsGolden(t *testing.T) {
 		t.Errorf("CoordinatorInstructions() differs from the golden %s:\n%s", golden, got)
 	}
 }
+
+// TestLandHeadsNote: the opening prompt names the default branch and the
+// land target, each with its recorded head, and the count only above zero
+// (§7.1); no land target says nothing.
+func TestLandHeadsNote(t *testing.T) {
+	if got := LandHeadsNote(nil); got != "" {
+		t.Errorf("note without a land target = %q, want none", got)
+	}
+	got := LandHeadsNote(&LandHeads{Default: "main", Target: "brigada/landed", DefaultHead: "aaa111", TargetHead: "bbb222", Behind: 4})
+	for _, want := range []string{`"main" at aaa111`, `"brigada/landed" at bbb222`, "which the user merges", "which brigada lands approved work on", "4 commits behind"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("note = %q, want %q", got, want)
+		}
+	}
+	got = LandHeadsNote(&LandHeads{Default: "main", Target: "t", DefaultHead: "a", TargetHead: "b"})
+	if strings.Contains(got, "behind") {
+		t.Errorf("note with a zero count = %q, want no count", got)
+	}
+}

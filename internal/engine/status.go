@@ -120,6 +120,10 @@ type StatusInfo struct {
 	Instructions     []StatusInstructions     `json:"instructions,omitempty"`
 	RoleInstructions []StatusRoleInstructions `json:"role_instructions,omitempty"`
 	Skills           []StatusSkill            `json:"skills,omitempty"`
+	// LandSyncs lists the projects whose land target lags the default
+	// branch (§7.1): one entry per project with a land target set and a
+	// count above zero. Rendered on the project's line.
+	LandSyncs []StatusLandSync `json:"land_syncs,omitempty"`
 	// PlanScope is set only on a plan-scoped status (StatusForPlan).
 	PlanScope *PlanScope `json:"plan_scope,omitempty"`
 }
@@ -469,6 +473,9 @@ func (e *Engine) status(ctx context.Context, project int64, withText, all bool) 
 			return err
 		}
 		if info.Instructions, err = statusInstructionsTx(tx, project, withText); err != nil {
+			return err
+		}
+		if info.LandSyncs, err = statusLandSyncsTx(tx, project); err != nil {
 			return err
 		}
 		return nil

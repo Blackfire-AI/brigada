@@ -218,6 +218,9 @@ func StatusSections(st Status) string {
 			lines = append(lines, line)
 		}
 	}
+	for _, ls := range st.LandSyncs {
+		lines = append(lines, engine.LandSyncLine(ls))
+	}
 	for _, in := range st.Instructions {
 		line := fmt.Sprintf("project instructions (project #%d): %s, %d bytes, sha256 %s", in.ProjectID, in.Source, in.Bytes, in.Digest)
 		if in.Version != "" {
