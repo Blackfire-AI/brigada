@@ -71,7 +71,7 @@ tasks:
     continue: "sync-engine"
     tier: heavy
     effort: medium
-    state: ready
+    state: running
     branch: ""
     rounds: 0
   - id: 59
