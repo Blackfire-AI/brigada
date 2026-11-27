@@ -88,7 +88,7 @@ tasks:
     tier: heavy
     effort: medium
     skills: ["schema-migration"]
-    state: reviewing
+    state: done
     branch: "brigada/task-31-r1"
     rounds: 0
   - id: 32
@@ -101,7 +101,7 @@ tasks:
     tier: heavy
     effort: medium
     skills: ["refactor"]
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 33
