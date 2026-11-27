@@ -101,7 +101,7 @@ tasks:
     tier: heavy
     effort: medium
     skills: ["refactor"]
-    state: reviewing
+    state: done
     branch: "brigada/task-32-r2"
     rounds: 0
   - id: 33
@@ -114,7 +114,7 @@ tasks:
     tier: heavy
     effort: medium
     skills: ["surface-parity"]
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 35
