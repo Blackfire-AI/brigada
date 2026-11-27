@@ -82,7 +82,7 @@ tasks:
     tier: heavy
     effort: medium
     skills: ["config-setting", "surface-parity"]
-    state: running
+    state: reviewing
     branch: "brigada/task-46"
     rounds: 1
   - id: 47
