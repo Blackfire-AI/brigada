@@ -626,7 +626,7 @@ func (e *Engine) autoRestartWorkTx(tx *sql.Tx, job *jobRow, kind, text string, n
 	}
 	// Use the dispatcher's eligibility and ranking, across runners, without
 	// a family exclusion: a work retry may use the same family.
-	cands, err := eligibleAgentsTx(tx, &e.cfg, e.cfg.Rand, 0, &jobRow{
+	cands, _, err := eligibleAgentsTx(tx, &e.cfg, e.cfg.Rand, 0, &jobRow{
 		ProjectID: job.ProjectID, TaskID: job.TaskID, Kind: KindWork, ExcludeAgents: []int64{job.AgentID},
 	}, class, fmtTime(now))
 	if err != nil || len(cands) == 0 {
@@ -677,7 +677,7 @@ func (e *Engine) autoRetryFixTx(tx *sql.Tx, job *jobRow, kind, text string, now 
 	// the failure was not a lost runner, whose agent's runner is gone.
 	sameAgent := kind != "runner_lost"
 	if sameAgent {
-		cands, err := eligibleAgentsTx(tx, &e.cfg, nil, 0, &jobRow{
+		cands, _, err := eligibleAgentsTx(tx, &e.cfg, nil, 0, &jobRow{
 			ProjectID: job.ProjectID, TaskID: job.TaskID, Kind: KindFix,
 			Harness: job.Harness, RequireAgent: job.AgentID,
 		}, classImplement, fmtTime(now))
@@ -691,7 +691,7 @@ func (e *Engine) autoRetryFixTx(tx *sql.Tx, job *jobRow, kind, text string, now 
 		// Another eligible agent of the tier, on a fresh session. The
 		// round's feedback is the job's own prompt, carried verbatim; the
 		// branch stays the task's, named at the retry's lease.
-		cands, err := eligibleAgentsTx(tx, &e.cfg, e.cfg.Rand, 0, &jobRow{
+		cands, _, err := eligibleAgentsTx(tx, &e.cfg, e.cfg.Rand, 0, &jobRow{
 			ProjectID: job.ProjectID, TaskID: job.TaskID, Kind: KindFix, ExcludeAgents: []int64{job.AgentID},
 		}, classImplement, fmtTime(now))
 		if err != nil || len(cands) == 0 {

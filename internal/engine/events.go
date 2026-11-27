@@ -203,6 +203,30 @@ type eventPayload struct {
 	Weight     *int     `json:"weight,omitempty"`
 	Draw       float64  `json:"draw,omitempty"`
 	Candidates []Ranked `json:"candidates,omitempty"`
+	// FamilyPolicy is the review.family setting in force for a review or
+	// plan-review job's pick (§7): prefer or require. A non-review pick
+	// carries none.
+	FamilyPolicy string `json:"family_policy,omitempty"`
+	// Pin is the explicit agent a job is pinned to (§3): the require_agent
+	// the placement names, 0 when none. Session is true when the job
+	// resumes a session — a fix round on the author's, a re-review on the
+	// reviewer's — rather than ranking afresh.
+	Pin     int64 `json:"pin,omitempty"`
+	Session bool  `json:"session,omitempty"`
+	// Fallback is the family-preference fallback a review took under
+	// review.family=prefer: same_family or same_agent when no reviewer of
+	// the preferred group was available (§7). Empty when none was taken.
+	Fallback string `json:"fallback,omitempty"`
+	// ExcludeAgents is the retry exclusions in force for the job's
+	// logical attempt (§7): the agents that failed it and may never take
+	// it again.
+	ExcludeAgents []int64 `json:"exclude_agents,omitempty"`
+	// Removed names the agents the placement dropped and why (§8): a
+	// candidate that did not offer the class, failed a family or
+	// exclusion rule, sat capped at 0, below the floor, broken or
+	// cooling. The better-ranked agents passed over for cap room stay in
+	// PassedOver, as before.
+	Removed []Removed `json:"removed,omitempty"`
 	// A foreman session rotation's why (§4.2): the input tokens the last
 	// turn read, the threshold it crossed, and the generation it opened.
 	Tokens    int64 `json:"tokens,omitempty"`
@@ -219,6 +243,15 @@ type Ranked struct {
 	Agent  int64   `json:"agent"`
 	Weight int     `json:"weight"`
 	Draw   float64 `json:"draw"`
+}
+
+// Removed is one agent the placement dropped, and why (§8): the reason
+// words the rule that removed it — class, family, exclusion, a zero cap,
+// the tier floor, health or cooling — so an operator reading the pick can
+// tell what was not considered and why.
+type Removed struct {
+	Agent  int64  `json:"agent"`
+	Reason string `json:"reason"`
 }
 
 // appendEventTx adds one row to the event log inside the caller's

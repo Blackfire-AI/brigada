@@ -252,7 +252,7 @@ func foremanFamilyTx(tx *sql.Tx, project int64) (string, error) {
 // missing one is not.
 func planReviewerAvailableTx(tx *sql.Tx, reviewFamily string, project int64, family string) (bool, error) {
 	review := &jobRow{ProjectID: project, Kind: KindPlanReview, ExcludeFamily: family}
-	agents, err := qualifyingAgentRowsTx(tx, reviewFamily, 0, review, string(KindReview), "")
+	agents, _, err := qualifyingAgentRowsTx(tx, reviewFamily, 0, review, string(KindReview), "")
 	if err != nil {
 		return false, err
 	}

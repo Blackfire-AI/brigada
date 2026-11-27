@@ -90,7 +90,7 @@ func (e *Engine) holdCoolingTx(tx *sql.Tx, now time.Time) error {
 		// The lookup leaves out an agent capped at exactly 0 for the
 		// job's kind (zeroCapLayer, issue #195): it never frees up, so a
 		// job whose only agent is one is not held but parked by the TTL.
-		agents, err := qualifyingAgentsTx(tx, &e.cfg, nil, 0, j, kindClass(j.Kind), nowStr, true)
+		agents, _, err := qualifyingAgentsTx(tx, &e.cfg, nil, 0, j, kindClass(j.Kind), nowStr, true)
 		if err != nil {
 			return err
 		}

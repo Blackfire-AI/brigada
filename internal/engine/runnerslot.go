@@ -173,7 +173,7 @@ func (e *Engine) holdBusyRunnersTx(tx *sql.Tx, now time.Time, polling int64) err
 					continue
 				}
 			}
-			agents, err := eligibleAgentsTx(tx, &e.cfg, nil, r.id, j, kindClass(j.Kind), nowStr)
+			agents, _, err := eligibleAgentsTx(tx, &e.cfg, nil, r.id, j, kindClass(j.Kind), nowStr)
 			if err != nil {
 				return err
 			}
