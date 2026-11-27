@@ -125,3 +125,18 @@ func TestToolGrantAllowlistPinned(t *testing.T) {
 		t.Errorf("git add refused: %v", err)
 	}
 }
+
+// TestToolGrantsInLeaseEvent: a worker job's lease event carries the
+// task's tool grants, so history shows them (§6.1, §9).
+func TestToolGrantsInLeaseEvent(t *testing.T) {
+	e := newEnv(t)
+	sr := e.submitTask(TaskParams{RepoURL: envRepo, BaseRef: "main", Spec: "a change", ToolGrants: []string{"Bash(git checkout:*)"}})
+	g := e.leaseAny(e.runner1)
+	if g == nil || g.JobID != sr.JobID {
+		t.Fatalf("lease = %+v, want job %d", g, sr.JobID)
+	}
+	payload := e.str("SELECT payload FROM events WHERE kind = ? AND job_id = ?", evJobLeased, sr.JobID)
+	if !strings.Contains(payload, `"tool_grants":["Bash(git checkout:*)"]`) {
+		t.Errorf("job_leased payload = %s, want the tool grants", payload)
+	}
+}

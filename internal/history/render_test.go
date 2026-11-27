@@ -24,7 +24,7 @@ func goldenItems() []Item {
 		},
 		{
 			Type: TypeEvent, ID: 2, Kind: "job_leased", ProjectID: 7, TaskID: 3, JobID: 11,
-			Payload:   []byte(`{"lease":"2-abcd123","owner":2,"attempt":1}`),
+			Payload:   []byte(`{"lease":"2-abcd123","owner":2,"attempt":1,"tool_grants":["Bash(git merge:*)","Bash(git checkout:*)"]}`),
 			CreatedAt: "2026-10-12T12:00:01.000000000Z",
 		},
 		{
@@ -129,10 +129,11 @@ func TestRenderLanding(t *testing.T) {
 }
 
 // TestRenderLeasedPromptDigests: a lease event names the template and
-// the shortened digests of the instruction and skill texts (§9).
+// the shortened digests of the instruction and skill texts, and the
+// tool grants the worker was given (§9, §6.1).
 func TestRenderLeasedPromptDigests(t *testing.T) {
-	it := Item{Type: TypeEvent, Kind: "job_leased", Payload: []byte(`{"lease":"abc","prompt":{"template":2,"instructions":"0123456789abcdef","skills":["aaaaaaaaaaaaaaaa","bbbbbbbbbbbbbbbb"]}}`)}
-	want := "lease=abc template=2 instructions=0123456789ab skills=aaaaaaaaaaaa,bbbbbbbbbbbb"
+	it := Item{Type: TypeEvent, Kind: "job_leased", Payload: []byte(`{"lease":"abc","prompt":{"template":2,"instructions":"0123456789abcdef","skills":["aaaaaaaaaaaaaaaa","bbbbbbbbbbbbbbbb"]},"tool_grants":["Bash(git merge:*)","Bash(git restore:*)"]}`)}
+	want := "lease=abc template=2 instructions=0123456789ab skills=aaaaaaaaaaaa,bbbbbbbbbbbb tool_grants=Bash(git merge:*),Bash(git restore:*)"
 	if got := summary(it); got != want {
 		t.Errorf("summary = %q, want %q", got, want)
 	}

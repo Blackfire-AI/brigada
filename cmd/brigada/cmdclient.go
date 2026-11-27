@@ -18,6 +18,10 @@ import (
 // Tests can exercise the real authenticated API handler without a listener.
 var connectClient = connect
 
+// connectSubmit is the connection `task submit` makes; tests stub it to
+// capture the submitted request without a listener.
+var connectSubmit = connect
+
 // runStatus is the client's status (§13, §10): the engine — which
 // process, up how long — the jobs by status, then the plans with their
 // tasks and the "needs you" queue, plain text, one line each, the
@@ -124,7 +128,7 @@ func withLogo(stdout io.Writer, line string) string {
 // path that submits a task without the foreman (§12.1), and `task
 // retire`, the user's settle of tasks that will not land (§6.2).
 func runTask(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	return dispatch(ctx, args, stdout, stderr, "task", "usage: brigada task submit --repo URL --spec FILE|- [--base REF] [--check CMD] [--title TITLE] [--harness HARNESS] | brigada task retire --reason TEXT <task-id>...", "submit or retire", taskCommands)
+	return dispatch(ctx, args, stdout, stderr, "task", "usage: brigada task submit --repo URL --spec FILE|- [--base REF] [--check CMD] [--title TITLE] [--harness HARNESS] [--tool-grants PATTERN]... | brigada task retire --reason TEXT <task-id>...", "submit or retire", taskCommands)
 }
 
 // taskRetirer is what task retire asks of the API client; tests stub it.
@@ -212,7 +216,7 @@ func printTaskRetire(ctx context.Context, client taskRetirer, ids []int64, reaso
 // the spec verbatim (§1.4, §5.3).
 func runTaskSubmit(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := newFlagSet("task submit",
-		"brigada task submit --repo URL --spec FILE|- [--base REF] [--check CMD] [--title TITLE] [--harness HARNESS] [--no-start]",
+		"brigada task submit --repo URL --spec FILE|- [--base REF] [--check CMD] [--title TITLE] [--harness HARNESS] [--tool-grants PATTERN]... [--no-start]",
 		"Submit one task directly, without the foreman.")
 	stderr = commandStderr(stderr, fs.Name())
 	common := addCommon(fs)
@@ -223,6 +227,7 @@ func runTaskSubmit(ctx context.Context, args []string, stdout, stderr io.Writer)
 		check   string
 		title   string
 		harness string
+		grants  toolGrantList
 		noStart bool
 	)
 	fs.StringVar(&repo, "repo", "", "the repository URL the task works in")
@@ -231,6 +236,7 @@ func runTaskSubmit(ctx context.Context, args []string, stdout, stderr io.Writer)
 	fs.StringVar(&check, "check", "", "the check command the runner runs after the worker reports done; empty = none")
 	fs.StringVar(&title, "title", "", "the task's title; default is the spec's first line")
 	fs.StringVar(&harness, "harness", "", "the harness that must run the job (default: any)")
+	fs.Var(&grants, "tool-grants", "a Claude Code permission pattern the task grants its worker, from the allowlist (repeatable): Bash(git merge:*), Bash(git checkout:*), Bash(git restore:*), Bash(git cherry-pick:*), Bash(git add:*)")
 	fs.BoolVar(&noStart, "no-start", false, "do not start the engine on demand; fail when none is running")
 	if code, stop := common.parse(stdout, stderr, args); stop {
 		return code
@@ -252,17 +258,18 @@ func runTaskSubmit(ctx context.Context, args []string, stdout, stderr io.Writer)
 	if code != 0 {
 		return code
 	}
-	client, code := connect(ctx, rt, "admin", noStart, stderr)
+	client, code := connectSubmit(ctx, rt, "admin", noStart, stderr)
 	if code != 0 {
 		return code
 	}
 	res, err := client.SubmitTask(ctx, api.TaskSubmit{
-		RepoURL:  repo,
-		BaseRef:  base,
-		Title:    title,
-		Spec:     specBody,
-		CheckCmd: check,
-		Harness:  harness,
+		RepoURL:    repo,
+		BaseRef:    base,
+		Title:      title,
+		Spec:       specBody,
+		CheckCmd:   check,
+		Harness:    harness,
+		ToolGrants: grants,
 	})
 	if err != nil {
 		return fail(stderr, err)
@@ -270,6 +277,12 @@ func runTaskSubmit(ctx context.Context, args []string, stdout, stderr io.Writer)
 	fmt.Fprintf(stdout, "task %d job %d: %s (run %d)\n", res.TaskID, res.JobID, res.Answer, res.Run)
 	return 0
 }
+
+// toolGrantList is the repeatable --tool-grants flag.
+type toolGrantList []string
+
+func (l *toolGrantList) String() string     { return strings.Join(*l, ",") }
+func (l *toolGrantList) Set(v string) error { *l = append(*l, v); return nil }
 
 // readSpec reads the task spec: a file, or stdin when the path is -.
 func readSpec(path string) (string, error) {

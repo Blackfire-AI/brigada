@@ -720,6 +720,16 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 				leased.Prompt = &meta
 			}
 		}
+		// A worker job's lease records the permission patterns the task
+		// grants its worker (§6.1), the same list the task read returns.
+		// A review runs under the reviewer's own scope and a landing under
+		// the runner's, so neither carries them.
+		if j.Kind == KindWork || j.Kind == KindFix {
+			var grants string
+			if err := tx.QueryRow("SELECT tool_grants FROM tasks WHERE id = ?", j.TaskID).Scan(&grants); err == nil {
+				leased.ToolGrants = parseTaskToolGrants(grants)
+			}
+		}
 		if _, err := appendEventTx(tx, evJobLeased, j.ProjectID, j.TaskID, j.ID, leased, now); err != nil {
 			return nil, err
 		}

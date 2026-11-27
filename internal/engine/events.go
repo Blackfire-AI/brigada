@@ -188,12 +188,15 @@ type eventPayload struct {
 	// Prompt is what a leased job's prompt was composed from (§5.9
 	// 'Versioning', §9): the template version and the digests of the
 	// instruction and skill texts it carried.
-	Prompt  *promptMeta `json:"prompt,omitempty"`
-	Classes []string    `json:"classes,omitempty"`
-	Paths   []string    `json:"paths,omitempty"`
-	Agent   int64       `json:"agent,omitempty"`
-	Score   float64     `json:"score,omitempty"`
-	Pick    string      `json:"pick,omitempty"`
+	Prompt *promptMeta `json:"prompt,omitempty"`
+	// ToolGrants names the Claude Code permission patterns a leased task
+	// job grants its worker (§6.1); a job without a task carries none.
+	ToolGrants []string `json:"tool_grants,omitempty"`
+	Classes    []string `json:"classes,omitempty"`
+	Paths      []string `json:"paths,omitempty"`
+	Agent      int64    `json:"agent,omitempty"`
+	Score      float64  `json:"score,omitempty"`
+	Pick       string   `json:"pick,omitempty"`
 	// Placement is how a review job's picked reviewer relates to its
 	// author (issue #126): cross_family, same_family, same_agent — or
 	// unknown when the author's family is not known. Computed at the

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -256,6 +257,56 @@ func TestRecoverSkipsAFileItCannotApply(t *testing.T) {
 		t.Fatalf("results = %+v, want one skipped naming the dep", res)
 	}
 	if got := r.int("SELECT COUNT(*) FROM plans WHERE id = 50"); got != 0 {
+		t.Error("a skipped plan was written")
+	}
+}
+
+// TestRecoverPreservesToolGrants: a recovered task keeps its tool_grants
+// verbatim, and a task without grants keeps the empty default (§6.1, §6.4).
+func TestRecoverPreservesToolGrants(t *testing.T) {
+	r := newRecoverEnv(t)
+	stored := time.Date(2026, 10, 12, 12, 0, 0, 0, time.UTC)
+	grants := []string{"Bash(git merge:*)", "Bash(git checkout:*)"}
+	r.pushFile(planfile.Plan{
+		ID: 60, Title: "grants", State: "active",
+		Created: stored.Add(time.Hour), Updated: stored.Add(2 * time.Hour),
+		Tasks: []planfile.Task{
+			{ID: 601, Name: "build", Title: "build", Class: "implement", State: "done", Branch: "brigada/task-601", ToolGrants: grants},
+			{ID: 602, Name: "ship", Title: "ship", Class: "implement", State: "pending"},
+		},
+	})
+	res := r.recoverPlans()
+	if len(res) != 1 || res[0].Action != PlanRebuilt {
+		t.Fatalf("results = %+v, want plan 60 rebuilt", res)
+	}
+	if got := r.str("SELECT tool_grants FROM tasks WHERE id = 601"); got != `["Bash(git merge:*)","Bash(git checkout:*)"]` {
+		t.Errorf("recovered tool_grants = %q", got)
+	}
+	if got := r.str("SELECT tool_grants FROM tasks WHERE id = 602"); got != "" {
+		t.Errorf("grantless recovered tool_grants = %q, want the empty default", got)
+	}
+	// The mirror reads them back too, so a later push writes them again.
+	snap := r.planSnapshot(60)
+	if task := taskByName(t, snap, "build"); !slices.Equal(task.ToolGrants, grants) {
+		t.Errorf("snapshot tool grants = %v, want %v", task.ToolGrants, grants)
+	}
+}
+
+// TestRecoverRefusesOutOfAllowlistToolGrant: a plan file that names a
+// pattern outside the allowlist is skipped whole, as create refuses it
+// (§6.1), and nothing is written.
+func TestRecoverRefusesOutOfAllowlistToolGrant(t *testing.T) {
+	r := newRecoverEnv(t)
+	later := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+	r.pushFile(planfile.Plan{
+		ID: 61, Title: "bad grants", State: "active", Created: later, Updated: later,
+		Tasks: []planfile.Task{{ID: 611, Title: "t", Class: "implement", ToolGrants: []string{"Bash(git push:*)"}, State: "pending"}},
+	})
+	res := r.recoverPlans()
+	if len(res) != 1 || res[0].Action != PlanSkipped || !strings.Contains(res[0].Detail, "Bash(git push:*)") {
+		t.Fatalf("results = %+v, want one skipped naming the grant", res)
+	}
+	if got := r.int("SELECT COUNT(*) FROM plans WHERE id = 61"); got != 0 {
 		t.Error("a skipped plan was written")
 	}
 }

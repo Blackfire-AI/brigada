@@ -47,6 +47,7 @@ func TestParseInvertsRender(t *testing.T) {
 		"tier and effort":        {ID: 8, State: "active", Created: time.Unix(1, 0).UTC(), Updated: time.Unix(2, 0).UTC(), Tasks: []Task{{ID: 1, Tier: "heavy", Effort: "high", State: "ready"}, {ID: 2, Tier: "light", State: "pending"}}},
 		"review tier and effort": {ID: 7, State: "active", Created: time.Unix(1, 0).UTC(), Updated: time.Unix(2, 0).UTC(), Tasks: []Task{{ID: 1, Tier: "heavy", Effort: "high", ReviewTier: "heavy", ReviewEffort: "max", State: "ready"}, {ID: 2, ReviewEffort: "low", State: "pending"}}},
 		"skills in order":        {ID: 6, State: "active", Created: time.Unix(1, 0).UTC(), Updated: time.Unix(2, 0).UTC(), Tasks: []Task{{ID: 1, Skills: []string{"cli-flag", "bugfix", "a \"b\", c"}, State: "ready"}, {ID: 2, State: "pending"}}},
+		"tool grants in order":   {ID: 5, State: "active", Created: time.Unix(1, 0).UTC(), Updated: time.Unix(2, 0).UTC(), Tasks: []Task{{ID: 1, ToolGrants: []string{"Bash(git merge:*)", "Bash(git checkout:*)", "Bash(git add:*)"}, State: "ready"}, {ID: 2, State: "pending"}}},
 		"no tasks": {ID: 1, Title: "", Repo: "r", State: "draft",
 			Created: time.Date(2026, 1, 2, 3, 4, 5, 6, time.UTC), Updated: time.Date(2026, 1, 2, 3, 4, 5, 7, time.UTC)},
 		"awkward text": {ID: 2, Title: "tab\there, \"quotes\", back\\slash, ünïcode, [brackets], # hash", Repo: "file:///a b/c.git",
@@ -201,5 +202,28 @@ func TestSkillsLineKeepsOrderAndStaysOptional(t *testing.T) {
 	empty := strings.Replace(string(data), `skills: ["zeta", "alpha"]`, "skills: []", 1)
 	if _, err := Parse([]byte(empty)); err == nil {
 		t.Error("parse took an empty skills list")
+	}
+}
+
+// TestToolGrantsLineKeepsOrderAndStaysOptional: the tool_grants line holds
+// the patterns in the order recorded, a task with none writes no line, and
+// an empty list is a file the engine would never write (§6.1, §6.4).
+func TestToolGrantsLineKeepsOrderAndStaysOptional(t *testing.T) {
+	p := goldenPlan()
+	p.Tasks[0].ToolGrants = []string{"Bash(git merge:*)", "Bash(git checkout:*)"}
+	data, err := Render(p)
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	if n := strings.Count(string(data), "tool_grants: "); n != 1 || !strings.Contains(string(data), "    tool_grants: [\"Bash(git merge:*)\", \"Bash(git checkout:*)\"]\n") {
+		t.Errorf("rendering has %d tool_grants lines, want the one in order:\n%s", n, data)
+	}
+	plain, err := Render(goldenPlan())
+	if err != nil || strings.Contains(string(plain), "tool_grants:") {
+		t.Errorf("a plan with no tool grants renders a tool_grants line (err %v):\n%s", err, plain)
+	}
+	empty := strings.Replace(string(data), "    tool_grants: [\"Bash(git merge:*)\", \"Bash(git checkout:*)\"]\n", "    tool_grants: []\n", 1)
+	if _, err := Parse([]byte(empty)); err == nil {
+		t.Error("parse took an empty tool_grants list")
 	}
 }

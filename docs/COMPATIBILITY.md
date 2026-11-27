@@ -22,7 +22,7 @@ What brigada 1.0 promises until 2.0.
 - `stop`: `--engine`, `--drain` (which needs `--engine`: pause the engine and wait out its running jobs before stopping).
 - `mcp`: `--coordinator`, `--client`, `--socket`.
 - `status`: `--line`, `--all`, `--no-start`.
-- `task submit`: `--repo`, `--base`, `--spec`, `--check`, `--title`, `--harness`, `--no-start`.
+- `task submit`: `--repo`, `--base`, `--spec`, `--check`, `--title`, `--harness`, `--tool-grants`, `--no-start`.
 - `task retire`: `--reason` (required), `--no-start`.
 - `project foreman`: `--repo`, `--harness`, `--model`, `--effort`, `--no-start`.
 - `project list`: `--no-start`.

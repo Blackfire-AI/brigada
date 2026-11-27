@@ -82,6 +82,7 @@ func summary(it Item) string {
 			Reviewer     string   `json:"reviewer"`
 			Skills       []string `json:"skills"`
 		} `json:"prompt"`
+		ToolGrants []string `json:"tool_grants"`
 	}
 	if json.Unmarshal(it.Payload, &p) != nil {
 		return string(it.Payload)
@@ -154,6 +155,9 @@ func summary(it Item) string {
 		}
 		add("skills", strings.Join(skills, ","))
 	}
+	// A leased task job's tool grants (§6.1), the permission patterns the
+	// worker is granted, in order; a job without a task carries none.
+	add("tool_grants", strings.Join(p.ToolGrants, ","))
 	return strings.Join(parts, " ")
 }
 

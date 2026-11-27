@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -399,6 +400,29 @@ func TestPlanFileMirrorsForemanTierAndEffort(t *testing.T) {
 	m.eng.SyncPlanFiles()
 	if task := taskByName(t, m.mustFile("brigada/plans", res.PlanID), "build"); task.Tier != "light" || task.Effort != "high" {
 		t.Errorf("foreman tier lost: %+v", task)
+	}
+}
+
+// TestPlanFileMirrorsToolGrants: the plan file carries a task's
+// tool_grants in order (§6.1, §6.4), and omits the line for a task with
+// none.
+func TestPlanFileMirrorsToolGrants(t *testing.T) {
+	t.Parallel()
+	m := newMirrorEnv(t)
+	grants := []string{"Bash(git merge:*)", "Bash(git checkout:*)"}
+	res, err := m.eng.CreatePlan(m.ctx, m.project, "grants", []PlanTask{
+		{Name: "build", Spec: "build", ToolGrants: grants},
+		{Name: "plain", Spec: "plain"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := m.mustFile("brigada/plans", res.PlanID)
+	if task := taskByName(t, p, "build"); !slices.Equal(task.ToolGrants, grants) {
+		t.Errorf("mirrored tool grants = %v, want %v", task.ToolGrants, grants)
+	}
+	if task := taskByName(t, p, "plain"); len(task.ToolGrants) != 0 {
+		t.Errorf("a task with no grants mirrored tool_grants: %+v", task)
 	}
 }
 

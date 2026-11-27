@@ -64,11 +64,15 @@ type Task struct {
 	Continue string // the dep whose author's session the first work job resumes (§6.1); '' = fresh
 	// Skills names the task's skills in the order it recorded them
 	// (§5.10); the file carries names alone, never texts.
-	Skills   []string
-	State    string
-	Branch   string // the result branch (§6.4); '' until the task pushed one
-	Rounds   int    // fix and review rounds spent (§7)
-	Question string // the open question (§3), '' when there is none
+	Skills []string
+	// ToolGrants names the Claude Code permission patterns the task grants
+	// its worker (§6.1); written only when the task grants some, as skills
+	// is.
+	ToolGrants []string
+	State      string
+	Branch     string // the result branch (§6.4); '' until the task pushed one
+	Rounds     int    // fix and review rounds spent (§7)
+	Question   string // the open question (§3), '' when there is none
 	// ExtraRepos are the read-only repositories the task was given (§5.8),
 	// as the task recorded them: the canonical identity, never a URL that
 	// could carry a credential.
@@ -89,7 +93,7 @@ const header = `# Brigada plan file (§6.4): a mirror of the engine's store, whi
 # and the open questions — never transcripts.
 `
 
-const taskOptionsComment = "# Optional tier (light, standard, heavy) and effort (low, medium, high, max)\n# describe the model needed and how hard it should think (§6.1);\n# review_tier and review_effort do the same for its reviews (§7, §8); caps\n# override the task's fix_rounds, review_rounds and restart budgets (§6.1);\n# skills name the project's skills the task carries, in order (§5.10).\n"
+const taskOptionsComment = "# Optional tier (light, standard, heavy) and effort (low, medium, high, max)\n# describe the model needed and how hard it should think (§6.1);\n# review_tier and review_effort do the same for its reviews (§7, §8); caps\n# override the task's fix_rounds, review_rounds and restart budgets (§6.1);\n# skills name the project's skills the task carries, in order (§5.10);\n# tool_grants name the Claude Code permission patterns the task grants\n# its worker (§6.1), written only when the task grants some.\n"
 
 // Keep the default file byte-for-byte stable; describe optional keys when used.
 const tasksComment = tasksGraphComment + taskOptionsComment
@@ -122,7 +126,7 @@ func Render(p Plan) ([]byte, error) {
 	fmt.Fprintf(&b, "updated: %s\n", p.Updated.UTC().Format(time.RFC3339Nano))
 	comment := tasksGraphComment
 	for _, t := range p.Tasks {
-		if (t.Tier != "" && t.Tier != adapter.TierStandard) || t.Effort != "" || t.ReviewTier != "" || t.ReviewEffort != "" || len(t.Caps) > 0 || len(t.Skills) > 0 {
+		if (t.Tier != "" && t.Tier != adapter.TierStandard) || t.Effort != "" || t.ReviewTier != "" || t.ReviewEffort != "" || len(t.Caps) > 0 || len(t.Skills) > 0 || len(t.ToolGrants) > 0 {
 			comment = tasksComment
 			break
 		}
@@ -187,6 +191,13 @@ func Render(p Plan) ([]byte, error) {
 				items[i] = strconv.Quote(n)
 			}
 			fmt.Fprintf(&b, "    skills: [%s]\n", strings.Join(items, ", "))
+		}
+		if len(t.ToolGrants) > 0 {
+			items := make([]string, len(t.ToolGrants))
+			for i, n := range t.ToolGrants {
+				items[i] = strconv.Quote(n)
+			}
+			fmt.Fprintf(&b, "    tool_grants: [%s]\n", strings.Join(items, ", "))
 		}
 		fmt.Fprintf(&b, "    state: %s\n", t.State)
 		fmt.Fprintf(&b, "    branch: %s\n", strconv.Quote(t.Branch))
@@ -460,6 +471,20 @@ func (r *reader) task() (Task, error) {
 		}
 		if len(t.Skills) == 0 {
 			return Task{}, r.errf("skills: written only when the task carries some")
+		}
+	}
+	// tool_grants is written only when the task grants some (§6.1), so
+	// files written before tool grants stay valid.
+	if r.peekIs(in + "tool_grants:") {
+		raw, err := r.field(in, "tool_grants")
+		if err != nil {
+			return Task{}, err
+		}
+		if t.ToolGrants, err = parseList(raw); err != nil {
+			return Task{}, r.errf("tool_grants: %v", err)
+		}
+		if len(t.ToolGrants) == 0 {
+			return Task{}, r.errf("tool_grants: written only when the task grants some")
 		}
 	}
 	if t.State, err = r.wordField(in, "state"); err != nil {
