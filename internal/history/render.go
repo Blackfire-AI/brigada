@@ -82,6 +82,7 @@ func summary(it Item) string {
 			Reviewer     string   `json:"reviewer"`
 			Skills       []string `json:"skills"`
 		} `json:"prompt"`
+		ToolGrants []string `json:"tool_grants"`
 	}
 	if json.Unmarshal(it.Payload, &p) != nil {
 		return string(it.Payload)
@@ -136,6 +137,9 @@ func summary(it Item) string {
 	addInt("epoch", p.Epoch)
 	add("path", p.Path)
 	addInt("bytes", p.Bytes)
+	if len(p.ToolGrants) > 0 {
+		add("tool_grants", strings.Join(p.ToolGrants, ","))
+	}
 	// A leased job's prompt names what it was composed from (§9): the
 	// template version and the digests, shortened to the usual 12.
 	if p.Prompt != nil {

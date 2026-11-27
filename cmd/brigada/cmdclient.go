@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -239,7 +240,7 @@ func printTaskRetire(ctx context.Context, client taskRetirer, ids []int64, reaso
 // the spec verbatim (§1.4, §5.3).
 func runTaskSubmit(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := newFlagSet("task submit",
-		"brigada task submit --repo URL --spec FILE|- [--base REF] [--check CMD] [--title TITLE] [--harness HARNESS] [--no-start]",
+		"brigada task submit --repo URL --spec FILE|- [--base REF] [--check CMD] [--title TITLE] [--harness HARNESS] [--tool-grant PATTERN]... [--no-start]",
 		"Submit one task directly, without the foreman.")
 	stderr = commandStderr(stderr, fs.Name())
 	common := addCommon(fs)
@@ -250,6 +251,7 @@ func runTaskSubmit(ctx context.Context, args []string, stdout, stderr io.Writer)
 		check   string
 		title   string
 		harness string
+		grants  []string
 		noStart bool
 	)
 	fs.StringVar(&repo, "repo", "", "the repository URL the task works in")
@@ -258,6 +260,13 @@ func runTaskSubmit(ctx context.Context, args []string, stdout, stderr io.Writer)
 	fs.StringVar(&check, "check", "", "the check command the runner runs after the worker reports done; empty = none")
 	fs.StringVar(&title, "title", "", "the task's title; default is the spec's first line")
 	fs.StringVar(&harness, "harness", "", "the harness that must run the job (default: any)")
+	fs.Func("tool-grant", "a Claude Code permission pattern the worker is granted, from the allowlist (PATTERN, e.g. 'Bash(git merge:*)'); repeatable", func(v string) error {
+		if v == "" {
+			return errors.New("needs a pattern")
+		}
+		grants = append(grants, v)
+		return nil
+	})
 	fs.BoolVar(&noStart, "no-start", false, "do not start the engine on demand; fail when none is running")
 	if code, stop := common.parse(stdout, stderr, args); stop {
 		return code
@@ -284,12 +293,13 @@ func runTaskSubmit(ctx context.Context, args []string, stdout, stderr io.Writer)
 		return code
 	}
 	res, err := client.SubmitTask(ctx, api.TaskSubmit{
-		RepoURL:  repo,
-		BaseRef:  base,
-		Title:    title,
-		Spec:     specBody,
-		CheckCmd: check,
-		Harness:  harness,
+		RepoURL:    repo,
+		BaseRef:    base,
+		Title:      title,
+		Spec:       specBody,
+		CheckCmd:   check,
+		Harness:    harness,
+		ToolGrants: grants,
 	})
 	if err != nil {
 		return fail(stderr, err)

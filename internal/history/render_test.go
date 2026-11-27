@@ -128,6 +128,15 @@ func TestRenderLanding(t *testing.T) {
 	}
 }
 
+// TestRenderLeasedToolGrants: a lease event names the task's tool grants (§6.1).
+func TestRenderLeasedToolGrants(t *testing.T) {
+	it := Item{Type: TypeEvent, Kind: "job_leased", Payload: []byte(`{"lease":"abc","tool_grants":["Bash(git merge:*)","Bash(git add:*)"]}`)}
+	want := "lease=abc tool_grants=Bash(git merge:*),Bash(git add:*)"
+	if got := summary(it); got != want {
+		t.Errorf("summary = %q, want %q", got, want)
+	}
+}
+
 // TestRenderLeasedPromptDigests: a lease event names the template and
 // the shortened digests of the instruction and skill texts (§9).
 func TestRenderLeasedPromptDigests(t *testing.T) {

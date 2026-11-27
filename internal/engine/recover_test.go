@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -182,6 +183,53 @@ func TestRecoverRebuildsPlanNewerThanSnapshotAndKeepsOlder(t *testing.T) {
 		if p.Action != PlanKept {
 			t.Errorf("second run: plan %d %s, want kept", p.PlanID, p.Action)
 		}
+	}
+}
+
+// TestRecoverCarriesToolGrants: a recovered task keeps its grants
+// verbatim and one with none keeps the empty default; a file naming a
+// pattern outside the allowlist is refused as plan creation refuses it.
+func TestRecoverCarriesToolGrants(t *testing.T) {
+	t.Parallel()
+	r := newRecoverEnv(t)
+	stored := time.Date(2026, 10, 12, 12, 0, 0, 0, time.UTC)
+	grants := []string{"Bash(git merge:*)", "Bash(git add:*)"}
+	r.pushFile(planfile.Plan{
+		ID: 60, Title: "grants", State: "active",
+		Created: stored.Add(time.Hour), Updated: stored.Add(2 * time.Hour),
+		Tasks: []planfile.Task{
+			{ID: 601, Name: "a", Title: "a", Class: "implement", State: "ready", ToolGrants: grants},
+			{ID: 602, Name: "b", Title: "b", Class: "implement", State: "ready"},
+		},
+	})
+	r.recoverPlans()
+	if got := r.str("SELECT tool_grants FROM tasks WHERE id = 601"); got != `["Bash(git merge:*)","Bash(git add:*)"]` {
+		t.Errorf("recovered grants = %q", got)
+	}
+	if got := r.str("SELECT tool_grants FROM tasks WHERE id = 602"); got != "" {
+		t.Errorf("a task with no grants recovered %q, want the empty default", got)
+	}
+	// The mirror reads them back out: the round trip is lossless.
+	snap := r.planSnapshot(60)
+	if got := taskByName(t, snap, "a").ToolGrants; !slices.Equal(got, grants) {
+		t.Errorf("mirrored grants = %v, want %v", got, grants)
+	}
+	if got := taskByName(t, snap, "b").ToolGrants; len(got) != 0 {
+		t.Errorf("mirrored grants of a plain task = %v", got)
+	}
+
+	r.pushFile(planfile.Plan{
+		ID: 61, Title: "bad grants", State: "active",
+		Created: stored.Add(time.Hour), Updated: stored.Add(2 * time.Hour),
+		Tasks: []planfile.Task{{ID: 611, Name: "x", Title: "x", Class: "implement", State: "ready", ToolGrants: []string{"Bash(rm:*)"}}},
+	})
+	for _, p := range r.recoverPlans() {
+		if p.PlanID == 61 && p.Action == PlanRebuilt {
+			t.Errorf("a plan with an out-of-allowlist grant was rebuilt: %+v", p)
+		}
+	}
+	if got := r.int("SELECT COUNT(*) FROM tasks WHERE id = 611"); got != 0 {
+		t.Errorf("the refused plan's task was written")
 	}
 }
 
