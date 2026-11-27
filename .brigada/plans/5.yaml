@@ -125,6 +125,6 @@ tasks:
     deps: ["wl-field"]
     base: "wl-field"
     effort: high
-    state: ready
+    state: running
     branch: ""
     rounds: 0
