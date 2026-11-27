@@ -5,9 +5,9 @@
 plan: 11
 title: "Landing machinery: land-target sync (#127) then batch landing (#134)"
 repo: "github.com/Blackfire-AI/brigada"
-state: needs_foreman
+state: reviewing
 created: 2026-11-26T20:46:37.060237154Z
-updated: 2026-11-27T19:29:24.181346963Z
+updated: 2026-11-27T19:30:09.624700817Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -183,16 +183,16 @@ tasks:
     continue: "batch-evidence"
     tier: heavy
     effort: medium
-    state: pending
+    state: cancelled
     branch: ""
     rounds: 0
   - id: 68
     name: "batch-docs"
     title: "Batch landing: docs, banners and CHANGELOG (Closes #134)"
     class: "implement"
-    deps: ["batch-recovery"]
-    base: "batch-recovery"
-    continue: "batch-recovery"
+    deps: ["batch-resume"]
+    base: "batch-resume"
+    continue: "batch-resume"
     tier: light
     effort: low
     skills: ["docs-change"]
@@ -211,4 +211,29 @@ tasks:
     skills: ["docs-change"]
     state: done
     branch: "brigada/task-70-r3"
+    rounds: 0
+  - id: 77
+    name: "batch-progress"
+    title: "Batch landing: engine-retained per-member progress and completion accounting (Refs #134)"
+    class: "implement"
+    deps: ["batch-evidence"]
+    base: "batch-evidence"
+    continue: "batch-evidence"
+    tier: heavy
+    effort: medium
+    skills: ["schema-migration"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 78
+    name: "batch-resume"
+    title: "Batch landing: lost runner resumes by remote evidence (Refs #134)"
+    class: "implement"
+    deps: ["batch-progress"]
+    base: "batch-progress"
+    continue: "batch-progress"
+    tier: heavy
+    effort: medium
+    state: pending
+    branch: ""
     rounds: 0
