@@ -41,7 +41,7 @@ tasks:
     base: "packages-94"
     continue: "packages-94"
     effort: medium
-    state: pending
+    state: running
     branch: ""
     rounds: 0
   - id: 40
@@ -65,6 +65,6 @@ tasks:
     effort: medium
     review_tier: standard
     caps: {restart: 7}
-    state: reviewing
+    state: done
     branch: "brigada/task-54-r7"
     rounds: 0
