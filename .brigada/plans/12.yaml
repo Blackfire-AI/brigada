@@ -55,8 +55,8 @@ tasks:
     continue: "probe-161v2"
     effort: medium
     skills: ["cli-flag", "surface-parity"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-42"
     rounds: 0
   - id: 43
     name: "changelog-161"
