@@ -96,9 +96,9 @@ tasks:
     effort: low
     caps: {restart: 10}
     skills: ["docs-change"]
-    state: needs_foreman
+    state: ready
     branch: "brigada/task-47-r4"
-    rounds: 2
+    rounds: 0
   - id: 56
     name: "grants-core-v2"
     title: "Per-task tool grants core: reuse task-44 with the migration renumber and git-add allowlist (Refs #123)"
