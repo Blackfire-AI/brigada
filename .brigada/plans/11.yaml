@@ -159,8 +159,8 @@ tasks:
     continue: "batch-run"
     tier: heavy
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-65"
     rounds: 0
   - id: 66
     name: "batch-evidence"
