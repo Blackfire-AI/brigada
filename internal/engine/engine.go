@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	mrand "math/rand"
+	"net/http"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -281,8 +282,9 @@ type Config struct {
 	// Nil keeps the git-backed default; tests inject it.
 	BranchTrailers func(ctx context.Context, repoURL, base, branch string) (string, error)
 	// IssueFetch reads one issue or pull request of the repository at
-	// repoURL (§12.2 issue_read): GET requests alone. Nil keeps the
-	// gh-backed default — the user's own gh login on the engine's host;
+	// repoURL (§12.2 issue_read) for a project whose tracker is github or
+	// unset; gitea reads through TrackerHTTP and none reads nothing. GET
+	// requests alone. Nil keeps the gh-backed default — the user's own gh login on the engine's host;
 	// tests inject it so no test reaches the network.
 	IssueFetch func(ctx context.Context, repoURL string, number int, comments bool) (*Issue, error)
 	// TrackerToken resolves the token of the forge at host (host[:port] of
@@ -293,6 +295,11 @@ type Config struct {
 	// request alone: never to a job's environment, the store, a log or an
 	// error.
 	TrackerToken func(host string) (token string, ok bool, err error)
+	// TrackerHTTP is the client a gitea tracker is read with (§12.2), GET
+	// requests alone. Nil keeps a plain client with a 30 s timeout; tests
+	// inject one, and point tracker_url at a local test server, so no
+	// test reaches the network.
+	TrackerHTTP *http.Client
 	// Warnf logs the warnings of work the engine does best-effort, the
 	// plan-file mirror's failed pushes among them; nil logs to the
 	// standard logger.
@@ -561,6 +568,7 @@ func New(s *store.Store, cfg Config) *Engine {
 		def.IssueFetch = cfg.IssueFetch
 	}
 	def.TrackerToken = cfg.TrackerToken
+	def.TrackerHTTP = cfg.TrackerHTTP
 	if cfg.SnapshotEvery > 0 {
 		def.SnapshotEvery = cfg.SnapshotEvery
 	}
