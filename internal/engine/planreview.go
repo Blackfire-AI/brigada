@@ -651,11 +651,15 @@ func (e *Engine) planReviewAnswerTx(tx *sql.Tx, project, plan int64, batch []int
 // the verdict block read as a task review reads it (§7). Approve
 // runs the approval rules as a no-review creation does; changes carries
 // the findings to the foreman and waits for its amendment, unless the
-// rounds are spent, when the plan proceeds with the findings recorded;
-// anything else — no block, a malformed one, an approve without
-// substantive findings, a run that ended in an error or a limit — is no
-// verdict, retried on another reviewer of the round's bounded set and
-// then held for the foreman (planReviewFailedTx).
+// rounds are spent, when the plan proceeds with the findings recorded.
+// Both substantive verdicts count as successful reviews on the outcome
+// record, as a task review's do (§8); anything else — no block, a
+// malformed one, an approve without substantive findings, a run that
+// ended in an error — is no verdict and records a reliability failure,
+// retried on another reviewer of the round's bounded set and then held
+// for the foreman (planReviewFailedTx). A reviewer that could not run at
+// all — quota, auth, setup, infrastructure — is an availability event
+// and charges nothing.
 func (e *Engine) planReviewCompletedTx(tx *sql.Tx, job *jobRow, c Completion, now time.Time) error {
 	plan := planReviewOfJobTx(job)
 	if plan == 0 {
@@ -680,6 +684,10 @@ func (e *Engine) planReviewCompletedTx(tx *sql.Tx, job *jobRow, c Completion, no
 		}
 		return e.planReviewConcludedTx(tx, job.ProjectID, plan, job.ID, verdictApprove, v.Findings, "", now, false)
 	case haveVerdict && v.Verdict == verdictChanges:
+		// A substantive changes verdict is a successful review too (§8).
+		if err := recordOutcomeTx(tx, job, now); err != nil {
+			return err
+		}
 		return e.planReviewConcludedTx(tx, job.ProjectID, plan, job.ID, verdictChanges, v.Findings, "", now, false)
 	default:
 		reason := "no verdict in the plan review result"
@@ -691,6 +699,11 @@ func (e *Engine) planReviewCompletedTx(tx *sql.Tx, job *jobRow, c Completion, no
 		}
 		if c.ErrorKind == ErrorKindInfra {
 			if handled, err := e.retryPlanReviewInfraTx(tx, job, plan, c, now); handled || err != nil {
+				return err
+			}
+		}
+		if !reviewerUnavailable(c) {
+			if err := recordReviewFailureTx(tx, job, now); err != nil {
 				return err
 			}
 		}

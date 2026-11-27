@@ -10,7 +10,8 @@
 - stale land refs (project and target whose waiting ref `refs/brigada/land/<target>` the next landing deletes before it stacks)
 - `runners`
 - `agents` (runner, adapter, harness, model, family, account, classes, permission, health, cooling until)
-- `outcomes`
+- `outcomes` (per project, agent, class and skill count: attempts and successes, the quality history of §8)
+- `class_cooldown` (per agent and class, added by migration 0082: the consecutive contract-failure streak, the cooldown expiry and the backoff step of the class-scoped reliability cooldown (§8); a substantive verdict resets the row, and `agents.cooling_until` stays the account-quota clock)
 - `events` (append-only)
 - `messages`
 - `questions`

@@ -521,9 +521,9 @@ func TestWorkCompletionParksTheTaskAtNeedsForeman(t *testing.T) {
 // finishes the task; changes queues a fix round on the author's session
 // (§3, below); and every unusable verdict here parks at once — the
 // reviewer is the only agent of another family, its exclusion holds for
-// the whole attempt, and no retry is possible. A missing or malformed
-// verdict records a reliability failure on the review class; a thin
-// approve stays off the record.
+// the whole attempt, and no retry is possible. Both substantive verdicts
+// count as successful reviews; a missing or malformed verdict and a thin
+// approve each record a reliability failure on the review class (§8).
 func TestReviewVerdicts(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -544,14 +544,14 @@ func TestReviewVerdicts(t *testing.T) {
 			result:     `{"verdict":"approve","findings":"` + shortFindings + `"}`,
 			state:      taskNeedsForeman,
 			event:      evReviewNoVerdict,
-			outcomeSum: 0,
+			outcomeSum: 1,
 		},
 		{
 			name:       "changes queues a fix round",
 			result:     `{"verdict":"changes","findings":"` + substantiveFindings + `"}`,
 			state:      taskReviewing,
 			event:      evReviewChanges,
-			outcomeSum: 0,
+			outcomeSum: 2,
 		},
 		{
 			name:       "no verdict block",
@@ -586,9 +586,9 @@ func TestReviewVerdicts(t *testing.T) {
 			if _, ok := e.eventPayloadOf(tc.event); !ok {
 				t.Fatalf("no %s event; have %v", tc.event, e.eventKinds())
 			}
-			// The substantive approve counts one attempt and one success;
-			// a missing or malformed verdict one attempt and no success;
-			// a thin approve and a changes verdict nothing (§7).
+			// A substantive verdict — approve or changes — counts one
+			// attempt and one success; a missing or malformed verdict and
+			// a thin approve one attempt and no success (§7, §8).
 			n := e.int("SELECT COALESCE(SUM(attempts + successes), 0) FROM outcomes")
 			if n != tc.outcomeSum {
 				t.Errorf("outcome rows carry %d, want %d", n, tc.outcomeSum)

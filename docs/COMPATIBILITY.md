@@ -99,6 +99,7 @@ Within schema 1, new keys are added as optional keys. A file that worked before 
 These may change in any release, including a patch release:
 
 - the engine's internal HTTP API;
+- the outcome record's accounting — which completions count as successes and failures on each class, and the class-scoped reliability cooldown repeated contract failures earn (§8). The record's key (project, agent, class, skill count) and its attempts/successes shape are the store's own;
 - the format of log output and status output;
 - the text of the prompts and the foreman's instructions;
 - the dsh adapter, which is experimental and may change in any release;

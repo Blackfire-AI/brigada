@@ -346,6 +346,12 @@ func (e *Engine) ResetAgents(ctx context.Context, harness, model string) (int, e
 		if err != nil {
 			return fmt.Errorf("reset agents: %w", err)
 		}
+		// The reset lifts the class-scoped reliability cooldowns too
+		// (§8): the user's handle clears every cooling the agent holds.
+		if _, err := tx.Exec(`DELETE FROM class_cooldown WHERE agent_id IN
+			(SELECT id FROM agents WHERE harness = ? AND model = ?)`, harness, model); err != nil {
+			return fmt.Errorf("reset the class cooldowns: %w", err)
+		}
 		cnt, err := res.RowsAffected()
 		if err != nil {
 			return fmt.Errorf("reset agents: rows: %w", err)

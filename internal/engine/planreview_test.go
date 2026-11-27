@@ -865,8 +865,9 @@ func TestPlanReviewHardCapProceeds(t *testing.T) {
 }
 
 // TestPlanReviewLazyApproveIsNoVerdict: an approve without substantive
-// findings is no verdict, as a task review's is (§7), and counts nothing
-// on the reviewer's outcome record; a substantive approve counts.
+// findings is no verdict, as a task review's is (§7), and counts as a
+// reliability failure on the reviewer's outcome record (§8); a
+// substantive approve counts as a success.
 func TestPlanReviewLazyApproveIsNoVerdict(t *testing.T) {
 	e := newPlanReviewEnv(t)
 	e.offerForeman(e.runner1)
@@ -876,8 +877,8 @@ func TestPlanReviewLazyApproveIsNoVerdict(t *testing.T) {
 	if got := e.str("SELECT review_verdict FROM plans WHERE id = ?", lazy.PlanID); got != planReviewNoRun {
 		t.Errorf("lazy approve recorded %q, want %s", got, planReviewNoRun)
 	}
-	if got := e.int("SELECT COUNT(*) FROM outcomes"); got != 0 {
-		t.Errorf("outcome rows = %d after a lazy approve, want none", got)
+	if a, s := e.outcomeOf(e.agentOf(e.runner2), "review"); a != 1 || s != 0 {
+		t.Errorf("lazy approve outcome = %d/%d, want 1/0", a, s)
 	}
 	real := e.createPlan(nTasks(2))
 	e.reviewVerdict(e.lease(e.runner2, nil, nil), verdictApprove, theFindings)

@@ -526,14 +526,14 @@ func TestNoVerdictRetriesOnAnotherAgentAndApproves(t *testing.T) {
 	if state := e.str("SELECT state FROM tasks WHERE id = ?", e.task); state != taskDone {
 		t.Errorf("task state after the retry's approve = %q, want done", state)
 	}
-	// Only the substantive approve counts on the outcome record (§7):
-	// the lazy one before it scored nothing.
-	attempts := e.int("SELECT attempts FROM outcomes WHERE agent_id = ? AND class = 'review'", e.agentOf(second))
-	if attempts != 1 {
-		t.Errorf("the retrying agent's outcome attempts = %d, want its one substantive approve", attempts)
+	// The substantive approve counts one attempt and one success; the
+	// lazy one before it counts a reliability failure on its own reviewer
+	// (§7, §8), never a success.
+	if a, s := e.outcomeOf(e.agentOf(second), "review"); a != 1 || s != 1 {
+		t.Errorf("the retrying agent's outcome = %d/%d, want its one substantive approve", a, s)
 	}
-	if n := e.int("SELECT COUNT(*) FROM outcomes WHERE class = 'review'"); n != 1 {
-		t.Errorf("review outcome rows = %d, want the second reviewer's alone", n)
+	if a, s := e.outcomeOf(e.agentOf(first), "review"); a != 1 || s != 0 {
+		t.Errorf("the lazy reviewer's outcome = %d/%d, want 1/0", a, s)
 	}
 }
 

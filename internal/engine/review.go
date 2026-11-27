@@ -292,13 +292,14 @@ func reviewGit(ctx context.Context, dir string, args ...string) (string, error) 
 }
 
 // standaloneReviewCompletedTx applies the end of a review that has no
-// task (§7): the verdict block read as a task's review reads it, the
-// substantive approve counted on the outcome record the same way, and
-// one review_verdict event — on the project's history with the job and
-// its branch — saying what came of it. There is no task to move: a
+// task (§7): the verdict block read as a task's review reads it, both
+// substantive verdicts counted on the outcome record the same way (§8),
+// and one review_verdict event — on the project's history with the job
+// and its branch — saying what came of it. There is no task to move: a
 // changes verdict starts no fix round, and a review with no usable
-// verdict is not retried; the event says so and the person asking runs
-// the review again.
+// verdict is not retried — it records a reliability failure like any
+// unusable review; the event says so and the person asking runs the
+// review again.
 func (e *Engine) standaloneReviewCompletedTx(tx *sql.Tx, job *jobRow, c Completion, now time.Time) error {
 	var v verdictBlock
 	haveVerdict := c.Error == "" && json.Unmarshal([]byte(c.Result), &v) == nil &&
@@ -311,8 +312,16 @@ func (e *Engine) standaloneReviewCompletedTx(tx *sql.Tx, job *jobRow, c Completi
 		}
 		p.Status, p.Findings = verdictApprove, boundNote(v.Findings)
 	case haveVerdict && v.Verdict == verdictChanges:
+		if err := recordOutcomeTx(tx, job, now); err != nil {
+			return err
+		}
 		p.Status, p.Findings = verdictChanges, boundNote(v.Findings)
 	default:
+		if !reviewerUnavailable(c) {
+			if err := recordReviewFailureTx(tx, job, now); err != nil {
+				return err
+			}
+		}
 		p.Status = "no_verdict"
 		switch {
 		case c.Error != "":
