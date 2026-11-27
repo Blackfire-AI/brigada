@@ -198,7 +198,7 @@ tasks:
     continue: "batch-resume"
     effort: medium
     skills: ["docs-change"]
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 70
@@ -236,6 +236,6 @@ tasks:
     continue: "batch-progress"
     tier: heavy
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-78"
     rounds: 0
