@@ -198,9 +198,9 @@ tasks:
     continue: "batch-resume"
     effort: medium
     skills: ["docs-change"]
-    state: reviewing
+    state: running
     branch: "brigada/task-68"
-    rounds: 0
+    rounds: 1
   - id: 70
     name: "sync-docs-v2"
     title: "Land-target sync: docs and CHANGELOG (Closes #127)"
