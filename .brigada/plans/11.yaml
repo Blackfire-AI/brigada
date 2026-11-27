@@ -19,7 +19,10 @@ updated: 2026-11-27T20:12:10.63889533Z
 # describe the model needed and how hard it should think (§6.1);
 # review_tier and review_effort do the same for its reviews (§7, §8); caps
 # override the task's fix_rounds, review_rounds and restart budgets (§6.1);
-# skills name the project's skills the task carries, in order (§5.10).
+# skills name the project's skills the task carries, in order (§5.10);
+# tool_grants name the permission patterns its worker is granted (§6.1);
+# wait_landed holds a dependent pending until its implement deps have
+# actually landed on the target, not merely been done (§6.1).
 tasks:
   - id: 22
     name: "sync-127"
@@ -171,7 +174,7 @@ tasks:
     continue: "batch-holds"
     tier: heavy
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-66"
     rounds: 0
   - id: 67
@@ -221,7 +224,7 @@ tasks:
     tier: heavy
     effort: medium
     skills: ["schema-migration"]
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 78
