@@ -122,8 +122,8 @@ tasks:
     continue: "sync-docs-v2"
     effort: medium
     skills: ["config-setting", "schema-migration"]
-    state: running
-    branch: "brigada/task-62"
+    state: reviewing
+    branch: "brigada/task-62-r1"
     rounds: 0
   - id: 63
     name: "batch-formation"
