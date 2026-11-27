@@ -536,3 +536,15 @@ func TestSyncCommitsNoHistory(t *testing.T) {
 		t.Errorf("SyncCommits on an unborn branch = %v, want none", got)
 	}
 }
+
+// TestUnmergedFilesReturnsGitError: a git that cannot be asked is an
+// error, never an empty list that would read as nothing unmerged.
+func TestUnmergedFilesReturnsGitError(t *testing.T) {
+	if files, err := UnmergedFiles(context.Background(), t.TempDir()); err == nil {
+		t.Errorf("UnmergedFiles outside a repository = %v, nil; want an error", files)
+	}
+	dir := newRepo(t)
+	if files, err := UnmergedFiles(context.Background(), dir); err != nil || len(files) != 0 {
+		t.Errorf("UnmergedFiles of a clean repository = %v, %v; want none", files, err)
+	}
+}

@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/Blackfire-AI/brigada/internal/api"
 	"github.com/Blackfire-AI/brigada/internal/engine"
+	"github.com/Blackfire-AI/brigada/internal/landing"
 	"github.com/Blackfire-AI/brigada/internal/projecturl"
 	"github.com/Blackfire-AI/brigada/internal/prompt"
 )
@@ -619,26 +621,25 @@ func (w *workspace) salvage(ctx context.Context, branch string) (bool, error) {
 // commitLeftovers commits whatever the worker left uncommitted, so a
 // done run cannot ship a branch that is missing its own edits. A clean
 // tree is left alone. A merge the worker left in progress is finished by
-// the commit when it has no unmerged entries — git records the two-parent
-// merge — and otherwise handled by the caller's mode: on the done path
-// (salvage false) an unfinished merge fails the job, naming the files; on
-// the salvage path it is aborted first, so the original failure is not
-// masked, and the commit records the abort.
+// the commit when it is finished — no unmerged index entries, and none of
+// the merge's conflicted paths still carrying a conflict marker — and git
+// records the two-parent merge. An unfinished merge is handled by the
+// caller's mode: on the done path (salvage false) it fails the job,
+// naming the files, and nothing is committed; on the salvage path it is
+// aborted first, so the original failure is not masked, and the commit
+// records the abort.
 func (w *workspace) commitLeftovers(ctx context.Context, salvage bool) error {
 	aborted := false
 	if merging, err := w.merging(ctx); err != nil {
 		return err
 	} else if merging {
-		// The merge is finished only when nothing is left unmerged. Read
-		// the unmerged paths with git's own signal — never a whole-tree
-		// content scan, which would refuse a legitimate file that merely
-		// contains conflict markers — and scan only those paths' content
-		// for the markers a git add -A would otherwise stage silently.
-		unmerged := w.unmergedPaths(ctx)
-		if len(unmergedPathsWithMarkers(w.dir, unmerged)) > 0 {
+		unfinished, err := w.unfinishedMerge(ctx)
+		if err != nil {
+			return err
+		}
+		if unfinished != "" {
 			if !salvage {
-				return fmt.Errorf("the worker left an unfinished merge (%s); resolve or abort it before the runner commits",
-					listPaths(unmerged, maxListedPaths))
+				return fmt.Errorf("the worker left an unfinished merge (%s); resolve or abort it before the runner commits", unfinished)
 			}
 			if out, err := w.git(ctx, "-C", w.dir, "merge", "--abort"); err != nil {
 				return fmt.Errorf("abort the unfinished merge: %w", trimCmdError(out, err))
@@ -684,26 +685,63 @@ func (w *workspace) merging(ctx context.Context) (bool, error) {
 	return strings.TrimSpace(string(out)) != "", nil
 }
 
-// unmergedPaths names the paths git still holds unmerged (index state U),
-// the merge's own signal for the files the worker has not resolved.
-func (w *workspace) unmergedPaths(ctx context.Context) []string {
-	out, err := w.git(ctx, "-C", w.dir, "diff", "--name-only", "--diff-filter=U")
+// unfinishedMerge describes why the merge in progress is unfinished, or
+// returns "" when it is finished. The gate is git's own signal: any
+// unmerged index entry (landing.UnmergedFiles) leaves the merge
+// unfinished, whatever its content — a modify/delete, binary or add/add
+// conflict carries no marker at all. A path the worker staged clears its
+// entry, so a git add of an unresolved file would hide it: for that case
+// only the merge's own conflicted paths (mergeConflictPaths) are read for
+// a conflict marker, never the whole tree, where a legitimate file may
+// hold one.
+func (w *workspace) unfinishedMerge(ctx context.Context) (string, error) {
+	unmerged, err := landing.UnmergedFiles(ctx, w.dir)
 	if err != nil {
-		return nil
+		return "", fmt.Errorf("read the merge's unmerged paths: %w", err)
 	}
+	if len(unmerged) > 0 {
+		return "unmerged: " + listPaths(unmerged, maxListedPaths), nil
+	}
+	conflicted, err := w.mergeConflictPaths(ctx)
+	if err != nil {
+		return "", err
+	}
+	if marked := pathsWithMarkers(w.dir, conflicted); len(marked) > 0 {
+		return "conflict markers staged in: " + listPaths(marked, maxListedPaths), nil
+	}
+	return "", nil
+}
+
+// mergeConflictPaths names the paths the merge in progress conflicted on
+// — the paths git held unmerged before the worker staged them — by
+// replaying the merge of HEAD and MERGE_HEAD in memory with
+// `git merge-tree --write-tree --name-only`, which touches neither the
+// index nor the tree. It exits 1 when the merge conflicts, listing the
+// paths after the result tree's line.
+func (w *workspace) mergeConflictPaths(ctx context.Context) ([]string, error) {
+	out, err := w.git(ctx, "-C", w.dir, "merge-tree", "--write-tree", "--name-only", "--no-messages", "HEAD", "MERGE_HEAD")
+	if err != nil {
+		var exit *exec.ExitError
+		if !errors.As(err, &exit) || exit.ExitCode() != 1 {
+			return nil, fmt.Errorf("read the merge's conflicted paths: %w", trimCmdError(out, err))
+		}
+	} else {
+		return nil, nil // the merge is clean: nothing conflicted
+	}
+	lines := strings.Split(string(out), "\n")
 	var files []string
-	for _, l := range strings.Split(string(out), "\n") {
+	for _, l := range lines[1:] { // the first line is the result tree
 		if l = strings.TrimSpace(l); l != "" {
 			files = append(files, l)
 		}
 	}
-	return files
+	return files, nil
 }
 
-// unmergedPathsWithMarkers returns the subset of files whose content
-// still carries a git conflict marker: the worker resolved the rest (and
-// only forgot to stage them), while these are genuinely unfinished.
-func unmergedPathsWithMarkers(dir string, files []string) []string {
+// pathsWithMarkers returns the subset of files whose content still
+// carries a git conflict marker. A file that is gone (a resolved
+// modify/delete) carries none.
+func pathsWithMarkers(dir string, files []string) []string {
 	var out []string
 	for _, f := range files {
 		data, err := os.ReadFile(filepath.Join(dir, f))

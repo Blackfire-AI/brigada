@@ -273,12 +273,15 @@ func apply3way(ctx context.Context, dir string, patch []byte) error {
 	return nil
 }
 
-// unmergedFiles names the unmerged paths; none can be named when git
-// itself cannot be asked.
-func unmergedFiles(ctx context.Context, dir string) []string {
+// UnmergedFiles names the paths git holds unmerged in dir's index
+// (`git diff --name-only --diff-filter=U`): a merge's or a three-way
+// apply's own signal for the files nobody has resolved yet. A git that
+// cannot be asked returns its error, never an empty list that would read
+// as "nothing unmerged".
+func UnmergedFiles(ctx context.Context, dir string) ([]string, error) {
 	out, err := text(ctx, dir, "diff", "--name-only", "--diff-filter=U")
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	var files []string
 	for _, l := range strings.Split(out, "\n") {
@@ -286,6 +289,13 @@ func unmergedFiles(ctx context.Context, dir string) []string {
 			files = append(files, l)
 		}
 	}
+	return files, nil
+}
+
+// unmergedFiles names the unmerged paths for a conflict report; none can
+// be named when git itself cannot be asked.
+func unmergedFiles(ctx context.Context, dir string) []string {
+	files, _ := UnmergedFiles(ctx, dir)
 	return files
 }
 
