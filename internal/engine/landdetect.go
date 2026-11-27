@@ -211,10 +211,17 @@ func (e *Engine) recordLandedTx(tx *sql.Tx, repoURL, branch string, landed []Lan
 // the land target when one is set, else the default branch — to
 // its landed end state (§7.1): a landing not yet pushed — waiting at the
 // push gate, or left to the user under gate_push never — becomes pushed
-// at the commit that carries the trailer, and a task parked at needs_foreman by a failed landing
-// or push returns to done with its needs-you line gone, its dependents
-// released as a finished task's are. It reports whether anything changed,
-// so the caller re-runs the land rule for the dependents.
+// at the commit that carries the trailer, and a task parked at
+// needs_foreman returns to done with its needs-you line gone, its
+// dependents released as a finished task's are and its plan closed when
+// it was the last live work. The caller has validated the landing, so
+// whatever parked the task — a failed landing or push, a review without
+// a verdict or with changes, spent rounds, a failure — the work is on the
+// branch and the parking is moot; only a worker's question still awaiting
+// an answer stays the foreman's: its latest parking event is task_needs_help,
+// and an answer or a restart moves the task out of needs_foreman, so a
+// task still parked there with that event is still waiting. It reports whether
+// anything changed, so the caller re-runs the land rule for the dependents.
 func (e *Engine) settleLandedTx(tx *sql.Tx, taskID int64, commit string, unpushed bool, now time.Time) (bool, error) {
 	changed := false
 	if unpushed {
@@ -233,16 +240,16 @@ func (e *Engine) settleLandedTx(tx *sql.Tx, taskID int64, commit string, unpushe
 	if state != taskNeedsForeman {
 		return changed, nil
 	}
-	// Only a parking by a failed landing moves: a task parked for any
-	// other reason is the foreman's still.
+	// A question awaiting its answer is the foreman's still; any other
+	// parking is moot once the validated work is on the branch.
 	kinds := "'" + strings.Join(needsYouEventKinds, "', '") + "'"
 	var kind string
 	err := tx.QueryRow(`SELECT kind FROM events WHERE task_id = ? AND kind IN (`+kinds+`) ORDER BY id DESC LIMIT 1`,
 		taskID).Scan(&kind)
-	if errors.Is(err, sql.ErrNoRows) || (err == nil && kind != evTaskLandFailed) {
+	if err == nil && kind == evTaskNeedsHelp {
 		return changed, nil
 	}
-	if err != nil {
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return false, fmt.Errorf("read the parking of task %d: %w", taskID, err)
 	}
 	if _, err := tx.Exec(`UPDATE tasks SET state = ?, updated_at = ? WHERE id = ?`, taskDone, fmtTime(now), taskID); err != nil {

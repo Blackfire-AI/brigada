@@ -573,3 +573,135 @@ func TestLandApproveTrailerLandedQueuesNothing(t *testing.T) {
 		t.Errorf("land_holds rows after approve = %d, want none", n)
 	}
 }
+
+// parkSettleFixture parks the fixture's done task at needs_foreman with
+// the given latest parking event and a dependent behind it, no land job
+// live, so the plan's close hangs on the landing alone.
+func (e *env) parkSettleFixture(kind, payload string) (dependent int64) {
+	e.t.Helper()
+	author := e.agented("author", "anthropic", "implement")
+	reviewer := e.agented("reviewer", "google", "implement", "review")
+	e.runToDone(author, reviewer)
+	e.trailerOK(e.task)
+	e.exec("UPDATE jobs SET status = 'cancelled' WHERE task_id = ? AND kind = 'land'", e.task)
+	dependent = e.addTask("{}")
+	e.exec("UPDATE tasks SET state = 'pending' WHERE id = ?", dependent)
+	e.exec("INSERT INTO task_deps (plan_id, task_id, depends_on_task_id) VALUES (?, ?, ?)", e.plan, dependent, e.task)
+	e.exec("UPDATE tasks SET state = 'needs_foreman' WHERE id = ?", e.task)
+	e.addTaskEvent(e.task, e.project, kind, payload)
+	return dependent
+}
+
+// TestRecordLandedSettlesReviewParkedTask: a task parked by a review with
+// no verdict, then landed by hand with a validated trailer, is done, its
+// dependent released, its plan closed and its needs-you entry gone.
+func TestRecordLandedSettlesReviewParkedTask(t *testing.T) {
+	e := newEnv(t)
+	dep := e.parkSettleFixture(evReviewNoVerdict, `{"reason":"no verdict"}`)
+	if _, ok := e.needsYouTask(e.task); !ok {
+		t.Fatal("the parked task has no needs-you entry")
+	}
+	if err := e.eng.RecordLanded(e.ctx, envRepo, "main", []LandedCommit{e.trailerFor(e.task, "abc123")}); err != nil {
+		t.Fatal(err)
+	}
+	if state := e.str("SELECT state FROM tasks WHERE id = ?", e.task); state != taskDone {
+		t.Errorf("task state = %q, want done", state)
+	}
+	if state := e.str("SELECT state FROM tasks WHERE id = ?", dep); state != "ready" {
+		t.Errorf("dependent state = %q, want ready after the landing", state)
+	}
+	if got := e.str("SELECT state FROM plans WHERE id = ?", e.plan); got != "active" {
+		t.Errorf("plan state = %q, want active while the released dependent is live", got)
+	}
+	if it, ok := e.needsYouTask(e.task); ok {
+		t.Errorf("needs-you entry left: %+v", it)
+	}
+	st, err := e.eng.Status(e.ctx, e.project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, it := range st.NeedsYou {
+		if it.Kind == "task" && it.ID == e.task {
+			t.Errorf("status lists the settled task: %+v", it)
+		}
+	}
+}
+
+// TestRecordLandedSettlesParkedTaskWithRecord: the landing row already
+// exists and the task is still parked; the next detection pass settles it
+// with no new commit, and it counts as newly landed for its plan.
+func TestRecordLandedSettlesParkedTaskWithRecord(t *testing.T) {
+	e := newEnv(t)
+	dep := e.parkSettleFixture(evReviewChanges, `{"reason":"changes"}`)
+	// No dependent is left to run, so the landing is the plan's last live work.
+	e.exec("DELETE FROM task_deps WHERE task_id = ?", dep)
+	e.exec("DELETE FROM tasks WHERE id = ?", dep)
+	e.exec(`INSERT INTO landings (task_id, project_id, target_branch, commit_sha, pushed, source, trailer_branch, trailer_head, created_at)
+		VALUES (?, ?, 'main', 'abc123', 'pushed', 'trailer', ?, ?, ?)`,
+		e.task, e.project, trailerBranch, trailerHead, seedTS)
+	if err := e.eng.RecordLanded(e.ctx, envRepo, "main", []LandedCommit{e.trailerFor(e.task, "abc123")}); err != nil {
+		t.Fatal(err)
+	}
+	if state := e.str("SELECT state FROM tasks WHERE id = ?", e.task); state != taskDone {
+		t.Errorf("task state = %q, want done", state)
+	}
+	if it, ok := e.needsYouTask(e.task); ok {
+		t.Errorf("needs-you entry left: %+v", it)
+	}
+	if got := e.str("SELECT state FROM plans WHERE id = ?", e.plan); got == "active" {
+		t.Errorf("plan state = %q, want it closed", got)
+	}
+}
+
+// TestRecordLandedLeavesPendingQuestionAlone: a task parked by a worker
+// question still awaiting an answer stays the foreman's.
+func TestRecordLandedLeavesPendingQuestionAlone(t *testing.T) {
+	e := newEnv(t)
+	e.parkSettleFixture(evTaskNeedsHelp, `{"question":"which one?"}`)
+	if err := e.eng.RecordLanded(e.ctx, envRepo, "main", []LandedCommit{e.trailerFor(e.task, "abc123")}); err != nil {
+		t.Fatal(err)
+	}
+	if state := e.str("SELECT state FROM tasks WHERE id = ?", e.task); state != taskNeedsForeman {
+		t.Errorf("task state = %q, want needs_foreman", state)
+	}
+	if _, ok := e.needsYouTask(e.task); !ok {
+		t.Error("the pending question left the needs-you queue")
+	}
+}
+
+// A trailer whose head does not match the approved head changes nothing:
+// TestRecordLandedRefusesMismatchedTrailer already covers the refusal
+// (no landing row, task untouched); this pins it for a parked task.
+func TestRecordLandedMismatchedHeadLeavesParkedTask(t *testing.T) {
+	e := newEnv(t)
+	e.parkSettleFixture(evReviewNoVerdict, `{"reason":"no verdict"}`)
+	err := e.eng.RecordLanded(e.ctx, envRepo, "main", []LandedCommit{
+		{TaskID: e.task, Commit: "abc123", Branch: trailerBranch, Head: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state := e.str("SELECT state FROM tasks WHERE id = ?", e.task); state != taskNeedsForeman {
+		t.Errorf("task state = %q, want needs_foreman", state)
+	}
+	if n := e.int("SELECT COUNT(*) FROM landings WHERE task_id = ?", e.task); n != 0 {
+		t.Errorf("landings rows = %d, want 0", n)
+	}
+}
+
+// TestRecordLandedClosesPlanOfReviewParkedTask: the parked task is the
+// plan's last live work, so its trailer landing closes the plan.
+func TestRecordLandedClosesPlanOfReviewParkedTask(t *testing.T) {
+	e := newEnv(t)
+	dep := e.parkSettleFixture(evReviewNoVerdict, `{"reason":"no verdict"}`)
+	e.exec("DELETE FROM task_deps WHERE task_id = ?", dep)
+	e.exec("DELETE FROM tasks WHERE id = ?", dep)
+	if err := e.eng.RecordLanded(e.ctx, envRepo, "main", []LandedCommit{e.trailerFor(e.task, "abc123")}); err != nil {
+		t.Fatal(err)
+	}
+	if got := e.str("SELECT state FROM plans WHERE id = ?", e.plan); got != "done" {
+		t.Errorf("plan state = %q, want done", got)
+	}
+	if it, ok := e.needsYouTask(e.task); ok {
+		t.Errorf("needs-you entry left: %+v", it)
+	}
+}
