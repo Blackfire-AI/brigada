@@ -72,8 +72,8 @@ tasks:
     tier: light
     effort: low
     skills: ["docs-change"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-38-r3"
     rounds: 0
   - id: 49
     name: "note-delivery"
