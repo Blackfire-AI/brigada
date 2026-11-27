@@ -147,7 +147,7 @@ tasks:
     continue: "batch-formation"
     tier: heavy
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-64"
     rounds: 1
   - id: 65
