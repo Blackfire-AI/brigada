@@ -83,7 +83,7 @@ tasks:
     effort: medium
     caps: {restart: 10}
     skills: ["config-setting", "surface-parity"]
-    state: ready
+    state: running
     branch: "brigada/task-46-r9"
     rounds: 0
   - id: 47
