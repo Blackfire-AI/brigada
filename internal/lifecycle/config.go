@@ -8,11 +8,13 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Blackfire-AI/brigada/internal/adapter"
 	"github.com/Blackfire-AI/brigada/internal/caps"
 	"github.com/Blackfire-AI/brigada/internal/engine"
 	"github.com/Blackfire-AI/brigada/internal/notify"
+	"github.com/Blackfire-AI/brigada/internal/runner"
 )
 
 // maxSocketPath is the longest Unix socket path the kernel accepts:
@@ -89,6 +91,10 @@ type FileConfig struct {
 	// rounds.review, rounds.restart); a key the file never names stays nil
 	// and keeps the engine default.
 	Rounds RoundsConfig
+	// TimeCaps are the per-kind job time caps (time_cap_minutes.<kind>,
+	// §5.6): positive whole minutes. A kind the file never names stays nil
+	// and keeps the runner's default cap for it.
+	TimeCaps TimeCapConfig
 	// Review is the default tier, effort and family rule of a review
 	// (review.tier, review.effort, review.family, §7, §8); a key the file
 	// never names stays empty and keeps the engine default.
@@ -165,6 +171,81 @@ func ResolvePermission(harness, permission string, tools []string, file string) 
 // RoundsConfig holds the round caps the config file names; nil = unnamed.
 type RoundsConfig struct {
 	Fix, Review, Restart *int
+}
+
+// timeCapMargin is the gap the engine's hard cap keeps over the runner's
+// class cap (§5.6): the runner stops a run first and saves its work, and
+// the engine's own cap is the backstop that fails the job if the runner
+// never does.
+const timeCapMargin = 5 * time.Minute
+
+// TimeCapConfig holds the per-kind job time caps the config file names
+// (time_cap_minutes.<kind>, §5.6); each field is whole minutes, and a
+// kind the file never names stays nil and keeps the runner's default
+// cap. Sweep and sync are not kinds a key may name.
+type TimeCapConfig struct {
+	Work, Fix, Review, PlanReview, Foreman, Land *int
+}
+
+// named returns the kinds the file names with their whole minutes.
+func (t TimeCapConfig) named() map[string]int {
+	out := map[string]int{}
+	for kind, m := range map[string]*int{
+		"work": t.Work, "fix": t.Fix, "review": t.Review,
+		"plan_review": t.PlanReview, "foreman": t.Foreman, "land": t.Land,
+	} {
+		if m != nil {
+			out[kind] = *m
+		}
+	}
+	return out
+}
+
+// RunnerCaps maps the file's time caps onto the runner's class caps: a
+// named kind overrides its class's wall cap, an unnamed one keeps the
+// runner's default (the runner folds them with mergeClassCaps). nil when
+// the file names none, so the runner keeps every default.
+func (t TimeCapConfig) RunnerCaps() map[string]runner.ClassCaps {
+	named := t.named()
+	if len(named) == 0 {
+		return nil
+	}
+	out := make(map[string]runner.ClassCaps, len(named))
+	for kind, m := range named {
+		out[kind] = runner.ClassCaps{TimeCap: time.Duration(m) * time.Minute}
+	}
+	return out
+}
+
+// ClassCaps is the runner's effective wall-time cap per kind (§5.6): the
+// file's value for a named kind, the runner's default for the rest, and
+// nothing for a kind with no runner cap (land, unless the file names
+// one). A job's lease grant carries its kind's entry.
+func (t TimeCapConfig) ClassCaps() map[engine.Kind]time.Duration {
+	out := make(map[engine.Kind]time.Duration, len(runner.DefaultClassCaps())+len(t.named()))
+	for kind, cc := range runner.DefaultClassCaps() {
+		if cc.TimeCap > 0 {
+			out[engine.Kind(kind)] = cc.TimeCap
+		}
+	}
+	for kind, m := range t.named() {
+		out[engine.Kind(kind)] = time.Duration(m) * time.Minute
+	}
+	return out
+}
+
+// HardCaps derives the engine's hard caps from ClassCaps plus the
+// 5-minute margin (§5.6): the runner's effective cap is the one source,
+// so the engine's cap can never drift from it, and the runner stops first
+// and saves the work. A kind with no runner cap keeps no hard cap unless
+// the file names one.
+func (t TimeCapConfig) HardCaps() map[engine.Kind]time.Duration {
+	caps := t.ClassCaps()
+	out := make(map[engine.Kind]time.Duration, len(caps))
+	for kind, cap := range caps {
+		out[kind] = cap + timeCapMargin
+	}
+	return out
 }
 
 // Caps resolves the file's round caps over the engine defaults.
@@ -305,6 +386,8 @@ func loadConfigFile(path string, required bool) (FileConfig, error) {
 			cfg.ForemanWakesPerDay = n
 		case strings.HasPrefix(key, "rounds."):
 			err = setRounds(&cfg.Rounds, key, value)
+		case strings.HasPrefix(key, "time_cap_minutes."):
+			err = setTimeCap(&cfg.TimeCaps, key, value)
 		case key == "review.tier":
 			if !engine.ValidReviewTier(value) {
 				err = fmt.Errorf("want %s or %s", engine.ReviewTierBelow, engine.ReviewTierSame)
@@ -332,7 +415,7 @@ func loadConfigFile(path string, required bool) (FileConfig, error) {
 		case strings.HasPrefix(key, "env."):
 			err = setEnvRef(&cfg, key, value)
 		default:
-			return FileConfig{}, fmt.Errorf("config %s: line %d: unknown key %q; want state_dir, idle_minutes, notify, notify.webhook, snapshot_dir, retention_days, headroom, task_auto_retry, foreman_wakes_per_day, default_reviewer, rounds.fix, rounds.review, rounds.restart, review.tier, review.effort, review.family, a caps.<layer>, a cost.<harness>/<model>, a tier.<harness>/<model>, a tools.claude/<model>, a permission.<harness>/<model>, a read_scope.<harness>/<model> or an env.<harness>.<VAR>", path, n+1, key)
+			return FileConfig{}, fmt.Errorf("config %s: line %d: unknown key %q; want state_dir, idle_minutes, notify, notify.webhook, snapshot_dir, retention_days, headroom, task_auto_retry, foreman_wakes_per_day, default_reviewer, rounds.fix, rounds.review, rounds.restart, a time_cap_minutes.<kind>, review.tier, review.effort, review.family, a caps.<layer>, a cost.<harness>/<model>, a tier.<harness>/<model>, a tools.claude/<model>, a permission.<harness>/<model>, a read_scope.<harness>/<model> or an env.<harness>.<VAR>", path, n+1, key)
 		}
 		if err != nil {
 			return FileConfig{}, fmt.Errorf("config %s: line %d: %s: %v", path, n+1, key, err)
@@ -406,6 +489,37 @@ func setRounds(r *RoundsConfig, key, value string) error {
 		r.Restart = &n
 	default:
 		return fmt.Errorf("unknown rounds key; want rounds.fix, rounds.review or rounds.restart")
+	}
+	return nil
+}
+
+// setTimeCap sets one time_cap_minutes.<kind> key (§5.6) to a positive
+// whole number of minutes.
+func setTimeCap(t *TimeCapConfig, key, value string) error {
+	n, err := strconv.Atoi(value)
+	if err != nil || n <= 0 {
+		return fmt.Errorf("want a positive whole number of minutes, got %q", value)
+	}
+	rest, _ := strings.CutPrefix(key, "time_cap_minutes.")
+	// The kinds are the engine's job kinds; sweep (and sync) are refused
+	// as unknown: sweep jobs are short engine-internal housekeeping with
+	// no runner cap and no hard-cap enforcement path, so a key naming one
+	// has nothing to tune.
+	switch rest {
+	case "work":
+		t.Work = &n
+	case "fix":
+		t.Fix = &n
+	case "review":
+		t.Review = &n
+	case "plan_review":
+		t.PlanReview = &n
+	case "foreman":
+		t.Foreman = &n
+	case "land":
+		t.Land = &n
+	default:
+		return fmt.Errorf("unknown time_cap_minutes kind %q; want work, fix, review, plan_review, foreman or land", rest)
 	}
 	return nil
 }

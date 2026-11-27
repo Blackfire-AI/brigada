@@ -158,6 +158,7 @@ func runRunner(ctx context.Context, args []string, stdout, stderr io.Writer) int
 		Labels:      splitList(labels),
 		MaxParallel: maxParallel,
 		HarnessEnv:  harnessEnv,
+		ClassCaps:   rt.file.TimeCaps.RunnerCaps(),
 		Ready: func() {
 			fmt.Fprintf(stdout, "runner %s up on %s offering %s\n", name, rt.paths.Socket, strings.Join(parts, "; "))
 			for _, a := range adverts {

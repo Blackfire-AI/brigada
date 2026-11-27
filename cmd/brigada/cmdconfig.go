@@ -268,6 +268,7 @@ func printConfigMachine(rt *runtime, flagStateDir string, stdout, stderr io.Writ
 		{"task_auto_retry", "true"}, {"foreman_wakes_per_day", "20"},
 		{"default_reviewer", "none"},
 		{"rounds.fix", "2"}, {"rounds.review", "2"}, {"rounds.restart", "3"},
+		{"time_cap_minutes.<kind>", "work/fix 40m, review/plan_review 20m, foreman 25m, land none"},
 		{"review.tier", "below"}, {"review.effort", "medium"}, {"review.family", "prefer"},
 		{"caps.global", "no cap"}, {"caps.plan", "no cap"}, {"caps.runner", "no cap"},
 		{"caps.account.<label>", "no cap"}, {"caps.model.<model>", "no cap"},

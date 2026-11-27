@@ -204,8 +204,12 @@ type ClassCaps struct {
 	TimeCap time.Duration
 }
 
-// defaultClassCaps is what a class gets when nothing overrides it.
-func defaultClassCaps() map[string]ClassCaps {
+// DefaultClassCaps is what a class gets when nothing overrides it (§5.6):
+// the shipped wall-time caps a run gets — 40 m work and fix, 20 m review
+// and plan review, 25 m foreman — each just under the engine's hard cap,
+// and the shared 30-minute tool-call cap. It is the single source of
+// those defaults: the engine's lifecycle derives its hard caps from it.
+func DefaultClassCaps() map[string]ClassCaps {
 	return map[string]ClassCaps{
 		"work":        {ToolCap: defaultToolCap, TimeCap: 40 * time.Minute},
 		"fix":         {ToolCap: defaultToolCap, TimeCap: 40 * time.Minute},
@@ -222,7 +226,7 @@ func defaultClassCaps() map[string]ClassCaps {
 // its runs no wall cap — so an unknown kind is watched for silence but
 // never cut short by a cap it never agreed to.
 func mergeClassCaps(configured map[string]ClassCaps) map[string]ClassCaps {
-	out := defaultClassCaps()
+	out := DefaultClassCaps()
 	for kind, caps := range configured {
 		merged := out[kind]
 		if merged.ToolCap == 0 {

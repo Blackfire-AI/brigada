@@ -444,10 +444,16 @@ func (r *jobRun) heartbeats(ctx context.Context, abort context.CancelFunc, done 
 // and the caps of the class the job's kind belongs to.
 func (r *jobRun) stallPolicy() stallPolicy {
 	caps := r.cfg.ClassCaps[r.grant.Kind]
+	timeCap := caps.TimeCap
+	// The grant's cap is the engine's authoritative value (§5.6); a grant
+	// that names none keeps the runner's own class cap.
+	if r.grant.TimeCap != 0 {
+		timeCap = r.grant.TimeCap
+	}
 	return stallPolicy{
 		StallAfter: r.cfg.StallAfter,
 		ToolCap:    caps.ToolCap,
-		TimeCap:    caps.TimeCap,
+		TimeCap:    timeCap,
 		StartedAt:  r.startedAt,
 	}
 }

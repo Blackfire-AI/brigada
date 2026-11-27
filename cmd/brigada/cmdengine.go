@@ -53,6 +53,7 @@ func runEngine(ctx context.Context, args []string, stdout, stderr io.Writer) int
 		Retention:     time.Duration(rt.file.RetentionDays) * 24 * time.Hour,
 		TaskAutoRetry: rt.file.TaskAutoRetry,
 		Rounds:        rt.file.Rounds,
+		TimeCaps:      rt.file.TimeCaps,
 		Review:        rt.file.Review,
 
 		ForemanWakeBudget: rt.file.ForemanWakesPerDay,

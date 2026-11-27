@@ -1697,6 +1697,7 @@ func (e *Engine) landLeaseGrantTx(tx *sql.Tx, j *jobRow, owner int64, leaseID st
 			LandReady:      s.LandReady,
 			SkipLandReady:  j.SkipLandReady,
 			Attempt:        j.Attempts + 1,
+			TimeCap:        e.cfg.ClassCaps[j.Kind],
 		}, nil
 	}
 	repo, baseRef, _, branch, err := taskInfoTx(tx, j)
@@ -1777,6 +1778,7 @@ func (e *Engine) landLeaseGrantTx(tx *sql.Tx, j *jobRow, owner int64, leaseID st
 		LandReady:      s.LandReady,
 		SkipLandReady:  j.SkipLandReady,
 		Attempt:        j.Attempts + 1,
+		TimeCap:        e.cfg.ClassCaps[j.Kind],
 	}, nil
 }
 

@@ -93,6 +93,7 @@ func TestConfigSavedAgentsAndRunningRunnerOutsideRepo(t *testing.T) {
 		"task_auto_retry = true (default)", "headroom = true (default)",
 		"foreman_wakes_per_day = 20 (default)", "default_reviewer = none (default)",
 		"rounds.fix = 2 (default)", "rounds.review = 2 (default)", "rounds.restart = 3 (default)",
+		"time_cap_minutes.<kind> = work/fix 40m, review/plan_review 20m, foreman 25m, land none (default)",
 		"review.tier = below (default)", "review.effort = medium (default)",
 		"review.family = prefer (default)",
 		"snapshot_dir = none (default)", "retention_days = 0, keep everything (default)", "caps.plan = no cap (default)",

@@ -410,7 +410,11 @@ type jobGrant struct {
 	Prompt         string    `json:"prompt"`
 	LeaseID        string    `json:"lease_id"`
 	LeaseExpiresAt time.Time `json:"lease_expires_at"`
-	Harness        string    `json:"harness"`
+	// TimeCap is the job kind's effective wall-time cap (§5.6), carried
+	// from the engine's lease grant: the runner's stall policy takes it
+	// when set, its own class cap otherwise. Zero means none.
+	TimeCap time.Duration `json:"time_cap,omitempty"`
+	Harness string        `json:"harness"`
 	// Agent is the harness of the agent the lease picked for the job
 	// (§8): the runner runs the job with that agent's adapter and model,
 	// never with the job's own harness constraint, which placed the job
@@ -532,6 +536,7 @@ func jobGrantOf(g *engine.LeaseGrant) *jobGrant {
 		Prompt:          g.Prompt,
 		LeaseID:         g.LeaseID,
 		LeaseExpiresAt:  g.LeaseExpiresAt,
+		TimeCap:         g.TimeCap,
 		Harness:         g.Harness,
 		Agent:           g.Agent,
 		AgentAdapter:    g.AgentAdapter,

@@ -156,6 +156,16 @@ type Config struct {
 	// job's current lease (§5.6). Entries here override the
 	// defaults for their kind only.
 	HardCaps map[Kind]time.Duration
+	// ClassCaps are the runner's effective wall-time caps per job kind
+	// (§5.6): what a runner stops a run at, one 5-minute margin under
+	// the engine's own hard cap so the runner saves the work first. A
+	// job's lease grant carries its kind's entry, and the runner's stall
+	// policy takes it over its own default. Zero — the value for a kind
+	// with no runner cap, and the default when nothing sets the map —
+	// lets the runner decide its own cap. The engine's lifecycle fills
+	// this from the runner's defaults and the config file's
+	// time_cap_minutes keys.
+	ClassCaps map[Kind]time.Duration
 	// RoundCaps are the default per-task round caps; a task's caps JSON
 	// (fix_rounds, review_rounds, restart) overrides them per task.
 	RoundCaps RoundCaps
@@ -432,6 +442,14 @@ func New(s *store.Store, cfg Config) *Engine {
 	for kind, limit := range cfg.HardCaps {
 		if limit > 0 {
 			def.HardCaps[kind] = limit
+		}
+	}
+	for kind, limit := range cfg.ClassCaps {
+		if limit > 0 {
+			if def.ClassCaps == nil {
+				def.ClassCaps = map[Kind]time.Duration{}
+			}
+			def.ClassCaps[kind] = limit
 		}
 	}
 	if cfg.RoundCaps.Fix > 0 {

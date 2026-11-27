@@ -115,7 +115,7 @@ func TestMergeClassCaps(t *testing.T) {
 		}
 	}
 	// A nil configuration keeps every default.
-	if got := mergeClassCaps(nil); !reflect.DeepEqual(got, defaultClassCaps()) {
+	if got := mergeClassCaps(nil); !reflect.DeepEqual(got, DefaultClassCaps()) {
 		t.Errorf("mergeClassCaps(nil) = %+v, want the defaults", got)
 	}
 }
@@ -393,6 +393,55 @@ func TestRunnerClassTimeCap(t *testing.T) {
 	e.assertNoWorktrees()
 	if _, err := os.Stat(filepath.Join(markers, "finished")); err == nil {
 		t.Fatal("the time-capped worker ran to the end; it was not killed")
+	}
+}
+
+// TestRunnerGrantTimeCap covers the grant's cap reaching the stall policy
+// (§5.6): the engine puts the kind's effective cap on the lease grant,
+// and the runner takes it over its own class cap. The runner here sets no
+// class cap of its own, so its work class keeps the shipped 40-minute
+// default; a run that stops at the grant's 2 minutes proves the grant won.
+func TestRunnerGrantTimeCap(t *testing.T) {
+	remote := newRemote(t)
+	e := newTestEnv(t, engine.Config{
+		ClassCaps: map[engine.Kind]time.Duration{engine.KindWork: 2 * time.Minute},
+	})
+	e.seedProject(remote)
+	task := e.seedTask("", "true")
+	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Take your time.", "", ""))
+	markers := markerDir(t)
+
+	// The manual clock keeps the cap from expiring while the worker still
+	// starts; it moves only on Advance, as the class-time-cap tests do.
+	clk := newManualClock()
+	p := e.startRunner(writeWorkerScript(t, silentWorker), 100*time.Millisecond,
+		func(c *Config) {
+			c.Clock = clk.Clock()
+			c.StallAfter = time.Hour // the grant's cap, not the silence, stops this run
+		})
+	defer p.stop(t)
+
+	e.waitUntil("the worker to start", func() bool {
+		_, err := os.Stat(filepath.Join(markers, "started"))
+		return err == nil
+	})
+	stopped := e.waitJob(job, func(j *engine.JobInfo) bool {
+		if j.Status == statusStalled {
+			return true
+		}
+		clk.Advance(time.Minute)
+		return false
+	})
+	res := e.workerResult(stopped)
+	if res.Status != statusTimeCap {
+		t.Errorf("worker result = %+v, want status %q (the grant's 2-minute cap, not the runner's 40-minute default, stopped it)", res, statusTimeCap)
+	}
+	if !strings.Contains(res.Reason, "class time cap") || !strings.Contains(res.Reason, "2m") {
+		t.Errorf("reason = %q, want the grant's 2-minute cap named", res.Reason)
+	}
+	e.assertNoWorktrees()
+	if _, err := os.Stat(filepath.Join(markers, "finished")); err == nil {
+		t.Fatal("the grant-capped worker ran to the end; it was not killed")
 	}
 }
 

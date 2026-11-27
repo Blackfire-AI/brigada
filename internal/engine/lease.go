@@ -35,6 +35,11 @@ type LeaseGrant struct {
 	LeaseID    string
 	// LeaseExpiresAt is when the lease lapses without a heartbeat.
 	LeaseExpiresAt time.Time
+	// TimeCap is the job kind's effective wall-time cap (§5.6): the
+	// runner's cap for the kind, zero when the kind has none. The
+	// runner's stall policy takes it when set, its own class cap
+	// otherwise.
+	TimeCap time.Duration
 	// ForemanToken is the lease-scoped foreman token (§12.1, §12.2),
 	// minted with the lease of a foreman turn and empty for every task
 	// job. It is the secret's only appearance: it reaches the runner in
@@ -911,6 +916,7 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 			LeaseID:        leaseID,
 			LeaseExpiresAt: expires,
 			ForemanToken:   foremanToken,
+			TimeCap:        e.cfg.ClassCaps[j.Kind],
 
 			Effort:          effort,
 			ForemanEffort:   foremanEffort,
