@@ -36,6 +36,23 @@ func setEnvRef(cfg *FileConfig, key, value string) error {
 	if envReserved(name) {
 		return fmt.Errorf("%s is set by the runner or the adapter and cannot be configured", name)
 	}
+	if err := checkSecretRef(value); err != nil {
+		return err
+	}
+	if cfg.Env == nil {
+		cfg.Env = map[string]map[string]string{}
+	}
+	if cfg.Env[harness] == nil {
+		cfg.Env[harness] = map[string]string{}
+	}
+	cfg.Env[harness][name] = value
+	return nil
+}
+
+// checkSecretRef refuses a config value that is not a reference,
+// keychain:<item> or file:<path>. The value is never echoed: it may be a
+// secret written where a reference belongs.
+func checkSecretRef(value string) error {
 	var target string
 	switch {
 	case strings.HasPrefix(value, envRefKeychain):
@@ -48,14 +65,53 @@ func setEnvRef(cfg *FileConfig, key, value string) error {
 	if target == "" {
 		return fmt.Errorf("the reference names nothing")
 	}
-	if cfg.Env == nil {
-		cfg.Env = map[string]map[string]string{}
-	}
-	if cfg.Env[harness] == nil {
-		cfg.Env[harness] = map[string]string{}
-	}
-	cfg.Env[harness][name] = value
 	return nil
+}
+
+// trackerHostKey is the <host> of a tracker.<host>.token key: a DNS name
+// or IPv4 address, or a bracketed IPv6 address, with an optional port.
+var trackerHostKey = regexp.MustCompile(`^([a-z0-9]([a-z0-9.-]*[a-z0-9])?|\[[0-9a-f:.]+\])(:[0-9]{1,5})?$`)
+
+// setTrackerToken records one tracker.<host>.token key (§12.2): the
+// reference to the token the engine reads the forge at host[:port] with,
+// the host of a project's tracker_url. Like an env key it holds the
+// reference alone, never a value.
+func setTrackerToken(cfg *FileConfig, key, value string) error {
+	rest, _ := strings.CutPrefix(key, "tracker.")
+	host, ok := strings.CutSuffix(rest, ".token")
+	host = strings.ToLower(host)
+	if !ok || !trackerHostKey.MatchString(host) {
+		return fmt.Errorf("want tracker.<host>.token, the host[:port] of the project's tracker_url, with no scheme, user name or path")
+	}
+	if err := checkSecretRef(value); err != nil {
+		return err
+	}
+	if cfg.TrackerTokens == nil {
+		cfg.TrackerTokens = map[string]string{}
+	}
+	cfg.TrackerTokens[host] = value
+	return nil
+}
+
+// ResolveTrackerToken resolves the tracker.<host>.token reference of the
+// forge at host (host[:port], any case) into its token. ok is false when
+// the config names no reference for the host. A failure names the key and
+// the reference, never a value. A nil run uses the real `security`
+// program. The caller hands the token to the forge request alone.
+func ResolveTrackerToken(refs map[string]string, host string, run SecretCommand) (token string, ok bool, err error) {
+	host = strings.ToLower(host)
+	ref, ok := refs[host]
+	if !ok {
+		return "", false, nil
+	}
+	if run == nil {
+		run = runSecretCommand
+	}
+	token, err = resolveEnvRef(ref, run)
+	if err != nil {
+		return "", true, fmt.Errorf("tracker.%s.token = %s: %w", host, ref, err)
+	}
+	return token, true, nil
 }
 
 // envReserved names the variables the runner and the adapters pin: the

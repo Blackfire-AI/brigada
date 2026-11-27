@@ -275,6 +275,14 @@ type Config struct {
 	// gh-backed default — the user's own gh login on the engine's host;
 	// tests inject it so no test reaches the network.
 	IssueFetch func(ctx context.Context, repoURL string, number int, comments bool) (*Issue, error)
+	// TrackerToken resolves the token of the forge at host (host[:port] of
+	// a project's tracker_url) from the machine config's
+	// tracker.<host>.token reference, at the moment an issue is fetched;
+	// ok is false when no reference is configured. Nil = no token is
+	// configured for any host. The engine hands the token to the forge
+	// request alone: never to a job's environment, the store, a log or an
+	// error.
+	TrackerToken func(host string) (token string, ok bool, err error)
 	// Warnf logs the warnings of work the engine does best-effort, the
 	// plan-file mirror's failed pushes among them; nil logs to the
 	// standard logger.
@@ -542,6 +550,7 @@ func New(s *store.Store, cfg Config) *Engine {
 	if cfg.IssueFetch != nil {
 		def.IssueFetch = cfg.IssueFetch
 	}
+	def.TrackerToken = cfg.TrackerToken
 	if cfg.SnapshotEvery > 0 {
 		def.SnapshotEvery = cfg.SnapshotEvery
 	}

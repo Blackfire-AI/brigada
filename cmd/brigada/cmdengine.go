@@ -58,6 +58,7 @@ func runEngine(ctx context.Context, args []string, stdout, stderr io.Writer) int
 
 		ForemanWakeBudget: rt.file.ForemanWakesPerDay,
 		DefaultReviewer:   rt.file.DefaultReviewer,
+		TrackerTokens:     rt.file.TrackerTokens,
 	})
 	if err != nil {
 		return fail(stderr, err)

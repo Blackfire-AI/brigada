@@ -275,9 +275,12 @@ func printConfigMachine(rt *runtime, flagStateDir string, stdout, stderr io.Writ
 		{"cost.<harness>/<model>", "light 1, standard 2, heavy 3"}, {"tier.<harness>/<model>", "from the model table"},
 		{"permission.<harness>/<model>", "the harness default"},
 		{"tools.claude/<model>", "unset: the claude permission applies"},
+		{"tracker.<host>.token", "none"},
 	}
-	// The loader already validated this file. No accepted key holds a secret;
-	// do not read harness config or credential files into this map.
+	// The loader already validated this file. No accepted key holds a secret:
+	// an env.<harness>.<VAR> or tracker.<host>.token value is a reference,
+	// shown as written and never resolved here. Do not read harness config
+	// or credential files into this map.
 	data, err := os.ReadFile(rt.configPath)
 	if err != nil && !os.IsNotExist(err) {
 		return fail(stderr, err)

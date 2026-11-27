@@ -154,3 +154,106 @@ func TestConfigEnvKeys(t *testing.T) {
 		}
 	}
 }
+
+// TestConfigTrackerTokenKeys covers tracker.<host>.token: the reference
+// forms are kept as written under the lowercased host[:port], and a
+// value, an empty reference or a host that is not one is refused without
+// echoing the value.
+func TestConfigTrackerTokenKeys(t *testing.T) {
+	dir := t.TempDir()
+	write := func(lines string) string {
+		p := filepath.Join(dir, "config")
+		if err := os.WriteFile(p, []byte(lines+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	cfg, err := LoadConfigFile(write("tracker.Git.Example.invalid:3000.token = keychain:brigada-forge\n" +
+		"tracker.codeberg.example.token = file:/etc/brigada/forge-token\n" +
+		"tracker.[::1]:3000.token = keychain:local"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		"git.example.invalid:3000": "keychain:brigada-forge",
+		"codeberg.example":         "file:/etc/brigada/forge-token",
+		"[::1]:3000":               "keychain:local",
+	}
+	if len(cfg.TrackerTokens) != len(want) {
+		t.Errorf("tracker tokens = %v, want %v", cfg.TrackerTokens, want)
+	}
+	for host, ref := range want {
+		if cfg.TrackerTokens[host] != ref {
+			t.Errorf("tracker.%s.token = %q, want %q", host, cfg.TrackerTokens[host], ref)
+		}
+	}
+	if cfg, err := LoadConfigFile(write("notify = none")); err != nil || cfg.TrackerTokens != nil {
+		t.Errorf("unset: tracker tokens = %v, %v; want none", cfg.TrackerTokens, err)
+	}
+	for _, line := range []string{
+		"tracker.git.example.invalid.token = literal-not-a-reference",
+		"tracker.git.example.invalid.token = keychain:",
+		"tracker.git.example.invalid.token = file:",
+		"tracker.git.example.invalid.token = env:FORGE_TOKEN",
+		"tracker.git.example.invalid = keychain:x",
+		"tracker..token = keychain:x",
+		"tracker.token = keychain:x",
+		"tracker.https://git.example.invalid.token = keychain:x",
+		"tracker.user@git.example.invalid.token = keychain:x",
+		"tracker.git.example.invalid/forge.token = keychain:x",
+		"tracker.git.example.invalid:port.token = keychain:x",
+	} {
+		_, err := LoadConfigFile(write(line))
+		if err == nil {
+			t.Errorf("%q accepted", line)
+			continue
+		}
+		if strings.Contains(err.Error(), "literal-not-a-reference") {
+			t.Errorf("%q: error echoes the value: %v", line, err)
+		}
+	}
+}
+
+// TestResolveTrackerToken covers the resolver the engine calls at fetch
+// time: a host with no key is no token, a file and a keychain reference
+// resolve, and a failure names the key and the reference, never a value.
+func TestResolveTrackerToken(t *testing.T) {
+	path := writeRefFile(t, 0o600)
+	refs := map[string]string{
+		"git.example.invalid:3000": "file:" + path,
+		"keys.example.invalid":     "keychain:brigada-forge",
+		"gone.example.invalid":     "file:" + filepath.Join(t.TempDir(), "missing"),
+	}
+	if tok, ok, err := ResolveTrackerToken(refs, "other.example.invalid", nil); tok != "" || ok || err != nil {
+		t.Errorf("unconfigured host: %q, %v, %v", tok, ok, err)
+	}
+	if tok, ok, err := ResolveTrackerToken(nil, "git.example.invalid:3000", nil); tok != "" || ok || err != nil {
+		t.Errorf("no keys: %q, %v, %v", tok, ok, err)
+	}
+	fileTok, ok, err := ResolveTrackerToken(refs, "Git.Example.invalid:3000", nil)
+	if err != nil || !ok || fileTok == "" || strings.ContainsAny(fileTok, "\r\n") {
+		t.Fatalf("file reference: %q, %v, %v", fileTok, ok, err)
+	}
+	run := func(name string, args ...string) ([]byte, error) {
+		if name != "security" || args[len(args)-1] != "brigada-forge" {
+			t.Errorf("ran %s %v", name, args)
+		}
+		return []byte("token-from-keychain\n"), nil
+	}
+	if tok, ok, err := ResolveTrackerToken(refs, "keys.example.invalid", run); tok != "token-from-keychain" || !ok || err != nil {
+		t.Errorf("keychain reference: %q, %v, %v", tok, ok, err)
+	}
+	failing := func(string, ...string) ([]byte, error) {
+		return []byte("token-from-keychain"), errors.New("exit 44 token-from-keychain")
+	}
+	_, _, err = ResolveTrackerToken(refs, "keys.example.invalid", failing)
+	if err == nil || !strings.Contains(err.Error(), "tracker.keys.example.invalid.token = keychain:brigada-forge") {
+		t.Errorf("keychain failure: err = %v, want it to name the key and the reference", err)
+	} else if strings.Contains(err.Error(), "token-from-keychain") {
+		t.Errorf("keychain failure echoes a value: %v", err)
+	}
+	_, _, err = ResolveTrackerToken(refs, "gone.example.invalid", nil)
+	if err == nil || !strings.Contains(err.Error(), "tracker.gone.example.invalid.token = file:") {
+		t.Errorf("missing file: err = %v, want it to name the key and the reference", err)
+	}
+}
