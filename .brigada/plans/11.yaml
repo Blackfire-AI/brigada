@@ -97,7 +97,7 @@ tasks:
     continue: "sync-waiting"
     effort: medium
     skills: ["surface-parity"]
-    state: done
+    state: needs_foreman
     branch: "brigada/task-60"
     rounds: 0
   - id: 61
