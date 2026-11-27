@@ -56,7 +56,7 @@ tasks:
     tier: heavy
     effort: medium
     skills: ["config-setting", "surface-parity"]
-    state: ready
+    state: running
     branch: ""
     rounds: 0
   - id: 73
