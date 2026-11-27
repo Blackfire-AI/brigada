@@ -66,6 +66,12 @@ type LeaseGrant struct {
 	// its runner advertised it: the harness's own permission mode, for every
 	// job the agent runs, a review included. '' = none to pass.
 	Permission string
+	// ToolGrants are the task's per-task tool grants (§6.1), the Claude
+	// Code permission patterns its worker is granted; nil or empty when the
+	// task grants none. The runner hands them to the adapter, which appends
+	// them to a pattern-scoped claude agent's allowlist and leaves every
+	// other scope unchanged (§5.2).
+	ToolGrants []string
 	// Setup is the environment step the runner runs before the worker and
 	// again before the check (§5.7); nil = the project had none.
 	Setup *SetupSpec
@@ -751,6 +757,14 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 				leased.Prompt = &meta
 			}
 		}
+		// A worker job's lease grant carries the permission patterns the
+		// task grants its worker (§6.1), the same list the lease event
+		// records. A review runs under the reviewer's own scope and a
+		// landing under the runner's, so neither grant carries them.
+		var toolGrants []string
+		if j.Kind == KindWork || j.Kind == KindFix {
+			toolGrants = leased.ToolGrants
+		}
 		if _, err := appendEventTx(tx, evJobLeased, j.ProjectID, j.TaskID, j.ID, leased, now); err != nil {
 			return nil, err
 		}
@@ -960,6 +974,7 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 			DefaultBranch:   defaultBranch,
 			CheckCmd:        checkCmd,
 			Permission:      permission,
+			ToolGrants:      toolGrants,
 			Setup:           setup,
 			ExtraRepos:      extraRepos,
 			ReviewBranch:    reviewBranch,

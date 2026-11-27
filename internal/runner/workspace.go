@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -617,7 +618,7 @@ func leaseRejected(out []byte) bool {
 // branch — an amend, a rebuild on a new base — publishes, and a branch
 // someone else moved meanwhile is refused with a *leaseRefusedError.
 func (w *workspace) ensurePushed(ctx context.Context) error {
-	if err := w.commitLeftovers(ctx); err != nil {
+	if err := w.commitLeftovers(ctx, false); err != nil {
 		return err
 	}
 	head, err := w.worktreeHead(ctx)
@@ -665,7 +666,7 @@ func (w *workspace) ensurePushed(ctx context.Context) error {
 // the task's remote branch alone. A clean checkout with no commits
 // beyond the task's remote (or its base, if never pushed) saves nothing.
 func (w *workspace) salvage(ctx context.Context, branch string) (bool, error) {
-	if err := w.commitLeftovers(ctx); err != nil {
+	if err := w.commitLeftovers(ctx, true); err != nil {
 		return false, err
 	}
 	head, err := w.worktreeHead(ctx)
@@ -710,8 +711,41 @@ func (w *workspace) salvage(ctx context.Context, branch string) (bool, error) {
 
 // commitLeftovers commits whatever the worker left uncommitted, so a
 // done run cannot ship a branch that is missing its own edits. A clean
-// tree is left alone.
-func (w *workspace) commitLeftovers(ctx context.Context) error {
+// tree is left alone. A merge the worker left in progress is finished by
+// the commit when it is finished — no unmerged index entries, and none of
+// the merge's conflicted paths still carrying a conflict marker — and git
+// records the two-parent merge. An unfinished merge is handled by the
+// caller's mode: on the done path (salvage false) it fails the job,
+// naming the files, and nothing is committed; on the salvage path it is
+// aborted first, so the original failure is not masked, and the commit
+// records the abort.
+func (w *workspace) commitLeftovers(ctx context.Context, salvage bool) error {
+	aborted := false
+	// Git's own unmerged index entries are checked whether or not a merge
+	// is in progress: a cherry-pick, stash pop, checkout -m or restore
+	// --merge conflict leaves them with no MERGE_HEAD, and git add -A
+	// would clear them and commit the markers.
+	merging, err := w.merging(ctx)
+	if err != nil {
+		return err
+	}
+	unfinished, err := w.unfinishedMerge(ctx, merging)
+	if err != nil {
+		return err
+	}
+	if unfinished != "" {
+		if !salvage {
+			return fmt.Errorf("the worker left an unfinished merge (%s); resolve or abort it before the runner commits", unfinished)
+		}
+		abort := []string{"-C", w.dir, "merge", "--abort"}
+		if !merging {
+			abort = []string{"-C", w.dir, "reset", "--merge"}
+		}
+		if out, err := w.git(ctx, abort...); err != nil {
+			return fmt.Errorf("abort the unfinished merge: %w", trimCmdError(out, err))
+		}
+		aborted = true
+	}
 	out, err := w.git(ctx, "-C", w.dir, "status", "--porcelain")
 	if err != nil {
 		return fmt.Errorf("read the worktree's status: %w", trimCmdError(out, err))
@@ -729,10 +763,135 @@ func (w *workspace) commitLeftovers(ctx context.Context) error {
 	if out, err := w.git(ctx, "-C", w.dir, "add", "-A"); err != nil {
 		return fmt.Errorf("stage the worker's uncommitted changes: %w", trimCmdError(out, err))
 	}
-	if out, err := w.git(ctx, "-C", w.dir, "commit", "-m", "brigada runner: the worker's uncommitted changes"); err != nil {
+	msg := "brigada runner: the worker's uncommitted changes"
+	if aborted {
+		msg = "brigada runner: the worker's uncommitted changes (an unfinished merge was aborted)"
+	}
+	if out, err := w.git(ctx, "-C", w.dir, "commit", "-m", msg); err != nil {
 		return fmt.Errorf("commit the worker's uncommitted changes: %w", trimCmdError(out, err))
 	}
 	return nil
+}
+
+// merging reports whether a merge is in progress in the worktree: git
+// sets MERGE_HEAD when `git merge` began and has not yet been committed
+// or aborted.
+func (w *workspace) merging(ctx context.Context) (bool, error) {
+	out, err := w.git(ctx, "-C", w.dir, "rev-parse", "--verify", "--quiet", "MERGE_HEAD")
+	if err != nil {
+		var exit *exec.ExitError
+		if errors.As(err, &exit) && exit.ExitCode() == 1 {
+			return false, nil // no MERGE_HEAD: no merge in progress
+		}
+		return false, fmt.Errorf("look for a merge in progress: %w", trimCmdError(out, err))
+	}
+	return strings.TrimSpace(string(out)) != "", nil
+}
+
+// unfinishedMerge describes why the merge in progress is unfinished, or
+// returns "" when it is finished. The gate is git's own signal: any
+// unmerged index entry (unmergedPaths) leaves the merge
+// unfinished, whatever its content — a modify/delete, binary or add/add
+// conflict carries no marker at all. A path the worker staged clears its
+// entry, so a git add of an unresolved file would hide it: for that case
+// only the merge's own conflicted paths (mergeConflictPaths) are read for
+// a conflict marker, never the whole tree, where a legitimate file may
+// hold one.
+func (w *workspace) unfinishedMerge(ctx context.Context, merging bool) (string, error) {
+	unmerged, err := w.unmergedPaths(ctx)
+	if err != nil {
+		return "", err
+	}
+	if len(unmerged) > 0 {
+		return "unmerged: " + listPaths(unmerged, maxListedPaths), nil
+	}
+	if !merging {
+		return "", nil
+	}
+	conflicted, err := w.mergeConflictPaths(ctx)
+	if err != nil {
+		return "", err
+	}
+	if marked := pathsWithMarkers(w.dir, conflicted); len(marked) > 0 {
+		return "conflict markers staged in: " + listPaths(marked, maxListedPaths), nil
+	}
+	return "", nil
+}
+
+// unmergedPaths names the paths git holds unmerged in the index. A git
+// that cannot be asked is an error, never an empty list that would read
+// as nothing unmerged. Only stdout is read: stderr's warnings are not
+// paths.
+func (w *workspace) unmergedPaths(ctx context.Context) ([]string, error) {
+	cmd := exec.CommandContext(ctx, "git", "-C", w.dir, "diff", "--name-only", "-z", "--diff-filter=U")
+	cmd.Env = append(append(os.Environ(), "GIT_TERMINAL_PROMPT=0"), w.gitEnv...)
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("read the unmerged paths: %w", trimCmdError([]byte(stderr.String()), err))
+	}
+	var files []string
+	for _, p := range strings.Split(string(out), "\x00") {
+		if p != "" {
+			files = append(files, p)
+		}
+	}
+	return files, nil
+}
+
+// mergeConflictPaths names the paths the merge in progress conflicted on
+// — the paths git held unmerged before the worker staged them — by
+// replaying the merge of HEAD and MERGE_HEAD in memory with
+// `git merge-tree --write-tree --name-only`, which touches neither the
+// index nor the tree. It exits 1 when the merge conflicts, listing the
+// paths after the result tree's line.
+func (w *workspace) mergeConflictPaths(ctx context.Context) ([]string, error) {
+	out, err := w.git(ctx, "-C", w.dir, "merge-tree", "--write-tree", "--name-only", "--no-messages", "HEAD", "MERGE_HEAD")
+	if err != nil {
+		var exit *exec.ExitError
+		if !errors.As(err, &exit) || exit.ExitCode() != 1 {
+			return nil, fmt.Errorf("read the merge's conflicted paths: %w", trimCmdError(out, err))
+		}
+	} else {
+		return nil, nil // the merge is clean: nothing conflicted
+	}
+	lines := strings.Split(string(out), "\n")
+	var files []string
+	for _, l := range lines[1:] { // the first line is the result tree
+		if l = strings.TrimSpace(l); l != "" {
+			files = append(files, l)
+		}
+	}
+	return files, nil
+}
+
+// pathsWithMarkers returns the subset of files whose content still
+// carries a git conflict marker. A file that is gone (a resolved
+// modify/delete) carries none.
+func pathsWithMarkers(dir string, files []string) []string {
+	var out []string
+	for _, f := range files {
+		data, err := os.ReadFile(filepath.Join(dir, f))
+		if err != nil {
+			continue
+		}
+		if hasConflictMarkers(data) {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// hasConflictMarkers reports whether a file's content carries a git
+// conflict marker — a line that begins with <<<<<<<.
+func hasConflictMarkers(data []byte) bool {
+	for _, line := range bytes.Split(data, []byte("\n")) {
+		if bytes.HasPrefix(line, []byte("<<<<<<<")) {
+			return true
+		}
+	}
+	return false
 }
 
 // worktreeHead is the commit the worktree's branch points at.

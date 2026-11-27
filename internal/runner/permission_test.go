@@ -63,3 +63,18 @@ func TestRunWorkerWithoutPermissionAddsNothing(t *testing.T) {
 		t.Errorf("command line = %v, want the script alone", args)
 	}
 }
+
+// TestRunWorkerPassesTheGrantsToolGrants: the grant's tool grants reach
+// the adapter's job, so a pattern-scoped adapter can apply them.
+func TestRunWorkerPassesTheGrantsToolGrants(t *testing.T) {
+	t.Parallel()
+	var args []string
+	var job adapter.Job
+	ad := argCatcher{Adapter: &fake.Adapter{Script: "/bin/true"}, args: &args, job: &job}
+	want := []string{"Bash(git cherry-pick:*)", "Bash(go test:*)"}
+	r := &jobRun{cfg: &Config{}, grant: &api.JobGrant{Kind: "work", Prompt: "p", ToolGrants: want}}
+	_ = r.runWorker(context.Background(), ad, "", t.TempDir(), nil)
+	if !slices.Equal(job.ToolGrants, want) {
+		t.Errorf("adapter job ToolGrants = %v, want %v", job.ToolGrants, want)
+	}
+}

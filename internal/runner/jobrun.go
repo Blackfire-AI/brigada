@@ -292,6 +292,7 @@ func (r *jobRun) runWorker(ctx context.Context, ad adapter.Adapter, model, workd
 		MCPConfig:  r.mcpConfig,
 		ReadDirs:   r.extraDirs(),
 		Permission: r.grant.Permission,
+		ToolGrants: r.grant.ToolGrants,
 	}, workdir, resume)
 	if err != nil {
 		return &noWorkerError{err}
