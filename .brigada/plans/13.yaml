@@ -83,7 +83,7 @@ tasks:
     effort: medium
     caps: {restart: 7}
     skills: ["config-setting", "surface-parity"]
-    state: running
+    state: needs_foreman
     branch: "brigada/task-46-r1"
     rounds: 0
   - id: 47
