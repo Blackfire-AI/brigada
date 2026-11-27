@@ -59,7 +59,7 @@ tasks:
     tier: heavy
     effort: medium
     skills: ["schema-migration"]
-    state: reviewing
+    state: done
     branch: "brigada/task-57-r1"
     rounds: 0
   - id: 58
@@ -71,7 +71,7 @@ tasks:
     continue: "sync-engine"
     tier: heavy
     effort: medium
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 59
