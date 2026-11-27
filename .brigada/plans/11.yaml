@@ -85,8 +85,8 @@ tasks:
     continue: "sync-runner"
     tier: heavy
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-59"
     rounds: 0
   - id: 60
     name: "sync-surfaces"
