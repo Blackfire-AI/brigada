@@ -127,6 +127,6 @@ tasks:
     tier: heavy
     effort: medium
     caps: {restart: 5}
-    state: ready
+    state: running
     branch: ""
     rounds: 0
