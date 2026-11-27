@@ -60,7 +60,7 @@ tasks:
     review_effort: medium
     caps: {restart: 10}
     skills: ["schema-migration", "surface-parity"]
-    state: running
+    state: reviewing
     branch: "brigada/task-37-r5"
     rounds: 1
   - id: 38
