@@ -147,9 +147,9 @@ tasks:
     continue: "batch-formation"
     tier: heavy
     effort: medium
-    state: needs_foreman
+    state: ready
     branch: "brigada/task-64"
-    rounds: 1
+    rounds: 0
   - id: 65
     name: "batch-holds"
     title: "Batch landing: per-member gate holds and push-phase holds (Refs #134)"
