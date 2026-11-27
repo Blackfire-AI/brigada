@@ -69,7 +69,7 @@ tasks:
     continue: "grants-core-v2"
     effort: medium
     skills: ["surface-parity", "cli-flag"]
-    state: reviewing
+    state: done
     branch: "brigada/task-45-r2"
     rounds: 0
   - id: 46
