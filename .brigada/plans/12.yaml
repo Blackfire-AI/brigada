@@ -55,7 +55,7 @@ tasks:
     continue: "probe-161v2"
     effort: medium
     skills: ["cli-flag", "surface-parity"]
-    state: reviewing
+    state: done
     branch: "brigada/task-42"
     rounds: 0
   - id: 43
@@ -67,7 +67,7 @@ tasks:
     tier: light
     effort: low
     skills: ["docs-change"]
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 55
