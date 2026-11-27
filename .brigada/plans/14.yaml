@@ -56,8 +56,8 @@ tasks:
     tier: heavy
     effort: medium
     skills: ["config-setting", "surface-parity"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-72"
     rounds: 0
   - id: 73
     name: "tracker-docs"
