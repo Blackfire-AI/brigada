@@ -45,6 +45,9 @@ type landProgress struct {
 	outcome string           // 'parked', 'dropped' or '' while unsettled
 	result  landMemberResult // the settled outcome as reported
 	intent  string           // 'target', 'waiting' or '' before the push
+	// approvedHead is the head the member's pre-push attempt squashed —
+	// its recorded input, which its published trailers name.
+	approvedHead string
 }
 
 // LandProgress records a batch land job's per-member progress (§7.1),
@@ -135,7 +138,7 @@ func (e *Engine) landProgressTx(tx *sql.Tx, owner, jobID int64, leaseID string, 
 
 // landBatchProgressTx reads the batch job's stored progress by member.
 func landBatchProgressTx(tx *sql.Tx, job int64) (map[int64]landProgress, error) {
-	rows, err := tx.Query("SELECT task_id, outcome, result, intent FROM land_batch_progress WHERE job_id = ?", job)
+	rows, err := tx.Query("SELECT task_id, outcome, result, intent, approved_head FROM land_batch_progress WHERE job_id = ?", job)
 	if err != nil {
 		return nil, fmt.Errorf("read the progress of land batch %d: %w", job, err)
 	}
@@ -145,7 +148,7 @@ func landBatchProgressTx(tx *sql.Tx, job int64) (map[int64]landProgress, error) 
 		var id int64
 		var p landProgress
 		var raw string
-		if err := rows.Scan(&id, &p.outcome, &raw, &p.intent); err != nil {
+		if err := rows.Scan(&id, &p.outcome, &raw, &p.intent, &p.approvedHead); err != nil {
 			return nil, fmt.Errorf("read the progress of land batch %d: %w", job, err)
 		}
 		if raw != "" {

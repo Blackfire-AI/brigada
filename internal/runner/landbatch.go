@@ -567,10 +567,14 @@ func (r *jobRun) landStackPublished(ctx context.Context, dir string, stack bool,
 
 // publishedSHA picks the candidate that is the member's own published
 // landing (§7.1): its Brigada-Branch trailer naming the member's branch
-// at the approved head. "" when none is.
+// at the approved head, or at the head an earlier lease recorded as the
+// input of its pre-push attempt. "" when none is.
 func publishedSHA(cands []landing.Candidate, m engine.LandMember) string {
 	for _, c := range cands {
-		if c.Branch == m.Branch && (m.ApprovedHead == "" || c.Head == m.ApprovedHead) {
+		if c.Branch != m.Branch {
+			continue
+		}
+		if m.ApprovedHead == "" || c.Head == m.ApprovedHead || (m.RecordedHead != "" && c.Head == m.RecordedHead) {
 			return c.SHA
 		}
 	}

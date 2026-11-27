@@ -610,3 +610,79 @@ func TestLandBatchReportsProgress(t *testing.T) {
 		}
 	}
 }
+
+// TestLandBatchRecoversByRecordedInput (§7.1 "A lost runner resumes by
+// remote evidence"): a lease lost after its push published leaves the
+// next lease to find each member on the remote by the input the earlier
+// attempt recorded — even when the member's approved head has moved since
+// — and to record it with its own commit, no new squash.
+func TestLandBatchRecoversByRecordedInput(t *testing.T) {
+	remote := newRemote(t)
+	a := batchMember(t, remote, 1, "main", nil, map[string]string{"a.txt": "a\n"})
+	b := batchMember(t, remote, 2, "main", nil, map[string]string{"b.txt": "b\n"})
+	members := []engine.LandMember{a, b}
+	r, dir := batchRun(t, remote, engine.GateAuto, "", members...)
+	first, errMsg, _ := batchLoop(r, dir)
+	if errMsg != "" {
+		t.Fatalf("the first lease stopped: %s", errMsg)
+	}
+	tip := remoteBranchCommit(t, remote, "main")
+
+	moved := a
+	moved.RecordedHead, moved.ApprovedHead = a.ApprovedHead, strings.Repeat("f", 40)
+	r, dir = batchRun(t, remote, engine.GateAuto, "", moved, b)
+	again, errMsg, _ := batchLoop(r, dir)
+	if errMsg != "" {
+		t.Fatalf("the recovering lease stopped: %s", errMsg)
+	}
+	wantOutcomes(t, again, members, "1:landed", "2:landed")
+	for _, id := range []int64{1, 2} {
+		if again[id].Record.Commit != first[id].Record.Commit || again[id].Record.Pushed != "pushed" {
+			t.Errorf("task %d recovered as %+v, want its published %s", id, again[id].Record, first[id].Record.Commit)
+		}
+	}
+	if got := remoteBranchCommit(t, remote, "main"); got != tip {
+		t.Errorf("main moved on recovery: %s, want %s", got, tip)
+	}
+
+	if got := commitCount(t, remote, "main"); got != "3" {
+		t.Errorf("commits on main = %s, want the seed and each member once", got)
+	}
+}
+
+// TestLandBatchLostAfterWaitingPublication (§7.1 acceptance): under ask, a
+// lease lost after its stack reached the waiting ref, before any record
+// was written, leaves the next lease to record every member waiting with
+// its own commit; the waiting ref and the target do not move, and no
+// member is squashed twice.
+func TestLandBatchLostAfterWaitingPublication(t *testing.T) {
+	remote := newRemote(t)
+	seed := remoteBranchCommit(t, remote, "main")
+	a := batchMember(t, remote, 1, "main", nil, map[string]string{"a.txt": "a\n"})
+	b := batchMember(t, remote, 2, a.Branch, []int64{1}, map[string]string{"b.txt": "b\n"})
+	members := []engine.LandMember{a, b}
+	r, dir := batchRun(t, remote, engine.GateAsk, "", members...)
+	first, errMsg, _ := batchLoop(r, dir)
+	if errMsg != "" {
+		t.Fatalf("the first lease stopped: %s", errMsg)
+	}
+	wait := remoteRefCommit(t, remote, landWaitRef("main"))
+
+	r, dir = batchRun(t, remote, engine.GateAsk, "", members...)
+	again, errMsg, _ := batchLoop(r, dir)
+	if errMsg != "" {
+		t.Fatalf("the recovering lease stopped: %s", errMsg)
+	}
+	wantOutcomes(t, again, members, "1:landed", "2:landed")
+	for _, id := range []int64{1, 2} {
+		if rec := again[id].Record; rec.Commit != first[id].Record.Commit || rec.Pushed != "waiting" {
+			t.Errorf("task %d recovered as %+v, want its waiting commit %s", id, rec, first[id].Record.Commit)
+		}
+	}
+	if got := remoteRefCommit(t, remote, landWaitRef("main")); got != wait {
+		t.Errorf("the waiting ref moved on recovery: %s, want %s", got, wait)
+	}
+	if got := remoteBranchCommit(t, remote, "main"); got != seed {
+		t.Errorf("main moved under ask: %s, want the seed", got)
+	}
+}
