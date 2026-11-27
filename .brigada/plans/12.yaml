@@ -71,7 +71,7 @@ tasks:
     effort: low
     caps: {restart: 10}
     skills: ["docs-change"]
-    state: done
+    state: needs_foreman
     branch: "brigada/task-43-r5"
     rounds: 0
   - id: 55
