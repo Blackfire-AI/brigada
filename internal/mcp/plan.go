@@ -42,6 +42,9 @@ type planTaskArg struct {
 	// Skills (§5.10) names, in order, the project's imported skills the
 	// task's prompts carry; absent or empty = none.
 	Skills []string `json:"skills,omitempty"`
+	// WaitLanded marks a dependent whose release waits for landing, not
+	// mere completion (§6.1); default false.
+	WaitLanded bool `json:"wait_landed,omitempty"`
 }
 
 // extraRepoArg is one read-only extra repository of a task (§5.8).
@@ -94,7 +97,7 @@ func callPlanCreate(ctx context.Context, c *api.Client, args json.RawMessage) (s
 	a = a.canonical()
 	p := api.PlanCreate{Title: a.Title, Tasks: make([]api.PlanTask, len(a.Tasks))}
 	for i, t := range a.Tasks {
-		p.Tasks[i] = api.PlanTask{Title: t.Title, Name: t.Name, Deps: t.Deps, Base: t.Base, Continue: t.Continue, Spec: t.Spec, Check: t.Check, Class: t.Class, Tier: t.Tier, Effort: t.Effort, ReviewTier: t.ReviewTier, ReviewEffort: t.ReviewEffort, Caps: t.Caps, ExtraRepos: extraRepos(t.ExtraRepos), Skills: t.Skills}
+		p.Tasks[i] = api.PlanTask{Title: t.Title, Name: t.Name, Deps: t.Deps, Base: t.Base, Continue: t.Continue, Spec: t.Spec, Check: t.Check, Class: t.Class, Tier: t.Tier, Effort: t.Effort, ReviewTier: t.ReviewTier, ReviewEffort: t.ReviewEffort, Caps: t.Caps, ExtraRepos: extraRepos(t.ExtraRepos), Skills: t.Skills, WaitLanded: t.WaitLanded}
 	}
 	res, err := c.CreatePlan(ctx, p, idemKey("plan_create", a))
 	if err != nil {
@@ -261,6 +264,8 @@ type planAddArg struct {
 	ExtraRepos []extraRepoArg `json:"extra_repos"`
 	// Skills as planTaskArg's.
 	Skills []string `json:"skills,omitempty"`
+	// WaitLanded as planTaskArg's.
+	WaitLanded bool `json:"wait_landed,omitempty"`
 }
 
 type planRetierArg struct {
@@ -310,7 +315,7 @@ func callPlanAmend(ctx context.Context, c *api.Client, args json.RawMessage) (st
 		am.Cancel = append(am.Cancel, api.PlanCancel{Task: string(c.Task), Reason: c.Reason})
 	}
 	for _, t := range a.Add {
-		am.Add = append(am.Add, api.PlanTask{Title: t.Title, Name: t.Name, Deps: refStrings(t.Deps), Base: string(t.Base), Continue: string(t.Continue), Spec: t.Spec, Check: t.Check, Class: t.Class, Tier: t.Tier, Effort: t.Effort, ReviewTier: t.ReviewTier, ReviewEffort: t.ReviewEffort, Caps: t.Caps, ExtraRepos: extraRepos(t.ExtraRepos), Skills: t.Skills})
+		am.Add = append(am.Add, api.PlanTask{Title: t.Title, Name: t.Name, Deps: refStrings(t.Deps), Base: string(t.Base), Continue: string(t.Continue), Spec: t.Spec, Check: t.Check, Class: t.Class, Tier: t.Tier, Effort: t.Effort, ReviewTier: t.ReviewTier, ReviewEffort: t.ReviewEffort, Caps: t.Caps, ExtraRepos: extraRepos(t.ExtraRepos), Skills: t.Skills, WaitLanded: t.WaitLanded})
 	}
 	for _, rt := range a.Retarget {
 		am.Retarget = append(am.Retarget, api.PlanRetarget{Task: string(rt.Task), Deps: refStrings(rt.Deps), Base: string(rt.Base), Continue: string(rt.Continue)})

@@ -147,6 +147,12 @@ func StatusSections(st Status) string {
 				} else if t.Effort != "" {
 					detail = append(detail, "@"+t.Effort)
 				}
+				// A task whose release waits for landing, not mere
+				// completion (§6.1): it stays pending until every
+				// implement dependency has actually landed on the target.
+				if t.WaitLanded {
+					detail = append(detail, "wait-landed")
+				}
 				// A task's own review tier and effort (§7, §8); the engine
 				// default is left unsaid.
 				if t.ReviewTier != "" {

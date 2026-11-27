@@ -402,6 +402,35 @@ func TestPlanFileMirrorsForemanTierAndEffort(t *testing.T) {
 	}
 }
 
+// TestPlanFileMirrorsWaitLanded: the wait_landed flag (§6.1) rides the
+// plan file — written only when true, and a plain task writes no line —
+// so a recovered store rebuilds it.
+func TestPlanFileMirrorsWaitLanded(t *testing.T) {
+	t.Parallel()
+	m := newMirrorEnv(t)
+	res, err := m.eng.CreatePlan(m.ctx, m.project, "barrier", []PlanTask{
+		{Name: "build", Spec: "build"},
+		{Name: "ship", Spec: "ship", Deps: []string{"build"}, WaitLanded: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := m.mustFile("brigada/plans", res.PlanID)
+	if task := taskByName(t, p, "ship"); !task.WaitLanded {
+		t.Errorf("mirrored wait_landed = %+v, want true", task)
+	}
+	if task := taskByName(t, p, "build"); task.WaitLanded {
+		t.Errorf("default wait_landed should be omitted: %+v", task)
+	}
+	out, err := exec.Command("git", "-C", m.remote, "show", "brigada/plans:"+planfile.Path(res.PlanID)).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(out), "wait_landed: ") != 1 || !strings.Contains(string(out), "    wait_landed: true\n") {
+		t.Errorf("wait_landed lines:\n%s", out)
+	}
+}
+
 // TestPlanFileBranchIsASetting: plan_file_branch is set like any project
 // setting (§6.4), shown with its default, and moves the mirror; a value
 // that is not a branch name is refused.

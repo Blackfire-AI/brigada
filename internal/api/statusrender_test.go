@@ -251,6 +251,23 @@ func TestStatusSectionsShowsSkills(t *testing.T) {
 	}
 }
 
+// TestStatusSectionsShowsWaitLanded: a task whose release waits for
+// landing (§6.1) carries the marker beside tier and effort; one that
+// does not shows no word.
+func TestStatusSectionsShowsWaitLanded(t *testing.T) {
+	st := Status{Plans: []engine.StatusPlan{{ID: 1, Tasks: []engine.StatusTask{
+		{ID: 1, Title: "gated", State: "pending", WaitLanded: true},
+		{ID: 2, Title: "plain", State: "pending"},
+	}}}}
+	got := StatusSections(st)
+	if !strings.Contains(got, "  task #1 pending gated  wait-landed") {
+		t.Errorf("status lacks the wait-landed marker beside the task:\n%s", got)
+	}
+	if strings.Contains(got, "task #2 pending plain  wait-landed") {
+		t.Errorf("a task that does not wait for landing shows the marker:\n%s", got)
+	}
+}
+
 // TestStatusSectionsLandReadyStates: the land_ready gate's target state
 // (issue #87) rides the task line — ready, the hold, and the not-ready
 // backoff's wait.

@@ -2,7 +2,9 @@
 
 ## 6.1 Task graph
 
-A plan is a DAG of tasks with dependencies. Task fields: title, spec, check, class (`implement` | `review` | `answer` | …), deps, repo and base ref, caps, tier and effort, and skills (an ordered list of skill names, §5.10, resolved once at creation with their texts and digests).
+A plan is a DAG of tasks with dependencies. Task fields: title, spec, check, class (`implement` | `review` | `answer` | …), deps, repo and base ref, caps, tier and effort, skills (an ordered list of skill names, §5.10, resolved once at creation with their texts and digests), and `wait_landed`.
+
+The optional boolean task field `wait_landed` (default false) marks a dependent whose release waits for landing rather than mere completion: a task with `wait_landed` true stays pending until every `implement` dependency has actually landed on the target, where a plain dependent is released as soon as its dependencies are done. `plan_create` and `plan_amend`'s `add` take it, `status` shows it beside tier and effort, and the plan file carries it (§6.4).
 
 ### Bases and dependency rounds
 

@@ -52,6 +52,11 @@ type PlanTask struct {
 	// prompts carry (§5.10): resolved and copied onto the task once, at
 	// creation; nil or empty = none.
 	Skills []string
+	// WaitLanded marks a dependent whose release waits for landing, not
+	// mere completion (§6.1): false (the default) releases the task as
+	// soon as its dependencies are done; true holds it pending until
+	// every implement dependency has actually landed on the target.
+	WaitLanded bool
 }
 
 // CreatedTask is one task CreatePlan made: its id, its name, and the
@@ -402,9 +407,9 @@ func (e *Engine) createPlanTx(tx *sql.Tx, project int64, title string, tasks []P
 			taskTitle = taskTitleOf(t.Spec)
 		}
 		state := taskPending
-		r, err := tx.Exec(`INSERT INTO tasks (plan_id, name, title, spec, check_cmd, class, state, base_ref, caps, setup, extra_repos, tier, effective_tier, effort, effective_effort, review_tier, review_effort, created_at, updated_at)
-			VALUES (?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?)`,
-			planID, t.Name, taskTitle, t.Spec, t.Check, class, state, baseRef, taskCapsJSON(t.Caps), setupRec, extraRecs[i], taskTier(t.Tier), taskTier(t.Tier), t.Effort, t.Effort, t.ReviewTier, t.ReviewEffort, nowStr, nowStr)
+		r, err := tx.Exec(`INSERT INTO tasks (plan_id, name, title, spec, check_cmd, class, state, base_ref, caps, setup, extra_repos, tier, effective_tier, effort, effective_effort, review_tier, review_effort, wait_landed, created_at, updated_at)
+			VALUES (?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			planID, t.Name, taskTitle, t.Spec, t.Check, class, state, baseRef, taskCapsJSON(t.Caps), setupRec, extraRecs[i], taskTier(t.Tier), taskTier(t.Tier), t.Effort, t.Effort, t.ReviewTier, t.ReviewEffort, t.WaitLanded, nowStr, nowStr)
 		if err != nil {
 			return CreatePlanResult{}, fmt.Errorf("create the task: %w", err)
 		}

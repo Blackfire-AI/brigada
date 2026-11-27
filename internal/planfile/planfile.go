@@ -69,6 +69,11 @@ type Task struct {
 	Branch   string // the result branch (§6.4); '' until the task pushed one
 	Rounds   int    // fix and review rounds spent (§7)
 	Question string // the open question (§3), '' when there is none
+	// WaitLanded marks a dependent whose release waits for landing, not
+	// mere completion (§6.1); false releases the task as soon as its
+	// dependencies are done, true holds it pending until every implement
+	// dependency has actually landed on the target.
+	WaitLanded bool
 	// ExtraRepos are the read-only repositories the task was given (§5.8),
 	// as the task recorded them: the canonical identity, never a URL that
 	// could carry a credential.
@@ -89,7 +94,7 @@ const header = `# Brigada plan file (§6.4): a mirror of the engine's store, whi
 # and the open questions — never transcripts.
 `
 
-const taskOptionsComment = "# Optional tier (light, standard, heavy) and effort (low, medium, high, max)\n# describe the model needed and how hard it should think (§6.1);\n# review_tier and review_effort do the same for its reviews (§7, §8); caps\n# override the task's fix_rounds, review_rounds and restart budgets (§6.1);\n# skills name the project's skills the task carries, in order (§5.10).\n"
+const taskOptionsComment = "# Optional tier (light, standard, heavy) and effort (low, medium, high, max)\n# describe the model needed and how hard it should think (§6.1);\n# review_tier and review_effort do the same for its reviews (§7, §8); caps\n# override the task's fix_rounds, review_rounds and restart budgets (§6.1);\n# skills name the project's skills the task carries, in order (§5.10);\n# wait_landed holds a dependent pending until its implement deps have\n# actually landed on the target, not merely been done (§6.1).\n"
 
 // Keep the default file byte-for-byte stable; describe optional keys when used.
 const tasksComment = tasksGraphComment + taskOptionsComment
@@ -122,7 +127,7 @@ func Render(p Plan) ([]byte, error) {
 	fmt.Fprintf(&b, "updated: %s\n", p.Updated.UTC().Format(time.RFC3339Nano))
 	comment := tasksGraphComment
 	for _, t := range p.Tasks {
-		if (t.Tier != "" && t.Tier != adapter.TierStandard) || t.Effort != "" || t.ReviewTier != "" || t.ReviewEffort != "" || len(t.Caps) > 0 || len(t.Skills) > 0 {
+		if (t.Tier != "" && t.Tier != adapter.TierStandard) || t.Effort != "" || t.ReviewTier != "" || t.ReviewEffort != "" || len(t.Caps) > 0 || len(t.Skills) > 0 || t.WaitLanded {
 			comment = tasksComment
 			break
 		}
@@ -187,6 +192,9 @@ func Render(p Plan) ([]byte, error) {
 				items[i] = strconv.Quote(n)
 			}
 			fmt.Fprintf(&b, "    skills: [%s]\n", strings.Join(items, ", "))
+		}
+		if t.WaitLanded {
+			fmt.Fprintf(&b, "    wait_landed: true\n")
 		}
 		fmt.Fprintf(&b, "    state: %s\n", t.State)
 		fmt.Fprintf(&b, "    branch: %s\n", strconv.Quote(t.Branch))
@@ -461,6 +469,18 @@ func (r *reader) task() (Task, error) {
 		if len(t.Skills) == 0 {
 			return Task{}, r.errf("skills: written only when the task carries some")
 		}
+	}
+	// wait_landed is written only when true, so files written before it
+	// stay valid; the writer never writes false.
+	if r.peekIs(in + "wait_landed:") {
+		raw, err := r.field(in, "wait_landed")
+		if err != nil {
+			return Task{}, err
+		}
+		if raw != "true" {
+			return Task{}, r.errf("wait_landed: written only when true, got %q", raw)
+		}
+		t.WaitLanded = true
 	}
 	if t.State, err = r.wordField(in, "state"); err != nil {
 		return Task{}, err

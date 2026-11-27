@@ -1159,6 +1159,57 @@ func TestTaskSettledAtMigrationKeepsTheRows(t *testing.T) {
 	}
 }
 
+// TestTaskWaitLandedMigrationBackfillsFalse builds the store of a binary
+// that predates 0086_task_wait_landed — a task mid-flight — and opens it
+// with this binary: the column exists, every old row reads 0 (nothing
+// waited for landing under the old binary's writes), and the column
+// takes only 0 or 1.
+func TestTaskWaitLandedMigrationBackfillsFalse(t *testing.T) {
+	migs, err := allMigrations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := 0
+	for _, m := range migs {
+		if m.name == "task_wait_landed" {
+			before = m.version - 1
+			break
+		}
+	}
+	if before == 0 {
+		t.Fatal("task_wait_landed migration not found in allMigrations")
+	}
+	path := filepath.Join(t.TempDir(), "store.db")
+	db, err := sql.Open("sqlite", dsn(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range migs[:before] {
+		exec(t, db, m.sql)
+	}
+	exec(t, db, "PRAGMA user_version = "+strconv.Itoa(before))
+	project := insertProject(t, db)
+	plan := insertPlan(t, db, project)
+	task := insertTask(t, db, plan)
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s := openStore(t, path)
+	if cols := queryStrings(t, s.db, "SELECT name FROM pragma_table_info('tasks')"); !slices.Contains(cols, "wait_landed") {
+		t.Errorf("tasks after upgrade has no wait_landed column: %v", cols)
+	}
+	if got := queryInt(t, s.db, "SELECT wait_landed FROM tasks WHERE id = ?", task); got != 0 {
+		t.Errorf("existing task wait_landed = %d, want 0: no old row waited for landing", got)
+	}
+	exec(t, s.db, "UPDATE tasks SET wait_landed = 1 WHERE id = ?", task)
+	if got := queryInt(t, s.db, "SELECT wait_landed FROM tasks WHERE id = ?", task); got != 1 {
+		t.Errorf("wait_landed = %d, want 1 after the update", got)
+	}
+	if _, err := s.db.Exec("UPDATE tasks SET wait_landed = 2 WHERE id = ?", task); err == nil || !strings.Contains(err.Error(), "CHECK") {
+		t.Errorf("wait_landed = 2: err = %v; want a CHECK failure", err)
+	}
+}
+
 // TestLandingSourceMigration pins what 0056_landing_source added (§7.1):
 // a landing record names how it was made — 'job' by default, 'trailer'
 // for one detected from the default branch — and no other word.

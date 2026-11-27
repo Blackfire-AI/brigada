@@ -289,6 +289,10 @@ type StatusTask struct {
 	Continues string `json:"continues,omitempty"`
 	// Skills names the skills the task recorded (§5.10), in order.
 	Skills []string `json:"skills,omitempty"`
+	// WaitLanded is true when the task's release waits for landing, not
+	// mere completion (§6.1): it stays pending until every implement
+	// dependency has actually landed on the target.
+	WaitLanded bool `json:"wait_landed,omitempty"`
 }
 
 // LandedLabel words the task's landing state for the per-task lines the
@@ -683,7 +687,7 @@ func statusPlanRows(tx *sql.Tx, query string, args ...any) ([]StatusPlan, error)
 
 // statusPlanTasksTx reads one status plan's tasks, in id order.
 func statusPlanTasksTx(tx *sql.Tx, plan int64, now time.Time) ([]StatusTask, error) {
-	rows, err := tx.Query(`SELECT t.id, COALESCE(t.name, ''), t.title, t.class, t.state, COALESCE(t.branch, ''), t.tier, t.effective_tier, t.effort, t.effective_effort, t.review_tier, t.review_effort, t.caps, COALESCE(l.pushed, ''), COALESCE(l.commit_sha, ''), COALESCE(t.land_retry_at, ''), t.land_ready_exit, COALESCE(h.reason, ''), t.skills
+	rows, err := tx.Query(`SELECT t.id, COALESCE(t.name, ''), t.title, t.class, t.state, COALESCE(t.branch, ''), t.tier, t.effective_tier, t.effort, t.effective_effort, t.review_tier, t.review_effort, t.caps, COALESCE(l.pushed, ''), COALESCE(l.commit_sha, ''), COALESCE(t.land_retry_at, ''), t.land_ready_exit, COALESCE(h.reason, ''), t.skills, t.wait_landed
 		FROM tasks t
 		LEFT JOIN landings l ON l.task_id = t.id
 		LEFT JOIN land_holds h ON h.task_id = t.id AND h.state = 'held'
@@ -697,7 +701,7 @@ func statusPlanTasksTx(tx *sql.Tx, plan int64, now time.Time) ([]StatusTask, err
 		var t StatusTask
 		var capsJSON, pushed, commit, retryAt, holdReason, skills string
 		var exit sql.NullInt64
-		if err := rows.Scan(&t.ID, &t.Name, &t.Title, &t.Class, &t.State, &t.Branch, &t.Tier, &t.EffectiveTier, &t.Effort, &t.EffectiveEffort, &t.ReviewTier, &t.ReviewEffort, &capsJSON, &pushed, &commit, &retryAt, &exit, &holdReason, &skills); err != nil {
+		if err := rows.Scan(&t.ID, &t.Name, &t.Title, &t.Class, &t.State, &t.Branch, &t.Tier, &t.EffectiveTier, &t.Effort, &t.EffectiveEffort, &t.ReviewTier, &t.ReviewEffort, &capsJSON, &pushed, &commit, &retryAt, &exit, &holdReason, &skills, &t.WaitLanded); err != nil {
 			return nil, fmt.Errorf("list the tasks of plan %d: %w", plan, err)
 		}
 		t.Caps = parseTaskCaps(capsJSON)

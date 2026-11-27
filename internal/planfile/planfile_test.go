@@ -47,6 +47,7 @@ func TestParseInvertsRender(t *testing.T) {
 		"tier and effort":        {ID: 8, State: "active", Created: time.Unix(1, 0).UTC(), Updated: time.Unix(2, 0).UTC(), Tasks: []Task{{ID: 1, Tier: "heavy", Effort: "high", State: "ready"}, {ID: 2, Tier: "light", State: "pending"}}},
 		"review tier and effort": {ID: 7, State: "active", Created: time.Unix(1, 0).UTC(), Updated: time.Unix(2, 0).UTC(), Tasks: []Task{{ID: 1, Tier: "heavy", Effort: "high", ReviewTier: "heavy", ReviewEffort: "max", State: "ready"}, {ID: 2, ReviewEffort: "low", State: "pending"}}},
 		"skills in order":        {ID: 6, State: "active", Created: time.Unix(1, 0).UTC(), Updated: time.Unix(2, 0).UTC(), Tasks: []Task{{ID: 1, Skills: []string{"cli-flag", "bugfix", "a \"b\", c"}, State: "ready"}, {ID: 2, State: "pending"}}},
+		"wait_landed":            {ID: 5, State: "active", Created: time.Unix(1, 0).UTC(), Updated: time.Unix(2, 0).UTC(), Tasks: []Task{{ID: 1, WaitLanded: true, State: "pending"}, {ID: 2, State: "pending"}}},
 		"no tasks": {ID: 1, Title: "", Repo: "r", State: "draft",
 			Created: time.Date(2026, 1, 2, 3, 4, 5, 6, time.UTC), Updated: time.Date(2026, 1, 2, 3, 4, 5, 7, time.UTC)},
 		"awkward text": {ID: 2, Title: "tab\there, \"quotes\", back\\slash, ünïcode, [brackets], # hash", Repo: "file:///a b/c.git",
@@ -201,5 +202,28 @@ func TestSkillsLineKeepsOrderAndStaysOptional(t *testing.T) {
 	empty := strings.Replace(string(data), `skills: ["zeta", "alpha"]`, "skills: []", 1)
 	if _, err := Parse([]byte(empty)); err == nil {
 		t.Error("parse took an empty skills list")
+	}
+}
+
+// TestWaitLandedLineStaysOptional: wait_landed is written only when true
+// (§6.4), so a plan with none renders no line and a file the writer
+// would not write — wait_landed: false — is refused.
+func TestWaitLandedLineStaysOptional(t *testing.T) {
+	p := goldenPlan()
+	p.Tasks[0].WaitLanded = true
+	data, err := Render(p)
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	if n := strings.Count(string(data), "wait_landed: "); n != 1 || !strings.Contains(string(data), "    wait_landed: true\n") {
+		t.Errorf("rendering has %d wait_landed lines, want the one:\n%s", n, data)
+	}
+	plain, err := Render(goldenPlan())
+	if err != nil || strings.Contains(string(plain), "wait_landed:") {
+		t.Errorf("a plan with no wait_landed renders a line (err %v):\n%s", err, plain)
+	}
+	falseLine := strings.Replace(string(data), "wait_landed: true", "wait_landed: false", 1)
+	if _, err := Parse([]byte(falseLine)); err == nil {
+		t.Error("parse took a wait_landed: false line")
 	}
 }

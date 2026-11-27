@@ -602,6 +602,59 @@ func TestPlanContinueSchemaAndCalls(t *testing.T) {
 	}
 }
 
+// TestServeCallPlanWaitLanded covers the optional wait_landed of a task
+// (§6.1): plan_create's task items and plan_amend's added items both
+// declare it, and a true value reaches the store through each call.
+func TestServeCallPlanWaitLanded(t *testing.T) {
+	e := newEnvToken(t, foremanTokenFile, "foreman-secret-9")
+	s := start(t, e)
+
+	schemaOf := func(name string) map[string]any {
+		for _, tool := range tools {
+			if tool.Name == name {
+				return tool.InputSchema.(map[string]any)
+			}
+		}
+		t.Fatalf("no %s tool", name)
+		return nil
+	}
+	taskProps := schemaOf("plan_create")["properties"].(map[string]any)["tasks"].(map[string]any)["items"].(map[string]any)["properties"].(map[string]any)
+	addProps := schemaOf("plan_amend")["properties"].(map[string]any)["add"].(map[string]any)["items"].(map[string]any)["properties"].(map[string]any)
+	for name, props := range map[string]map[string]any{"plan_create tasks": taskProps, "plan_amend add": addProps} {
+		if _, ok := props["wait_landed"]; !ok {
+			t.Errorf("%s declares no wait_landed: %v", name, props)
+		}
+	}
+
+	a := s.call(1, "tools/call", map[string]any{"name": "plan_create", "arguments": map[string]any{
+		"title": "barrier",
+		"tasks": []any{
+			map[string]any{"name": "build", "spec": "build it"},
+			map[string]any{"name": "ship", "spec": "ship it", "deps": []any{"build"}, "wait_landed": true},
+		},
+	}})
+	if text, isError := toolText(t, a); isError {
+		t.Fatalf("plan_create with wait_landed errored: %s", text)
+	}
+	if got := countOf(t, e, "SELECT wait_landed FROM tasks WHERE name = ?", "ship"); got != 1 {
+		t.Errorf("ship's wait_landed = %d, want 1", got)
+	}
+	if got := countOf(t, e, "SELECT wait_landed FROM tasks WHERE name = ?", "build"); got != 0 {
+		t.Errorf("build's wait_landed = %d, want 0: the default", got)
+	}
+
+	a = s.call(2, "tools/call", map[string]any{"name": "plan_amend", "arguments": map[string]any{
+		"plan": 1,
+		"add":  []any{map[string]any{"name": "verify", "spec": "verify it", "deps": []any{"ship"}, "wait_landed": true}},
+	}})
+	if text, isError := toolText(t, a); isError {
+		t.Fatalf("plan_amend with wait_landed errored: %s", text)
+	}
+	if got := countOf(t, e, "SELECT wait_landed FROM tasks WHERE name = ?", "verify"); got != 1 {
+		t.Errorf("verify's wait_landed = %d, want 1", got)
+	}
+}
+
 // TestIdemKey covers the key's mint (§12.1): one logical call — the
 // same arguments — mints one key; another call mints another.
 func TestIdemKey(t *testing.T) {
