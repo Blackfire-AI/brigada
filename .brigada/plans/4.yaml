@@ -101,8 +101,8 @@ tasks:
     tier: heavy
     effort: medium
     skills: ["refactor"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-32-r2"
     rounds: 0
   - id: 33
     name: "placement-observability"
