@@ -65,6 +65,11 @@ var defaultApprovalClasses = []string{"implement", "review", "answer"}
 //	                            approval, and at the land gate a task
 //	                            whose recorded changed paths match holds
 //	                            the landing (§6.3, §7.1). Absent = none.
+//	approval_tool_grants        list of tool-grant allowlist patterns
+//	                            (§6.1) that run without approval; a task
+//	                            that grants a pattern outside the list
+//	                            needs approval. Absent = none: any grant
+//	                            triggers.
 //	gate_plan                   auto or ask; ask holds every plan at the
 //	                            plan gate (§6.3). Absent = auto.
 //	plan_review                 bool; the plan review before a plan's (or
@@ -92,6 +97,7 @@ type approvalSettings struct {
 	Budget            string     `json:"approval_budget"`
 	Classes           stringList `json:"approval_classes"`
 	ProtectedPaths    stringList `json:"approval_protected_paths"`
+	ToolGrants        stringList `json:"approval_tool_grants"`
 	GatePlan          string     `json:"gate_plan"`
 	GateLand          string     `json:"gate_land"`
 	GatePush          string     `json:"gate_push"`
@@ -171,6 +177,9 @@ type approvalVerdict struct {
 	// Extras describes each extra repository a task names outside the
 	// project's default list (§5.8), with its ref.
 	Extras []string
+	// Grants are the tool grants a task names outside approval_tool_grants
+	// (§6.1, §6.3), each once.
+	Grants []string
 }
 
 // reasons renders the verdict as short phrases, one per reason.
@@ -193,6 +202,9 @@ func (v approvalVerdict) reasons(allowed []string, defaultCheck string) []string
 	}
 	if len(v.Extras) > 0 {
 		out = append(out, "extra repositories outside the project default: "+strings.Join(v.Extras, ", "))
+	}
+	for _, g := range v.Grants {
+		out = append(out, toolGrantHoldReason(g))
 	}
 	return out
 }
