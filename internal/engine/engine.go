@@ -207,6 +207,12 @@ type Config struct {
 	// LimitCooling is how long a task job's limit with no known reset
 	// cools its account (§8 "Quota"); zero keeps 30 minutes.
 	LimitCooling time.Duration
+	// CoolingWait is how long a queued task job waits for its cooling
+	// agents to reset before the sweep parks it with a needs-you line
+	// naming the agent, its reset and the bound (§8.1); zero keeps the
+	// default. It bounds a cooling hold, so a job never waits silently
+	// on a quota reset days away.
+	CoolingWait time.Duration
 	// FailureStreak is how many consecutive failed completions by one
 	// agent mark it broken (§8 "Health"); zero keeps 2.
 	FailureStreak int
@@ -294,6 +300,7 @@ func DefaultConfig() Config {
 		NewLeaseToken:     newLeaseToken,
 		Rand:              mrand.Float64,
 		LimitCooling:      defaultLimitCooling,
+		CoolingWait:       defaultCoolingWait,
 		FailureStreak:     defaultFailureStreak,
 		RunnerStale:       defaultRunnerStale,
 		ProbeDelay:        defaultProbeDelay,
@@ -482,6 +489,9 @@ func New(s *store.Store, cfg Config) *Engine {
 	}
 	if cfg.LimitCooling > 0 {
 		def.LimitCooling = cfg.LimitCooling
+	}
+	if cfg.CoolingWait > 0 {
+		def.CoolingWait = cfg.CoolingWait
 	}
 	if cfg.FailureStreak > 0 {
 		def.FailureStreak = cfg.FailureStreak

@@ -978,7 +978,7 @@ Kimi's headless mode approves every call and the CLI has no narrower mode, so br
 
 Letting Kimi write code is an opt-in. Init warns that Kimi has no sandbox: when writing code it can run any command on this machine without asking. Every Kimi job uses Kimi's normal agent, or your `agent-file=`.
 
-**Keep the runner running.** A job nobody leases within ten minutes fails. The ten minutes do not count while every runner that could take the job is full, or while every agent that qualifies for it is cooling after a usage limit (a fix round is pinned to its author's agent). `brigada status` shows such a job as held: waiting for a runner slot, or `waiting: <harness>/<model> cooling until <time>`. A job pinned to a broken agent still fails after ten minutes, and the failure names the agent and its state.
+**Keep the runner running.** A job nobody leases within ten minutes fails. The ten minutes do not count while every runner that could take the job is full, or while every agent that qualifies for it is cooling after a usage limit (a fix round is pinned to its author's agent). `brigada status` shows such a job as held: waiting for a runner slot, or `waiting: <harness>/<model> cooling until <time>`. A cooling wait is bounded: once a job has waited past the cooling-wait bound (six hours by default) the engine parks it with a needs-you line naming the agent, its reset and the bound, so a quota reset days away is a park you see, not a hold that runs on unseen. A job pinned to a broken agent still fails after ten minutes, and the failure names the agent and its state.
 
 ### Models added later
 

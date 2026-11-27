@@ -247,10 +247,14 @@ func (e *Engine) restartDeadlinesTx(tx *sql.Tx, now time.Time, gap time.Duration
 	}
 	// Queued jobs: the wait during the gap was not a wait at all (§8.1),
 	// so the queue-TTL clock restarts from now — queued_at and the hold
-	// stamp cap_held_at together.
+	// stamp cap_held_at together, and a cooling hold's bound clock too.
 	if _, err := tx.Exec(`UPDATE jobs SET queued_at = ?, cap_held_at = ?, updated_at = ?
 		WHERE status = 'queued'`, nowStr, nowStr, nowStr); err != nil {
 		return fmt.Errorf("restart the queue-TTL clocks: %w", err)
+	}
+	if _, err := tx.Exec(`UPDATE jobs SET cooling_since = ?
+		WHERE status = 'queued' AND cooling_since IS NOT NULL`, nowStr); err != nil {
+		return fmt.Errorf("restart the cooling-wait clocks: %w", err)
 	}
 	// Attach holds: a terminal that slept with the engine keeps its hold,
 	// and its hold-scoped token moves with it.
@@ -459,6 +463,13 @@ func (e *Engine) sweepPolledTx(tx *sql.Tx, now time.Time, polling int64) (rep Sw
 		// cooling to end. It runs after the runner rule: see holdCoolingTx
 		// for which hold wins.
 		if err := e.holdCoolingTx(tx, now); err != nil {
+			return rep, err
+		}
+		// A cooling hold is bounded: past CoolingWait the sweep parks the
+		// job, so a quota reset days away is a visible park, not a silent
+		// hold (§8.1). It runs after the hold, so only a job still held
+		// is read.
+		if err := e.parkCoolingBoundTx(tx, now); err != nil {
 			return rep, err
 		}
 		// The TTL is for jobs no runner can serve (§8.1); a job held only

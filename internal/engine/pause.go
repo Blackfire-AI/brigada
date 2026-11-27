@@ -274,9 +274,10 @@ func heldSinceTx(tx *sql.Tx, project int64, from, now time.Time) (time.Duration,
 // once — taken from the later of the job's queuing and the stretch's
 // start, so a job queued mid-pause counts only its own wait. An earlier
 // stretch was shifted at its own lift and is never counted again. The
-// queue TTL reads queued_at, cap_held_at and not_before (sweepPolledTx
-// round 3), so all three move: queued_at and not_before by the held
-// time, a cap hold stamped during the pause no further than now. A lift
+// queue TTL reads queued_at, cap_held_at and not_before, and the cooling
+// wait's bound reads cooling_since (sweepPolledTx round 3, §8.1), so all
+// four move: queued_at and not_before by the held time, a cap hold
+// stamped during the pause no further than now. A lift
 // under a remaining scope frees nothing and shifts nothing yet. The
 // infra-retry window is not stored here: infraStreakSpentTx computes
 // its held time against the streak's start.
@@ -288,7 +289,7 @@ func shiftFreedJobsTx(tx *sql.Tx, lifted int64, now time.Time) error {
 	if engine || (lifted != 0 && paused[lifted]) {
 		return nil
 	}
-	query := `SELECT id, project_id, queued_at, COALESCE(cap_held_at, ''), COALESCE(not_before, '')
+	query := `SELECT id, project_id, queued_at, COALESCE(cap_held_at, ''), COALESCE(not_before, ''), COALESCE(cooling_since, '')
 		FROM jobs WHERE status = 'queued' AND queued_at IS NOT NULL`
 	var args []any
 	if lifted != 0 {
@@ -302,11 +303,12 @@ func shiftFreedJobsTx(tx *sql.Tx, lifted int64, now time.Time) error {
 	type queuedClock struct {
 		id, project                int64
 		queued, capHeld, notBefore string
+		coolingSince               string
 	}
 	var jobs []queuedClock
 	for rows.Next() {
 		var q queuedClock
-		if err := rows.Scan(&q.id, &q.project, &q.queued, &q.capHeld, &q.notBefore); err != nil {
+		if err := rows.Scan(&q.id, &q.project, &q.queued, &q.capHeld, &q.notBefore, &q.coolingSince); err != nil {
 			rows.Close()
 			return fmt.Errorf("read the queued jobs a lift frees: %w", err)
 		}
@@ -364,9 +366,13 @@ func shiftFreedJobsTx(tx *sql.Tx, lifted int64, now time.Time) error {
 		if t, err := parseTime(q.notBefore); err == nil {
 			notBefore = fmtTime(t.Add(held))
 		}
+		var coolingSince any
+		if t, err := parseTime(q.coolingSince); err == nil {
+			coolingSince = fmtTime(t.Add(held))
+		}
 		if _, err := tx.Exec(`UPDATE jobs SET queued_at = ?, cap_held_at = COALESCE(?, cap_held_at),
-			not_before = COALESCE(?, not_before), updated_at = ? WHERE id = ?`,
-			fmtTime(queued.Add(held)), capHeld, notBefore, fmtTime(now), q.id); err != nil {
+			not_before = COALESCE(?, not_before), cooling_since = COALESCE(?, cooling_since), updated_at = ? WHERE id = ?`,
+			fmtTime(queued.Add(held)), capHeld, notBefore, coolingSince, fmtTime(now), q.id); err != nil {
 			return fmt.Errorf("shift the clocks of job %d past its pause: %w", q.id, err)
 		}
 	}
