@@ -122,8 +122,8 @@ tasks:
     base: "grants-surfaces"
     effort: medium
     skills: ["config-setting", "surface-parity"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-84"
     rounds: 0
   - id: 85
     name: "grants-lease-v2"
