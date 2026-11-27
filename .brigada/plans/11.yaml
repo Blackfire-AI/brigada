@@ -97,8 +97,8 @@ tasks:
     continue: "sync-waiting"
     effort: medium
     skills: ["surface-parity"]
-    state: running
-    branch: "brigada/task-60"
+    state: reviewing
+    branch: "brigada/task-60-r1"
     rounds: 0
   - id: 61
     name: "sync-docs"
