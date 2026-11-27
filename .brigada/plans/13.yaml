@@ -69,7 +69,7 @@ tasks:
     continue: "grants-core-v2"
     effort: medium
     skills: ["surface-parity", "cli-flag"]
-    state: running
+    state: ready
     branch: ""
     rounds: 0
   - id: 46
