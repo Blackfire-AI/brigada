@@ -90,9 +90,9 @@ tasks:
     base: "gitea-fetcher"
     effort: medium
     skills: ["docs-change", "surface-parity"]
-    state: reviewing
+    state: running
     branch: "brigada/task-75"
-    rounds: 1
+    rounds: 2
   - id: 76
     name: "tracker-defaults-140"
     title: "Tracker text in the foreman default as defaults 1.4.0, CHANGELOG (Closes #110)"
