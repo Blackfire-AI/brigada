@@ -5,9 +5,9 @@
 plan: 14
 title: "Fix #110: issue_read for Gitea-API forges"
 repo: "github.com/Blackfire-AI/brigada"
-state: reviewing
+state: active
 created: 2026-11-26T20:46:37.136764596Z
-updated: 2026-11-27T18:15:13.836045477Z
+updated: 2026-11-27T18:15:30.035411371Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -43,7 +43,7 @@ tasks:
     tier: heavy
     effort: medium
     skills: ["config-setting"]
-    state: pending
+    state: running
     branch: ""
     rounds: 0
   - id: 72
