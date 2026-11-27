@@ -158,34 +158,37 @@ Plan
               agent's permission=
     qwen-code edit files and run any command without asking
   Files in this repository (brigada never commits them):
-    new        .brigada/project.yaml                      the settings above
-    new        .brigada/instructions/foreman.md           default foreman
-                                                          instructions
-    new        .brigada/instructions/plan_review.md       default plan_review
-                                                          instructions
-    new        .brigada/instructions/worker.md            default worker
-                                                          instructions
-    new        .brigada/instructions/reviewer.md          default reviewer
-                                                          instructions
-    new        .brigada/skills/bugfix/SKILL.md            default skill bugfix
-    new        .brigada/skills/cli-flag/SKILL.md          default skill
-                                                          cli-flag
-    new        .brigada/skills/config-setting/SKILL.md    default skill
-                                                          config-setting
-    new        .brigada/skills/dependency/SKILL.md        default skill
-                                                          dependency
-    new        .brigada/skills/docs-change/SKILL.md       default skill
-                                                          docs-change
-    new        .brigada/skills/refactor/SKILL.md          default skill
-                                                          refactor
-    new        .brigada/skills/schema-migration/SKILL.md  default skill
-                                                          schema-migration
-    new        .brigada/skills/surface-parity/SKILL.md    default skill
-                                                          surface-parity
-    unchanged  .git/info/exclude                          removes the exclude
-                                                          line that hid the
-                                                          private Claude Code
-                                                          settings
+    new        .brigada/project.yaml                        the settings above
+    new        .brigada/instructions/foreman.md             default foreman
+                                                            instructions
+    new        .brigada/instructions/plan_review.md         default plan_review
+                                                            instructions
+    new        .brigada/instructions/worker.md              default worker
+                                                            instructions
+    new        .brigada/instructions/reviewer.md            default reviewer
+                                                            instructions
+    new        .brigada/skills/bugfix/SKILL.md              default skill
+                                                            bugfix
+    new        .brigada/skills/cli-flag/SKILL.md            default skill
+                                                            cli-flag
+    new        .brigada/skills/config-setting/SKILL.md      default skill
+                                                            config-setting
+    new        .brigada/skills/dependency/SKILL.md          default skill
+                                                            dependency
+    new        .brigada/skills/docs-change/SKILL.md         default skill
+                                                            docs-change
+    new        .brigada/skills/early-verification/SKILL.md  default skill
+                                                            early-verification
+    new        .brigada/skills/refactor/SKILL.md            default skill
+                                                            refactor
+    new        .brigada/skills/schema-migration/SKILL.md    default skill
+                                                            schema-migration
+    new        .brigada/skills/surface-parity/SKILL.md      default skill
+                                                            surface-parity
+    unchanged  .git/info/exclude                            removes the exclude
+                                                            line that hid the
+                                                            private Claude Code
+                                                            settings
     (show full contents: --verbose)
   Operator skill: your own coding agent works with brigada through the
     brigada-operator skill, which init does not install. Add -g to install it
@@ -195,5 +198,5 @@ Plan
     ~/.local/state/brigada/runner.log; stop it with: brigada stop). The engine
     starts when needed and stops after 30 idle minutes.
 
-Write 13 files and start the runner? [y/N]:
+Write 14 files and start the runner? [y/N]:
 Declined; nothing written or started.

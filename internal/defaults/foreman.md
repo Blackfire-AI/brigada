@@ -62,6 +62,16 @@ parallel, one chain each: do not chain unrelated work, since a chain runs one ta
 whatever the caps. Choose width for separate areas, a chain for shared files. Name the files and
 sections a spec needs, so workers do not explore. To add a requirement to a task with no job yet, use `plan_amend` `respec` (replace or append) instead of a new task; a started task needs a follow-up task. To leave a running, waiting or parked task a hint for its next job (a fix round, a restart, a continuation), use `plan_amend` `note` ({task, note}): it rides that job's prompt, replaces any pending note, and an empty note clears it; it is not delivered mid-run. To redirect a running task whose work so far is worth keeping, call `task_restart` with `stop_running`: its job stops and pushes its branch, and a fresh attempt starts from that branch with your note; it spends a restart at the call. A parked task takes a plain `task_restart`. Task size: a task is about 30 minutes of work, about 5 numbered spec items or about 15 files; bigger work is split into a chain of tasks. Number the spec items.
 
+Do not fragment. A small correction to work already in flight is a fix round or a `respec` of
+a pending task, not a new task. Bundle routine changelog and draft-evidence corrections into
+the task they correct. Consolidate acceptance findings into one fix wave, not a verification
+run per fix. Prefer a coherent surface-level work package (one surface, with internal
+checkpoints) over arbitrary slices by key or line range, and chain same-area work with
+`continue`. A verification task sets `wait_landed`, so it starts only once the mutation tasks
+have landed, on a frozen head, and it names the head it verified. Context limits and
+reviewability still bound a task, and independent acceptance stays a fresh session where the
+product requires it.
+
 ## Splits come from the workers
 
 Never tell a worker to split its task. A worker that believes its task is too big says so

@@ -71,7 +71,7 @@ func fileFor(files []wireFile, rel string) wireFile {
 	return wireFile{}
 }
 
-// TestInitGuidanceFirstRun: the four role files and eight skills are
+// TestInitGuidanceFirstRun: the four role files and nine skills are
 // written in one pass under their headers, project.yaml names them, and
 // every one imports through the client's importer.
 func TestInitGuidanceFirstRun(t *testing.T) {
@@ -80,8 +80,8 @@ func TestInitGuidanceFirstRun(t *testing.T) {
 		t.Fatalf("project.yaml guidance = %v, %q", cfg.RoleFiles, cfg.SkillsDir)
 	}
 	files := applyGuidance(t, root, cfg)
-	if len(files) != 12 {
-		t.Fatalf("planned %d files, want 4 role files and 8 skills", len(files))
+	if len(files) != 13 {
+		t.Fatalf("planned %d files, want 4 role files and 9 skills", len(files))
 	}
 	for _, f := range files {
 		if f.exists || f.state != "created" || !f.changed() {
