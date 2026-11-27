@@ -59,7 +59,7 @@ tasks:
     review_tier: standard
     review_effort: medium
     skills: ["schema-migration", "surface-parity"]
-    state: needs_foreman
+    state: ready
     branch: ""
     rounds: 0
   - id: 38
@@ -84,6 +84,6 @@ tasks:
     review_tier: standard
     caps: {restart: 7}
     skills: ["schema-migration", "surface-parity"]
-    state: done
+    state: needs_foreman
     branch: "brigada/task-49-r7"
     rounds: 0
