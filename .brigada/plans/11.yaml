@@ -159,7 +159,7 @@ tasks:
     continue: "batch-run"
     tier: heavy
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-65"
     rounds: 0
   - id: 66
