@@ -3,11 +3,11 @@
 # here are overwritten. It holds the graph, the task states, the branches
 # and the open questions — never transcripts.
 plan: 17
-title: "dsh adapter: launcher flags before app flags (every dsh job fails with \"unknown option '--patch'\")"
+title: "Bug: a hand-landed task parked by its reviews never settles"
 repo: "github.com/Blackfire-AI/brigada"
-state: done
-created: 2026-10-20T15:09:48.559441Z
-updated: 2026-10-20T17:33:59.686701Z
+state: reviewing
+created: 2026-11-27T19:40:56.756096144Z
+updated: 2026-11-27T19:40:56.756096144Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -21,14 +21,14 @@ updated: 2026-10-20T17:33:59.686701Z
 # override the task's fix_rounds, review_rounds and restart budgets (§6.1);
 # skills name the project's skills the task carries, in order (§5.10).
 tasks:
-  - id: 56
-    name: "dsh-argv"
-    title: "dsh adapter: put --patch before --json so the launcher reads it"
+  - id: 79
+    name: "settle-hand-landed"
+    title: "Settle a hand-landed needs_foreman task whatever parked it, except a pending worker question"
     class: "implement"
     deps: []
     base: ""
-    tier: light
-    effort: low
-    state: cancelled
-    branch: "brigada/task-56-r3"
+    effort: medium
+    skills: ["bugfix"]
+    state: pending
+    branch: ""
     rounds: 0
