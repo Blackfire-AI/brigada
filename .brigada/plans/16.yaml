@@ -60,9 +60,9 @@ tasks:
     review_effort: medium
     caps: {restart: 10}
     skills: ["schema-migration", "surface-parity"]
-    state: needs_foreman
+    state: ready
     branch: "brigada/task-37-r5"
-    rounds: 1
+    rounds: 0
   - id: 38
     name: "changelog-53"
     title: "CHANGELOG entry for the #53 redirect work"
