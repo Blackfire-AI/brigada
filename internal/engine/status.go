@@ -1044,6 +1044,15 @@ func statusNeedsYouTx(tx *sql.Tx, reviewFamily string, project int64, now time.T
 	}
 	items = append(items, localLands...)
 
+	// A land-target sync whose merge waits at the push gate, or
+	// conflicts, holds the gate until the user clears it (§7.1): one line
+	// for the project, naming the merge or the conflicting files.
+	syncWaits, err := statusSyncTx(tx, project)
+	if err != nil {
+		return nil, err
+	}
+	items = append(items, syncWaits...)
+
 	// A blocked plan's stranded tasks stay done as well (§6.2): each
 	// names the cancelled or failed dependency it can never land on.
 	stranded, err := statusStrandedTx(tx, project)

@@ -595,6 +595,11 @@ func (e *Engine) queueLandJobTx(tx *sql.Tx, project, taskID int64, skipLandReady
 	} else if stale {
 		return SubmitResult{}, e.parkStaleBaseTx(tx, project, taskID, dep, baseRef, depBranch, "the landing is refused", true, now)
 	}
+	// The landing's squash consumes the target (§7.1): queue the sync
+	// ahead of it, so the land job leases only once the target is current.
+	if err := e.maybeQueueSyncTx(tx, project, now); err != nil {
+		return SubmitResult{}, err
+	}
 	return e.submitTx(tx, SubmitParams{
 		Key:           fmt.Sprintf("task:%d", taskID),
 		ProjectID:     project,
@@ -859,7 +864,9 @@ func (e *Engine) forgetWaitingLandingsTx(tx *sql.Tx, project int64, target strin
 			return err
 		}
 	}
-	return nil
+	// Forgetting the stack may leave a behind-stack sync with nothing to
+	// wait for (§7.1): wake it to merge at once.
+	return e.wakeBehindStackSyncTx(tx, project, now)
 }
 
 // forgetRestartedLandingTx drops the landing a restart leaves behind
@@ -1275,6 +1282,11 @@ func (e *Engine) landSucceededTx(tx *sql.Tx, job *jobRow, rec landRecord, now ti
 	if err := e.recoverLandEnvCausesTx(tx, job.ProjectID, now); err != nil {
 		return err
 	}
+	// A landing pushed to the target may settle the last waiting landing
+	// of a behind-stack sync (§7.1): wake it to merge at once.
+	if err := e.wakeBehindStackSyncTx(tx, job.ProjectID, now); err != nil {
+		return err
+	}
 	return e.finishLandPlanTx(tx, job, now)
 }
 
@@ -1346,6 +1358,11 @@ func (e *Engine) pushCompletedTx(tx *sql.Tx, job *jobRow, existing *landingRow, 
 	// The push proved the remote reachable (issue #116): the causes of
 	// failed landings end with it.
 	if err := e.recoverLandEnvCausesTx(tx, job.ProjectID, now); err != nil {
+		return err
+	}
+	// The push settled a waiting landing (§7.1): it may be the last of a
+	// behind-stack sync's stack, which wakes to merge at once.
+	if err := e.wakeBehindStackSyncTx(tx, job.ProjectID, now); err != nil {
 		return err
 	}
 	return e.finishLandPlanTx(tx, job, now)
@@ -2106,7 +2123,13 @@ func (e *Engine) pushApproveTx(tx *sql.Tx, project int64, now time.Time) (PushAp
 			return PushApproveResult{}, err
 		}
 	}
-	if len(waits) > 0 {
+	// The sync's waiting merge is released by the same approval (§7.1):
+	// a push-phase sync job pushes the recorded merge, no new merge.
+	syncReleased, err := e.releaseSyncPushTx(tx, project, now)
+	if err != nil {
+		return PushApproveResult{}, err
+	}
+	if len(waits) > 0 || syncReleased {
 		if _, err := appendEventTx(tx, evPushApproved, project, 0, 0,
 			eventPayload{Count: int64(len(waits))}, now); err != nil {
 			return PushApproveResult{}, err

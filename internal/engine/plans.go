@@ -504,6 +504,12 @@ func (e *Engine) queueTaskWorkTx(tx *sql.Tx, project, taskID int64, spec string,
 	if err := resolveBaseTx(tx, taskID, now); err != nil {
 		return SubmitResult{}, err
 	}
+	// The work leases the land target as its base (§7.1): queue the sync
+	// ahead of it when the base is the target, so the first wave waits on
+	// one sync. A task stacked on a dependency's branch consumes no target.
+	if err := e.maybeQueueSyncForBaseTx(tx, project, taskID, now); err != nil {
+		return SubmitResult{}, err
+	}
 	check, err := taskCheckTx(tx, taskID)
 	if err != nil {
 		return SubmitResult{}, err

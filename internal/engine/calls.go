@@ -346,6 +346,13 @@ func (e *Engine) completeTx(tx *sql.Tx, owner, jobID int64, leaseID string, c Co
 			return "", err
 		}
 	}
+	// A sync attempt drops the same stale ref (§7.1): the landings that
+	// waited on it land again, and the waiting sync's merge is forgotten.
+	if job.Kind == KindSync && c.StaleDropped != "" {
+		if err := e.syncStaleDroppedTx(tx, job, c.StaleDropped, now); err != nil {
+			return "", err
+		}
+	}
 
 	// A stop outcome ends the job as stalled (§5.6); the land_ready
 	// gate's outcomes (issue #87) end it done, for the gate answered.
@@ -404,11 +411,11 @@ func (e *Engine) completeTx(tx *sql.Tx, owner, jobID int64, leaseID string, c Co
 	if err != nil {
 		return "", err
 	}
-	if c.Result != "" && job.Kind != KindLand && job.Kind != KindSweep {
+	if c.Result != "" && job.Kind != KindLand && job.Kind != KindSweep && job.Kind != KindSync {
 		// The run's answer is a conversation item too (§9): what the
-		// worker ended saying, kept with the event that ended the job. Land
-		// and sweep jobs have no worker; their internal records are the job's
-		// result and the events below, never a worker's words.
+		// worker ended saying, kept with the event that ended the job. Land,
+		// sweep and sync jobs have no worker; their internal records are the
+		// job's result and the events below, never a worker's words.
 		if err := appendMessageTx(tx, job.ProjectID, eventID, msgKindWorkerResult,
 			authorWorker, workerResultMessage(c.Result), now); err != nil {
 			return "", err
@@ -464,6 +471,12 @@ func (e *Engine) completeTx(tx *sql.Tx, owner, jobID int64, leaseID string, c Co
 		// A landing (§7.1): the completion's payload is the landing
 		// record, and the task lands or parks on its outcome.
 		return AnsOK, e.landCompletedTx(tx, job, c, now)
+	}
+	if job.Kind == KindSync {
+		// The land-target sync (§7.1): the completion's payload is the
+		// sync record; the project's standing record and gate move on its
+		// outcome, and no task parks.
+		return AnsOK, e.syncCompletedTx(tx, job, c, now)
 	}
 	if job.Kind == KindPlanReview {
 		// A plan review (§6.2): the verdict block moves the plan,

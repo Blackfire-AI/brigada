@@ -143,9 +143,9 @@ func (e *Engine) submitTx(tx *sql.Tx, p SubmitParams, now time.Time) (SubmitResu
 	switch {
 	case p.Key == "":
 		return SubmitResult{}, fmt.Errorf("key is required")
-	case (p.Kind == KindForeman || p.Kind == KindSweep) && p.TaskID != 0:
+	case (p.Kind == KindForeman || p.Kind == KindSweep || p.Kind == KindSync) && p.TaskID != 0:
 		return SubmitResult{}, fmt.Errorf("kind %s belongs to no task", p.Kind)
-	case p.Kind != KindForeman && p.Kind != KindReview && p.Kind != KindPlanReview && p.Kind != KindSweep && p.TaskID == 0:
+	case p.Kind != KindForeman && p.Kind != KindReview && p.Kind != KindPlanReview && p.Kind != KindSweep && p.Kind != KindSync && p.TaskID == 0:
 		return SubmitResult{}, fmt.Errorf("kind %s needs a task", p.Kind)
 	case p.Kind == KindReview && p.TaskID == 0 && p.Branch == "":
 		return SubmitResult{}, fmt.Errorf("a review without a task needs a branch")

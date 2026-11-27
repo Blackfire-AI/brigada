@@ -142,6 +142,14 @@ func (r *jobRun) execute(ctx context.Context) {
 		return
 	}
 
+	// The land-target sync (§7.1) needs no worker or checkout either: the
+	// runner's credentialed git keeps the target current with the default
+	// branch.
+	if isSyncJob(r.grant) {
+		r.runSyncJob(ctx)
+		return
+	}
+
 	// The worker's kill switch exists before any goroutine that may
 	// fire it: the heartbeat loop (a stall) closes the channel, the
 	// worker's killer goroutine receives it — the field is written once,

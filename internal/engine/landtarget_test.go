@@ -51,6 +51,7 @@ func TestLandTargetBasesNewTasks(t *testing.T) {
 			t.Errorf("task %d base ref = %q, want the land target brigada/landed", id, got)
 		}
 	}
+	e.driveSync(e.runner1) // the first wave leases only once the sync is current (§7.1)
 	g := e.leaseAny(e.runner1)
 	if g == nil || g.TaskID != root || g.BaseRef != "brigada/landed" {
 		t.Fatalf("root grant = %+v, want base brigada/landed", g)
@@ -81,9 +82,13 @@ func TestLandTargetBasesAddedTasks(t *testing.T) {
 	}
 	leased := false
 	for {
-		g := e.leaseAny(e.runner1)
+		g := e.leaseGit(e.runner1)
 		if g == nil {
 			break
+		}
+		if g.Kind == KindSync {
+			e.complete(g, Completion{Result: `{"outcome":"current"}`})
+			continue
 		}
 		if g.TaskID == extra {
 			leased = true
@@ -110,6 +115,7 @@ func TestLandGrantDiffsAgainstLandTarget(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create plan: %v", err)
 	}
+	e.driveSync(author) // the work leases the target only once the sync is current (§7.1)
 	g := e.leaseAny(author)
 	if g == nil || g.TaskID != res.TaskID {
 		t.Fatalf("work grant = %+v", g)
@@ -119,6 +125,7 @@ func TestLandGrantDiffsAgainstLandTarget(t *testing.T) {
 	}
 	e.runReview(reviewer, `{"verdict":"approve","findings":"`+substantiveFindings+`"}`)
 
+	e.driveSync(author) // the landing's squash waits on its own sync (§7.1)
 	lg := e.leaseGit(author)
 	if lg == nil || lg.Kind != KindLand {
 		t.Fatalf("the land job was not leased: %+v", lg)
@@ -158,6 +165,7 @@ func TestCrossPlanDepLandedOnTarget(t *testing.T) {
 	if got := e.str("SELECT base_ref FROM tasks WHERE id = ?", next); got != "brigada/landed" {
 		t.Errorf("next base ref while waiting = %q, want the land target", got)
 	}
+	e.driveSync(e.runner1)
 	if ans := e.complete(e.leaseAny(e.runner1), done()); ans != AnsOK {
 		t.Fatalf("complete base: %s", ans)
 	}
@@ -178,9 +186,13 @@ func TestCrossPlanDepLandedOnTarget(t *testing.T) {
 		t.Errorf("solo edges = %d, want none", got)
 	}
 	for {
-		g := e.leaseAny(e.runner1)
+		g := e.leaseGit(e.runner1)
 		if g == nil {
 			break
+		}
+		if g.Kind == KindSync {
+			e.complete(g, Completion{Result: `{"outcome":"current"}`})
+			continue
 		}
 		if g.TaskID == solo.TaskID && g.BaseRef != "brigada/landed" {
 			t.Errorf("solo grant base = %q, want the land target", g.BaseRef)

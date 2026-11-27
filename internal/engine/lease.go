@@ -407,6 +407,41 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 				continue
 			}
 		}
+		// The land-target sync (§7.1): a sync leases only once no landing
+		// of the project is in flight; a landing or a task leasing the
+		// target as a base queues behind the one pending sync (the mirror
+		// rule), and the hold keeps the queue TTL from timing out the
+		// leases waiting on it.
+		if j.Kind == KindSync {
+			leasable, err := syncLeasableTx(tx, j.ProjectID)
+			if err != nil {
+				return nil, err
+			}
+			if !leasable {
+				if err := holdForSyncTx(tx, j, now); err != nil {
+					return nil, err
+				}
+				continue
+			}
+		}
+		if j.Kind == KindLand {
+			held, err := e.landLeaseHeldTx(tx, j, now)
+			if err != nil {
+				return nil, err
+			}
+			if held {
+				continue
+			}
+		}
+		if j.Kind == KindWork || j.Kind == KindFix {
+			held, err := e.baseLeaseHeldTx(tx, j, now)
+			if err != nil {
+				return nil, err
+			}
+			if held {
+				continue
+			}
+		}
 		// The harness the job is placed on: a foreman turn's is resolved
 		// from its pair (a turn submitted without a harness runs on the
 		// project's), and a turn with no whole pair is held — no poll takes
@@ -445,10 +480,10 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 
 		var cands []agentCand
 		var removed []Removed
-		if j.Kind == KindLand || j.Kind == KindSweep {
-			// Land and sweep jobs have no worker and no agent: the label
-			// check above is the whole placement, and the runner records
-			// no agent.
+		if j.Kind == KindLand || j.Kind == KindSweep || j.Kind == KindSync {
+			// Land, sweep and sync jobs have no worker and no agent: the
+			// label check above is the whole placement, and the runner
+			// records no agent.
 			cands = []agentCand{{}}
 		} else {
 			cands, removed, err = leaseAgentsTx(tx, &e.cfg, e.cfg.Rand, owner, j, nowStr)
@@ -746,6 +781,9 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 		}
 		if j.Kind == KindSweep {
 			return e.sweepLeaseGrantTx(tx, j, owner, leaseID, expires)
+		}
+		if j.Kind == KindSync {
+			return e.syncLeaseGrantTx(tx, j, owner, leaseID, expires)
 		}
 		repo, baseRef, checkCmd, branch, err := taskInfoTx(tx, j)
 		if err != nil {
