@@ -38,6 +38,10 @@ type landRecord struct {
 	AfterLandErr  string   `json:"after_land_error,omitempty"`
 	ConflictFiles []string `json:"conflict_files,omitempty"`
 	CheckLog      string   `json:"check_log,omitempty"`
+	// Predecessor is the target head the landing's push moved from (§7.1),
+	// set when it pushed to the target; Gate the land_ready evidence.
+	Predecessor string            `json:"predecessor,omitempty"`
+	Gate        *landGateEvidence `json:"gate,omitempty"`
 }
 
 // pushRecord is a push phase's completion (§7.1): the land job, reused
@@ -50,6 +54,11 @@ type pushRecord struct {
 	Commit       string `json:"commit"`
 	Pushed       string `json:"pushed"` // 'pushed' on success
 	AfterLandErr string `json:"after_land_error,omitempty"`
+	// Predecessor is the target head the push moved from (§7.1), empty
+	// when the target already held the commit; Gate the land_ready
+	// evidence.
+	Predecessor string            `json:"predecessor,omitempty"`
+	Gate        *landGateEvidence `json:"gate,omitempty"`
 }
 
 // landHeldRecord is the payload a land job's held outcome carries
@@ -63,6 +72,9 @@ type landHeldRecord struct {
 	// empty when the runner reports none. The hold's reason carries it
 	// after the line, verbatim.
 	Suspects string `json:"suspects,omitempty"`
+	// Gate is the run's evidence; the engine words the suspect line from
+	// it when the runner reports none (§7.1).
+	Gate *landGateEvidence `json:"gate,omitempty"`
 }
 
 // landNotReadyRecord is the payload a land job's not-ready outcome
@@ -775,7 +787,7 @@ func (e *Engine) landOutcomeTx(tx *sql.Tx, job *jobRow, c Completion, now time.T
 	case OutcomeLandNotReady:
 		return e.landNotReadyTx(tx, job, c, now)
 	case OutcomeLandReady:
-		return e.landRecheckPassedTx(tx, job, now)
+		return e.landRecheckPassedTx(tx, job, c, now)
 	}
 	if c.Error != "" {
 		return e.landErrorTx(tx, job, c, now)
@@ -840,7 +852,20 @@ func (e *Engine) landRecordTx(tx *sql.Tx, job *jobRow, c Completion, now time.Ti
 		if err := rec.validate(); err != nil {
 			return e.needsForemanTx(tx, job, evTaskLandFailed, eventPayload{Reason: boundNote(err.Error())}, now)
 		}
-		return e.landSucceededTx(tx, job, rec, now)
+		// The gate's pass may verify a baseline (§7.1), judged before the
+		// landing's own publication leaves the checked head.
+		if err := noteLandBaselineTx(tx, job.ProjectID, rec.TargetBranch, rec.Gate, now); err != nil {
+			return err
+		}
+		if err := e.landSucceededTx(tx, job, rec, now); err != nil {
+			return err
+		}
+		if rec.Pushed != "pushed" {
+			return nil
+		}
+		return recordLandPublicationTx(tx, job.ProjectID, rec.TargetBranch, job.ID, landPublication{
+			Predecessor: rec.Predecessor, Final: rec.Commit,
+			Members: []landPublicationMember{{TaskID: job.TaskID, Commit: rec.Commit}}}, now)
 	}
 }
 
@@ -1414,6 +1439,27 @@ func (e *Engine) pushCompletedTx(tx *sql.Tx, job *jobRow, existing *landingRow, 
 	if pr.Pushed != "pushed" {
 		return e.needsForemanTx(tx, job, evTaskLandFailed, eventPayload{Reason: "the push did not push"}, now)
 	}
+	// The gate's pass may verify a baseline (§7.1), judged before this
+	// push's publication; the publication records the members it actually
+	// released — the waiting landings beneath the commit, then its own.
+	if err := noteLandBaselineTx(tx, job.ProjectID, existing.TargetBranch, pr.Gate, now); err != nil {
+		return err
+	}
+	released := landPublication{Predecessor: pr.Predecessor, Final: pr.Commit}
+	if pr.Predecessor != "" {
+		covered, err := coveredWaitingTx(tx, job.TaskID)
+		if err != nil {
+			return err
+		}
+		for _, id := range covered {
+			l, err := landingTx(tx, id)
+			if err != nil {
+				return err
+			}
+			released.Members = append(released.Members, landPublicationMember{TaskID: id, Commit: l.Commit})
+		}
+		released.Members = append(released.Members, landPublicationMember{TaskID: job.TaskID, Commit: pr.Commit})
+	}
 	if _, err := tx.Exec(`UPDATE landings SET pushed = 'pushed', after_land_error = ? WHERE task_id = ?`,
 		pr.AfterLandErr, job.TaskID); err != nil {
 		return fmt.Errorf("record the push of task %d: %w", job.TaskID, err)
@@ -1433,6 +1479,9 @@ func (e *Engine) pushCompletedTx(tx *sql.Tx, job *jobRow, existing *landingRow, 
 	// The push carried every waiting commit beneath this one (§7.1): the
 	// recorded prefix lands with it, and no later commit.
 	if err := e.carryCoveredPushesTx(tx, job, pr.TargetBranch, now); err != nil {
+		return err
+	}
+	if err := recordLandPublicationTx(tx, job.ProjectID, existing.TargetBranch, job.ID, released, now); err != nil {
 		return err
 	}
 	// The push moved a waiting landing to the target, which releases a
@@ -1532,9 +1581,20 @@ func (e *Engine) landHeldTx(tx *sql.Tx, job *jobRow, c Completion, now time.Time
 	if json.Unmarshal([]byte(c.Result), &rec) == nil && rec.Line != "" {
 		reason += ": " + boundNote(rec.Line)
 	}
-	if rec.Suspects != "" {
-		reason += "; " + boundNote(rec.Suspects)
+	// The hold always carries the suspect line after the command's line
+	// (§7.1): tasks named only from a known baseline and a complete
+	// recorded chain, "suspects unknown" otherwise.
+	suspects := rec.Suspects
+	if suspects == "" {
+		target, err := landJobTargetTx(tx, job.ProjectID, job.TaskID)
+		if err != nil {
+			return err
+		}
+		if suspects, err = landSuspectsTx(tx, job.ProjectID, target, rec.Gate); err != nil {
+			return err
+		}
 	}
+	reason += "; " + boundNote(suspects)
 	var state string
 	if err := tx.QueryRow("SELECT state FROM tasks WHERE id = ?", job.TaskID).Scan(&state); err != nil {
 		return fmt.Errorf("read task %d: %w", job.TaskID, err)

@@ -30,6 +30,13 @@ type jobRun struct {
 	// staleDropped names the target whose stale waiting ref a land job
 	// deleted; every completion of the job carries it.
 	staleDropped string
+	// landGate is the land_ready gate's evidence (§7.1 "The checked head
+	// and suspects") from this job's one run of the command, nil when it
+	// ran none; every land record of the job carries it.
+	landGate *landGateJSON
+	// landPub is the batch's publication to the target, nil until its
+	// push moved the target.
+	landPub *landPublicationJSON
 
 	mu           sync.Mutex
 	events       []adapter.Event

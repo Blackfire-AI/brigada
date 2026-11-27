@@ -107,7 +107,7 @@ func TestRecheckKeepsTheHoldWhenTheGateRefusesAgain(t *testing.T) {
 	if ans := e.complete(g2, landHeld("the release window is closed")); ans != AnsOK {
 		t.Fatalf("complete the re-check's refusal: %s", ans)
 	}
-	if reason := e.str("SELECT reason FROM land_holds WHERE task_id = ? AND state = 'held'", e.task); reason != "held by rule land_ready: the release window is closed" {
+	if reason := e.str("SELECT reason FROM land_holds WHERE task_id = ? AND state = 'held'", e.task); reason != "held by rule land_ready: the release window is closed; suspects unknown" {
 		t.Errorf("land hold reason = %q, want the unchanged line", reason)
 	}
 	if n := e.countEvents(evTaskLandHeld); n != 1 {
@@ -123,7 +123,7 @@ func TestRecheckKeepsTheHoldWhenTheGateRefusesAgain(t *testing.T) {
 	if ans := e.complete(g3, landHeld("the CI run for the head failed")); ans != AnsOK {
 		t.Fatalf("complete the second refusal: %s", ans)
 	}
-	if reason := e.str("SELECT reason FROM land_holds WHERE task_id = ? AND state = 'held'", e.task); reason != "held by rule land_ready: the CI run for the head failed" {
+	if reason := e.str("SELECT reason FROM land_holds WHERE task_id = ? AND state = 'held'", e.task); reason != "held by rule land_ready: the CI run for the head failed; suspects unknown" {
 		t.Errorf("land hold reason = %q, want the command's new first line", reason)
 	}
 	if n := e.countEvents(evTaskLandHeld); n != 2 {
@@ -150,7 +150,7 @@ func TestRecheckQueuesAgainOnAnyOtherExit(t *testing.T) {
 	if ans := e.complete(g2, landNotReady(2, "")); ans != AnsOK {
 		t.Fatalf("complete the not-ready re-check: %s", ans)
 	}
-	if reason := e.str("SELECT reason FROM land_holds WHERE task_id = ? AND state = 'held'", e.task); reason != "held by rule land_ready: the release window is closed" {
+	if reason := e.str("SELECT reason FROM land_holds WHERE task_id = ? AND state = 'held'", e.task); reason != "held by rule land_ready: the release window is closed; suspects unknown" {
 		t.Errorf("land hold reason = %q, want the hold kept as it was", reason)
 	}
 	// The backoff's retry is the next re-check, leasable after its
@@ -164,7 +164,7 @@ func TestRecheckQueuesAgainOnAnyOtherExit(t *testing.T) {
 	if g3 == nil || g3.Kind != KindLand || g3.SkipLandReady {
 		t.Fatalf("the backoff's re-check = %+v, want a land job that runs the command", g3)
 	}
-	if got := e.statusTaskLandReady(e.task); got != "held by rule land_ready: the release window is closed" {
+	if got := e.statusTaskLandReady(e.task); got != "held by rule land_ready: the release window is closed; suspects unknown" {
 		t.Errorf("land_ready state under the hold = %q, want the hold, not the backoff", got)
 	}
 }

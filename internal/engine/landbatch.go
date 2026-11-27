@@ -432,6 +432,11 @@ type landBatchRecord struct {
 	Members   []landMemberResult `json:"members"`
 	Error     string             `json:"error,omitempty"`
 	ErrorKind string             `json:"error_kind,omitempty"`
+	// Gate is the batch's one land_ready run's evidence (§7.1), nil when
+	// none ran; Publication the push that moved the target, nil when the
+	// stack waits or nothing was pushed.
+	Gate        *landGateEvidence `json:"gate,omitempty"`
+	Publication *landPublication  `json:"publication,omitempty"`
 }
 
 // landMemberResult is one member's outcome in a batch completion.
@@ -710,6 +715,15 @@ func (e *Engine) landBatchCompletedTx(tx *sql.Tx, job *jobRow, members []int64, 
 	for _, r := range rec.Members {
 		byTask[r.TaskID] = r
 	}
+	// The gate's pass may verify a green baseline (§7.1), judged before
+	// this batch's own publication leaves the checked head.
+	target, err := landJobTargetTx(tx, job.ProjectID, job.TaskID)
+	if err != nil {
+		return err
+	}
+	if err := noteLandBaselineTx(tx, job.ProjectID, target, rec.Gate, now); err != nil {
+		return err
+	}
 	for _, id := range members {
 		r, ok := byTask[id]
 		mj := memberJob(job, id)
@@ -725,7 +739,12 @@ func (e *Engine) landBatchCompletedTx(tx *sql.Tx, job *jobRow, members []int64, 
 			}
 			continue
 		}
-		if err := e.landMemberOutcomeTx(tx, mj, r, now); err != nil {
+		if err := e.landMemberOutcomeTx(tx, mj, r, rec.Gate, now); err != nil {
+			return err
+		}
+	}
+	if rec.Publication != nil {
+		if err := recordLandPublicationTx(tx, job.ProjectID, target, job.ID, *rec.Publication, now); err != nil {
 			return err
 		}
 	}
@@ -774,7 +793,7 @@ func spendLandSkipTx(tx *sql.Tx, ids ...int64) error {
 // its landing record, written once; parked is its own land failure with
 // its conflicting files, its check log or its reason; dropped leaves it
 // done to wait for the member it depends on, nothing recorded.
-func (e *Engine) landMemberOutcomeTx(tx *sql.Tx, mj *jobRow, r landMemberResult, now time.Time) error {
+func (e *Engine) landMemberOutcomeTx(tx *sql.Tx, mj *jobRow, r landMemberResult, gate *landGateEvidence, now time.Time) error {
 	switch r.Outcome {
 	case landMemberLanded:
 		if l, err := landingTx(tx, mj.TaskID); err != nil {
@@ -807,7 +826,7 @@ func (e *Engine) landMemberOutcomeTx(tx *sql.Tx, mj *jobRow, r landMemberResult,
 		// The command held this member of a mixed batch (§7.1 "Deciding a
 		// batch hold"): its own hold and re-check, the same line and
 		// suspects as every member it held.
-		b, err := json.Marshal(landHeldRecord{Outcome: OutcomeLandHeld, Line: r.Line, Suspects: r.Suspects})
+		b, err := json.Marshal(landHeldRecord{Outcome: OutcomeLandHeld, Line: r.Line, Suspects: r.Suspects, Gate: gate})
 		if err != nil {
 			return fmt.Errorf("encode the land hold of task %d: %w", mj.TaskID, err)
 		}

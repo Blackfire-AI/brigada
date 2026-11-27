@@ -139,7 +139,7 @@ func TestLandHeldHoldsAtTheGate(t *testing.T) {
 		t.Errorf("landing records = %d, want none: the gate held the landing", n)
 	}
 	reason := e.str("SELECT reason FROM land_holds WHERE task_id = ? AND state = 'held'", e.task)
-	if reason != "held by rule land_ready: the release window is closed" {
+	if reason != "held by rule land_ready: the release window is closed; suspects unknown" {
 		t.Errorf("land hold reason = %q, want the land_ready rule and the command's line", reason)
 	}
 	p, ok := e.eventPayloadOf(evTaskLandHeld)
@@ -262,7 +262,7 @@ func TestStatusShowsTheLandReadyState(t *testing.T) {
 	if ans := e.complete(g, landHeld("the release window is closed")); ans != AnsOK {
 		t.Fatalf("complete the held land job: %s", ans)
 	}
-	if got := e.statusTaskLandReady(e.task); got != "held by rule land_ready: the release window is closed" {
+	if got := e.statusTaskLandReady(e.task); got != "held by rule land_ready: the release window is closed; suspects unknown" {
 		t.Errorf("land_ready state while held = %q, want the hold's rule and line", got)
 	}
 
@@ -320,7 +320,7 @@ func TestLandApproveThroughThePushHold(t *testing.T) {
 	if pushed := e.str("SELECT pushed FROM landings WHERE task_id = ?", e.task); pushed != "waiting" {
 		t.Errorf("landing pushed = %q, want waiting: the gate held the push", pushed)
 	}
-	if reason := e.str("SELECT reason FROM land_holds WHERE task_id = ? AND state = 'held'", e.task); reason != "held by rule land_ready: the release window is closed" {
+	if reason := e.str("SELECT reason FROM land_holds WHERE task_id = ? AND state = 'held'", e.task); reason != "held by rule land_ready: the release window is closed; suspects unknown" {
 		t.Errorf("land hold reason = %q, want the land_ready rule and line", reason)
 	}
 	it, ok := e.needsYouTask(e.task)
@@ -330,7 +330,7 @@ func TestLandApproveThroughThePushHold(t *testing.T) {
 	if strings.Contains(it.Reason, "waits to push") {
 		t.Errorf("needs-you entry = %q, want the hold, not the plain push wait", it.Reason)
 	}
-	if got := e.statusTaskLandReady(e.task); got != "held by rule land_ready: the release window is closed" {
+	if got := e.statusTaskLandReady(e.task); got != "held by rule land_ready: the release window is closed; suspects unknown" {
 		t.Errorf("land_ready state while the push holds = %q, want the hold", got)
 	}
 
