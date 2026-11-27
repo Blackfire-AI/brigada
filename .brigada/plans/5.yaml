@@ -126,6 +126,6 @@ tasks:
     base: "wl-field"
     tier: heavy
     effort: high
-    state: needs_foreman
+    state: ready
     branch: ""
     rounds: 0
