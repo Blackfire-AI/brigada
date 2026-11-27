@@ -12,7 +12,7 @@ The release rule reads `wait_landed`: such a dependent is released only when eve
 
 **Base ref.** A task's work starts from the project's land target — `land_target` when set (§6.3), else the default branch — the same branch approved work lands on (§7.1): the runner materializes that branch for the worktree (§5.1), and the land job's diff is taken against that base.
 
-A base that is the land target is the target as the remote holds it: brigada has no sync that keeps the target current with the default branch, so the target's staleness is the user's own to clear; the sync rule that would hold a base while a target's sync runs — pending running, conflicting, or waiting at the push gate — is not implemented (§7.1).
+A base that is the land target is the target after the land-target sync (§7.1): a land target set off the default branch is synced before any task leases it as a base, and the lease is held while the project's sync is pending — running, conflicting, or waiting at the push gate — so a task never starts from a target that lacks the default branch's commits. A task stacked on a dependency's branch is not held, for its base is not the target. A sync that queues behind a waiting push stack merges nothing, so bases lease on the standing record meanwhile.
 
 A land target the remote does not hold yet (the land job creates it) leaves the worktree on the default branch, with a warning in the runner log. A task stacked on a dependency resolves to that dependency's result branch when its work is queued, and a dependency that recorded no branch keeps the land target.
 
@@ -165,7 +165,7 @@ A **rule** turns `auto` into `ask` for the one plan or task that trips it, and t
 
 The rules are flat keys in `.brigada/project.yaml` (schema 1 is flat by design; no expression language):
 
-**Not implemented: batch landing, `land_ready` suspect attribution, and the land-target sync.** brigada lands one task per land job — `land_batch_max` below is refused as an unknown key — a `land_ready` hold carries the command's first output line and no suspects, and no job keeps a land target current with the default branch. The `land_batch_max` row and paragraph, the `land_ready` attribution sentences, the batch sentences that follow, and §7.1's batch, suspects and sync paragraphs state the designs.
+**Not implemented: batch landing and `land_ready` suspect attribution.** brigada lands one task per land job — `land_batch_max` below is refused as an unknown key — a `land_ready` hold carries the command's first output line and no suspects. The `land_batch_max` row and paragraph, the `land_ready` attribution sentences, the batch sentences that follow, and §7.1's batch and suspects paragraphs state the designs.
 
 | Key | Gate it holds | Default |
 |---|---|---|

@@ -559,6 +559,8 @@ brigada push approve      # release the push gate for every waiting landing
 
 Only you can say these: the foreman has no tool to pass a gate.
 
+When `land_target` is set off the default branch, a **sync** keeps it current: a job of its own, no task, that merges the default branch into the target as a true merge commit. It runs before a landing's squash and before a task leases the target as a base, and those leases wait while it is pending, so no task starts from or lands onto a stale target. The merge follows the push gate: `auto` pushes it; `ask` and `never` leave it waiting on `refs/brigada/land/<target>` with a needs-you line, and `brigada push approve` releases an `ask` merge. A conflict holds the gate with a needs-you line naming the files; merge the default branch into the target by hand and push, and the next attempt opens the gate. While landings wait at the push gate the sync merges nothing and queues behind them. `brigada status` shows `land target is <n> commits behind <default>` while the target lags.
+
 ### Conflicts and failed checks
 
 A landing lands the head the review approved: a branch that gained a commit after its approving review is refused, nothing squashed or pushed, and the task parks at `needs_foreman` naming both heads, for the foreman to restart it so the new head is checked and reviewed.

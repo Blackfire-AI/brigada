@@ -49,7 +49,7 @@ Family detection: the job record; for `brigada review --branch` without a job, t
 
 ## 7.1 Landing approved work: the `land` job, and `brigada land` by hand
 
-**Not implemented: batch landing, the checked-head suspects, and the land-target sync in this section.** brigada lands one task per land job — `land_batch_max` (§6.3) is refused as an unknown key — a `land_ready` hold carries the command's first output line with no suspect attribution, and no sync job exists: a land target set off the default branch stays current only by the user's own merge. The batch paragraphs below — one job lands a batch, the batch holds, acceptance, running — the checked head and suspects, and the sync paragraphs — keeping the land target current, commits behind — describe the design.
+**Not implemented: batch landing and the checked-head suspects in this section.** brigada lands one task per land job — `land_batch_max` (§6.3) is refused as an unknown key — a `land_ready` hold carries the command's first output line with no suspect attribution. The batch paragraphs below — one job lands a batch, the batch holds, acceptance, running — and the checked head and suspects describe the design; the land-target sync below is implemented.
 
 ### The land job
 
@@ -182,7 +182,7 @@ A merge conflict, and a held push, before any task runs park nothing per task �
 
 A held push reads the same before any task runs: the merge waits at the gate with nothing beneath it, the wave holds behind it, and one `brigada push approve` — or, under `never`, the recorded push — releases it.
 
-**Commits behind.** The count a sync keeps is the default branch's commits the remote land target does not hold, read after the sync: 0 when the target is current or the merge was pushed; the earlier count kept when the merge waits at the gate or conflicts, and while the sync queues behind a waiting stack. `brigada status` shows it on the project's line whenever a land target is set and the count is above zero — `land target is <n> commits behind <default>` — and it becomes a needs-you entry (§10), carrying the number, exactly when brigada cannot clear it alone: the merge waiting at the gate, or conflicting. The foreman's opening prompt names both heads — the default branch and the land target, each with the head the last sync recorded, the count too when it is above zero — so a foreman reading the project's history never mistakes the branch the user merges for the branch brigada lands on (§4.2).
+**Commits behind.** The count a sync keeps is the default branch's commits the remote land target does not hold, read after the sync: 0 when the target is current or the merge was pushed; the earlier count kept when the merge waits at the gate or conflicts, and while the sync queues behind a waiting stack. `brigada status` shows it on the project's line whenever a land target is set and the count is above zero — `land target is <n> commits behind <default> (project #<id>)` — and it becomes a needs-you entry (§10), carrying the number, exactly when brigada cannot clear it alone: the merge waiting at the gate, or conflicting. The foreman's opening prompt names both heads — the default branch and the land target, each with the head the last sync recorded, the count too when it is above zero — so a foreman reading the project's history never mistakes the branch the user merges for the branch brigada lands on (§4.2).
 
 ### Landing by hand
 
