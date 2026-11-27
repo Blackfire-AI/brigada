@@ -114,8 +114,8 @@ tasks:
     tier: heavy
     effort: medium
     skills: ["surface-parity"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-33"
     rounds: 0
   - id: 35
     name: "changelog-263"
