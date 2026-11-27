@@ -13,7 +13,7 @@ import (
 func TestEveryHoldReasonHasASetting(t *testing.T) {
 	for _, kind := range []string{
 		holdGatePlan, holdGateLand, holdMaxTasks, holdBudget,
-		holdClass, holdPath, holdTier, holdRestart, holdExtras, holdCheck,
+		holdClass, holdPath, holdTier, holdRestart, holdExtras, holdGrants, holdCheck,
 	} {
 		key, ok := holdSettingOf[kind]
 		if !ok {
@@ -76,6 +76,12 @@ func TestStopAskingValues(t *testing.T) {
 	got = stopAskingValues(s, []holdAsk{{kind: holdExtras, extra: &ExtraRepo{Name: "web", Repo: "example.com/other/web"}}})
 	if got[SettingExtraRepos] != "docs example.com/other/docs+web example.com/other/web" {
 		t.Errorf("extra_repos = %q", got[SettingExtraRepos])
+	}
+
+	// A tool grant joins the approved list, as a class does.
+	got = stopAskingValues(s, []holdAsk{{kind: holdGrants, item: "Bash(git merge:*)"}})
+	if got[SettingApprovalToolGrants] != "Bash(git merge:*)" {
+		t.Errorf("approval_tool_grants = %q, want the pattern", got[SettingApprovalToolGrants])
 	}
 }
 
@@ -252,4 +258,54 @@ func TestProjectSetRecordsHistory(t *testing.T) {
 	if p, ok := e.eventPayloadOf(evProjectSettingSet); !ok || p.Reason != "gate_plan=ask" {
 		t.Errorf("project_setting_set event = %+v (%t), want gate_plan=ask", p, ok)
 	}
+}
+
+// TestToolGrantsApprovalTrigger (§6.3): a task with tool_grants is an
+// approval trigger — a grant outside approval_tool_grants holds the
+// plan, a setting listing the pattern releases it, and
+// --and-stop-asking adds the pattern to the setting.
+func TestToolGrantsApprovalTrigger(t *testing.T) {
+	granted := []PlanTask{{Spec: "merge work", ToolGrants: []string{"Bash(git merge:*)"}}}
+
+	t.Run("a grant outside the setting holds the plan", func(t *testing.T) {
+		e := newEnv(t)
+		e.assertAwaits(e.createPlan(granted), "tool_grants Bash(git merge:*) outside approval_tool_grants")
+	})
+
+	t.Run("a setting listing the pattern releases it", func(t *testing.T) {
+		e := newEnv(t)
+		e.setSettings(`{"approval_tool_grants": ["Bash(git merge:*)"], "approval_max_tasks": 0}`)
+		res := e.createPlan(granted)
+		if res.State != "active" || len(res.Reasons) != 0 {
+			t.Fatalf("the granted plan = %s %v, want active with no reasons", res.State, res.Reasons)
+		}
+	})
+
+	t.Run("stop-asking adds the pattern to the setting", func(t *testing.T) {
+		e := newEnv(t)
+		res := e.createPlan(granted)
+		e.assertAwaits(res, "tool_grants Bash(git merge:*) outside approval_tool_grants")
+		dec, err := e.eng.ApprovePlanVersion(e.ctx, 0, res.PlanID, 0, true)
+		if err != nil {
+			t.Fatalf("approve: %v", err)
+		}
+		if dec.State != "active" {
+			t.Fatalf("decision state = %q", dec.State)
+		}
+		if !slices.Equal(dec.Settings, []string{"approval_tool_grants=Bash(git merge:*)"}) {
+			t.Fatalf("settings changed = %v, want the pattern added", dec.Settings)
+		}
+		ps, err := e.eng.ProjectSettings(e.ctx, envRepo)
+		if err != nil {
+			t.Fatalf("read settings: %v", err)
+		}
+		if s := settingOf(t, *ps, SettingApprovalToolGrants); s.Value != "Bash(git merge:*)" || s.Default {
+			t.Errorf("approval_tool_grants = %+v, want the pattern as a local value", s)
+		}
+		// The same shape now runs without asking.
+		next := e.createPlan(granted)
+		if next.State != "active" || len(next.Reasons) != 0 {
+			t.Errorf("the same granted plan again = %s %v, want active with no reasons", next.State, next.Reasons)
+		}
+	})
 }

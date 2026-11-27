@@ -74,7 +74,7 @@ const guidanceDefaults = "instructions.foreman: not configured, file none\n" +
 	"instructions.reviewer: not configured, file none\n" +
 	"skills: none imported\n"
 
-const validSettingKeys = "approval_max_tasks, approval_budget, approval_classes, approval_protected_paths, gate_plan, gate_land, gate_push, plan_review, plan_review.tier, plan_review.effort, approval_tiers, approval_restarted, land_target, after_land, land_ready, default_check, worker_tools, setup, setup_cache_key_files, setup_timeout_minutes, extra_repos, foreman_rotate_tokens, foreman_wakes_per_day, plan_files, plan_file_branch, branch_retention_days, instructions"
+const validSettingKeys = "approval_max_tasks, approval_budget, approval_classes, approval_protected_paths, approval_tool_grants, gate_plan, gate_land, gate_push, plan_review, plan_review.tier, plan_review.effort, approval_tiers, approval_restarted, land_target, after_land, land_ready, default_check, worker_tools, setup, setup_cache_key_files, setup_timeout_minutes, extra_repos, foreman_rotate_tokens, foreman_wakes_per_day, plan_files, plan_file_branch, branch_retention_days, instructions"
 
 // TestProjectSettingsGolden covers project set and show: the defaults,
 // one override, the reset, and the usage errors for a bad key and value.
@@ -106,6 +106,7 @@ func TestProjectSettingsGolden(t *testing.T) {
 		"approval_budget=none (default)\n" +
 		"approval_classes=implement+review+answer (default)\n" +
 		"approval_protected_paths=infra/**+db/*.sql (set)\n" +
+		"approval_tool_grants=none (default)\n" +
 		gateDefaults +
 		"default_check=none (default)\n" +
 		"worker_tools=agent default (default)\n" + tailDefaults
@@ -124,6 +125,7 @@ func TestProjectSettingsGolden(t *testing.T) {
 		"approval_budget=2000000+$5.5 (set)\n" +
 		"approval_classes=implement+review+answer (default)\n" +
 		"approval_protected_paths=infra/**+db/*.sql (set)\n" +
+		"approval_tool_grants=none (default)\n" +
 		gateDefaults +
 		"default_check=none (default)\n" +
 		"worker_tools=agent default (default)\n" + tailDefaults
@@ -137,6 +139,7 @@ func TestProjectSettingsGolden(t *testing.T) {
 		"approval_budget=none (default)\n" +
 		"approval_classes=implement+review+answer (default)\n" +
 		"approval_protected_paths=none (default)\n" +
+		"approval_tool_grants=none (default)\n" +
 		gateDefaults +
 		"default_check=none (default)\n" +
 		"worker_tools=agent default (default)\n" + tailDefaults

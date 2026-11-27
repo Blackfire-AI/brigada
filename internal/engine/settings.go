@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -28,6 +29,10 @@ const (
 	SettingApprovalBudget         = "approval_budget"
 	SettingApprovalClasses        = "approval_classes"
 	SettingApprovalProtectedPaths = "approval_protected_paths"
+	// approval_tool_grants lists the tool-grant allowlist patterns that do
+	// not hold the plan (§6.3): a task whose tool_grants names a pattern
+	// outside it needs the user's yes. Absent = none, so every grant holds.
+	SettingApprovalToolGrants = "approval_tool_grants"
 	// The gates and land rules (§6.3). gate_plan is enforced today: ask
 	// holds every plan at the plan-approval gate. The land rules and
 	// gates are read by the land job (§7.1).
@@ -105,6 +110,7 @@ const (
 
 // SettingKeys are the editable keys, in the order show prints them.
 var SettingKeys = []string{SettingApprovalMaxTasks, SettingApprovalBudget, SettingApprovalClasses, SettingApprovalProtectedPaths,
+	SettingApprovalToolGrants,
 	SettingGatePlan, SettingGateLand, SettingGatePush, SettingPlanReview, SettingPlanReviewTier, SettingPlanReviewEffort,
 	SettingApprovalTiers, SettingApprovalRestarted, SettingLandTarget, SettingAfterLand, SettingLandReady,
 	SettingDefaultCheck, SettingWorkerTools, SettingSetup, SettingSetupCacheKeyFiles, SettingSetupTimeout,
@@ -217,7 +223,7 @@ var classWord = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
 // Every refusal names the valid keys.
 func parseSettingValue(key, value string) (json.RawMessage, error) {
 	switch key {
-	case SettingApprovalMaxTasks, SettingApprovalBudget, SettingApprovalClasses, SettingApprovalProtectedPaths,
+	case SettingApprovalMaxTasks, SettingApprovalBudget, SettingApprovalClasses, SettingApprovalProtectedPaths, SettingApprovalToolGrants,
 		SettingGatePlan, SettingGateLand, SettingGatePush, SettingPlanReview, SettingPlanReviewTier, SettingPlanReviewEffort,
 		SettingApprovalTiers, SettingApprovalRestarted, SettingLandTarget, SettingAfterLand, SettingLandReady,
 		SettingDefaultCheck, SettingWorkerTools,
@@ -404,6 +410,10 @@ func parseKnownValue(key, value string) (json.RawMessage, error) {
 				return nil, fmt.Errorf("%w: %s item %q is not a valid glob: %v", ErrInvalidSetting, key, item, err)
 			}
 		}
+		if key == SettingApprovalToolGrants && !slices.Contains(ToolGrantAllowlist, item) {
+			return nil, fmt.Errorf("%w: %s item %q is not in the tool-grant allowlist (%s)",
+				ErrInvalidSetting, key, item, strings.Join(ToolGrantAllowlist, ", "))
+		}
 		items = append(items, item)
 	}
 	if key == SettingExtraRepos {
@@ -486,6 +496,8 @@ func settingsViewTx(tx *sql.Tx, project int64, repo string, wakeBudgetDefault in
 			sv.Value = list(eff.Classes)
 		case SettingApprovalProtectedPaths:
 			sv.Value = list(eff.ProtectedPaths)
+		case SettingApprovalToolGrants:
+			sv.Value = list(eff.ToolGrants)
 		case SettingGatePlan:
 			sv.Value = GateAuto
 			if s, ok := rawString(cur); ok && s != "" {

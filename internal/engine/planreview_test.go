@@ -488,7 +488,7 @@ func TestComposePlanReviewInput(t *testing.T) {
 	plan := planReviewPlanView{
 		ID: 12, Title: "ship it",
 		Tasks: []planReviewTaskView{
-			{ID: 1, Name: "base", Title: "base", Spec: "do\nthe base\nwork", State: taskPending, Class: "", Tier: "", Effort: "high", Check: "go test ./..."},
+			{ID: 1, Name: "base", Title: "base", Spec: "do\nthe base\nwork", State: taskPending, Class: "", Tier: "", Effort: "high", Check: "go test ./...", ToolGrants: []string{"Bash(git merge:*)"}},
 			{ID: 2, Name: "top", Title: "top", Spec: "do the top", State: taskCancelled, Class: "deploy", Deps: []string{"base"}, Base: "base", Continue: "base"},
 		},
 	}
@@ -505,6 +505,8 @@ func TestComposePlanReviewInput(t *testing.T) {
 		"task 1 base: class implement, tier standard, effort high.",
 		"task 2 top: class deploy, tier standard, effort default, state cancelled.",
 		"it waits on base; its work starts from base; it continues base.",
+		"tool_grants: Bash(git merge:*)",
+		"tool_grants: none",
 		`plan 7 "other plan", 1 tasks`,
 		"task 3 running one: running, branch brigada/task-3.",
 	} {
@@ -522,6 +524,22 @@ func TestComposePlanReviewInput(t *testing.T) {
 	}
 	if composePlanReviewInput(1, plan, others, "", "") != got {
 		t.Error("the input is not a pure function of its views")
+	}
+}
+
+// TestPlanReviewInputNamesToolGrants (§6.2): a task's tool grants reach
+// the review input beside its skills, read from the task record.
+func TestPlanReviewInputNamesToolGrants(t *testing.T) {
+	e := newPlanReviewEnv(t)
+	e.offerForeman(e.runner1)
+	e.offerReviewer()
+	res := e.createPlan([]PlanTask{{Name: "merge", Spec: "merge it", ToolGrants: []string{"Bash(git merge:*)"}}})
+	if res.State != planReviewing {
+		t.Fatalf("plan state = %q, want %s", res.State, planReviewing)
+	}
+	prompt := e.str("SELECT prompt FROM jobs WHERE key = ?", planReviewKey(res.PlanID))
+	if !strings.Contains(prompt, "tool_grants: Bash(git merge:*)") {
+		t.Errorf("plan review input lacks the grant:\n%s", prompt)
 	}
 }
 

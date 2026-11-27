@@ -16,6 +16,13 @@ import (
 // point, named, and a task without the field grants none.
 func TestToolGrantsRoundTrip(t *testing.T) {
 	e := newEnv(t)
+	// A task with tool_grants is an approval trigger (§6.3); pre-approve
+	// the allowlist so the plan below is created active, not held for the
+	// user's yes — this test is about the grants round-tripping, not the
+	// hold.
+	e.exec("UPDATE projects SET settings = ? WHERE id = ?",
+		`{"approval_tool_grants": ["Bash(git merge:*)", "Bash(git restore:*)", "Bash(git checkout:*)", "Bash(git cherry-pick:*)"]}`,
+		e.project1)
 	grants := []string{"Bash(git merge:*)", "Bash(git restore:*)"}
 	read := func(task int64) []string {
 		t.Helper()

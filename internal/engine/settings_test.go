@@ -91,6 +91,7 @@ func TestProjectSettingsView(t *testing.T) {
 		{Key: SettingApprovalBudget, Value: "none", Default: true, Source: SourceDefault},
 		{Key: SettingApprovalClasses, Value: "implement+review+answer", Default: true, Source: SourceDefault},
 		{Key: SettingApprovalProtectedPaths, Value: "infra/**", Source: SourceLocal},
+		{Key: SettingApprovalToolGrants, Value: "none", Default: true, Source: SourceDefault},
 		{Key: SettingGatePlan, Value: "auto", Default: true, Source: SourceDefault},
 		{Key: SettingGateLand, Value: "auto", Default: true, Source: SourceDefault},
 		{Key: SettingGatePush, Value: "auto", Default: true, Source: SourceDefault},
@@ -152,6 +153,8 @@ func TestSetProjectSettingsRefusals(t *testing.T) {
 		{SettingApprovalClasses: "a++b"},
 		{SettingApprovalClasses: "has space"},
 		{SettingApprovalProtectedPaths: "bad[glob"},
+		{SettingApprovalToolGrants: "Bash(git push:*)"},
+		{SettingApprovalToolGrants: "Bash(git merge:*)+Bash(git push:*)"},
 		{SettingApprovalMaxTasks: "2", "nope": "1"},
 		{SettingGatePlan: "maybe"},
 		{SettingGateLand: "never"},
@@ -264,5 +267,23 @@ func TestLandReadyValidation(t *testing.T) {
 	raw, err := parseSettingValue(SettingLandReady, " .brigada/land-ready.sh ")
 	if err != nil || string(raw) != `".brigada/land-ready.sh"` {
 		t.Errorf("land_ready valid = %s, %v", raw, err)
+	}
+}
+
+// approval_tool_grants (§6.3) takes a +-separated list of allowlist
+// patterns: a pattern outside the allowlist is refused, the list
+// round-trips, and an unset value reads back as none.
+func TestApprovalToolGrantsSetting(t *testing.T) {
+	e := newEnv(t)
+	got := e.set(map[string]string{SettingApprovalToolGrants: "Bash(git merge:*)+Bash(git restore:*)"})
+	if s := settingOf(t, got, SettingApprovalToolGrants); s.Value != "Bash(git merge:*)+Bash(git restore:*)" || s.Default || s.Source != SourceLocal {
+		t.Errorf("approval_tool_grants = %+v, want the local patterns", s)
+	}
+	if raw := e.str("SELECT settings FROM projects WHERE id = ?", e.project); !strings.Contains(raw, `"approval_tool_grants":["Bash(git merge:*)","Bash(git restore:*)"]`) {
+		t.Errorf("stored settings %s lack the patterns", raw)
+	}
+	got = e.set(map[string]string{SettingApprovalToolGrants: ""})
+	if s := settingOf(t, got, SettingApprovalToolGrants); s.Value != "none" || !s.Default {
+		t.Errorf("approval_tool_grants after reset = %+v, want none at the default", s)
 	}
 }
