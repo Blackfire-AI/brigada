@@ -1,6 +1,6 @@
 # 10. Notifications
 
-Local OS notifications plus a "needs you" queue in `brigada status`: a plan, a landing or a push held by a rule at its gate (§6.3), a worker's question, a plan parked on a `changes` verdict a done foreman turn swallowed — the entry names the turn and keeps the findings (§6.2) — the foreman's limit, the foreman's budget out, a broken agent, a task parked with no eligible agent, a plan done.
+Local OS notifications plus a "needs you" queue in `brigada status`: a plan, a landing or a push held by a rule at its gate (§6.3), a worker's question, a plan parked on a `changes` verdict a done foreman turn swallowed — the entry names the turn and keeps the findings (§6.2) — the foreman's limit, the foreman's budget out, a broken agent, a task parked with no eligible agent, a task parked past the cooling-wait bound (§8.1), a plan done.
 
 A broken agent's entry carries its reason; for an `auth` break on a harness whose credential comes from the environment (dsh: `DEEPSEEK_API_KEY`), the reason names the variable and the time the runner process started, which the engine keeps as the runner's `started_at`: the runner sends its process start time with every register, and the engine moves `started_at` only when that time differs from the stored one, so a restart sets it and a re-poll does not; a runner that has reported none gets the reason `the runner has not reported its start` in place of the time. A harness with another kind of login keeps the bare `auth`.
 

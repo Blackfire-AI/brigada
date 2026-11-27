@@ -602,6 +602,59 @@ func TestPlanContinueSchemaAndCalls(t *testing.T) {
 	}
 }
 
+// TestServeCallPlanWaitLanded covers the optional wait_landed of a task
+// (§6.1): plan_create's task items and plan_amend's added items both
+// declare it, and a true value reaches the store through each call.
+func TestServeCallPlanWaitLanded(t *testing.T) {
+	e := newEnvToken(t, foremanTokenFile, "foreman-secret-9")
+	s := start(t, e)
+
+	schemaOf := func(name string) map[string]any {
+		for _, tool := range tools {
+			if tool.Name == name {
+				return tool.InputSchema.(map[string]any)
+			}
+		}
+		t.Fatalf("no %s tool", name)
+		return nil
+	}
+	taskProps := schemaOf("plan_create")["properties"].(map[string]any)["tasks"].(map[string]any)["items"].(map[string]any)["properties"].(map[string]any)
+	addProps := schemaOf("plan_amend")["properties"].(map[string]any)["add"].(map[string]any)["items"].(map[string]any)["properties"].(map[string]any)
+	for name, props := range map[string]map[string]any{"plan_create tasks": taskProps, "plan_amend add": addProps} {
+		if _, ok := props["wait_landed"]; !ok {
+			t.Errorf("%s declares no wait_landed: %v", name, props)
+		}
+	}
+
+	a := s.call(1, "tools/call", map[string]any{"name": "plan_create", "arguments": map[string]any{
+		"title": "barrier",
+		"tasks": []any{
+			map[string]any{"name": "build", "spec": "build it"},
+			map[string]any{"name": "ship", "spec": "ship it", "deps": []any{"build"}, "wait_landed": true},
+		},
+	}})
+	if text, isError := toolText(t, a); isError {
+		t.Fatalf("plan_create with wait_landed errored: %s", text)
+	}
+	if got := countOf(t, e, "SELECT wait_landed FROM tasks WHERE name = ?", "ship"); got != 1 {
+		t.Errorf("ship's wait_landed = %d, want 1", got)
+	}
+	if got := countOf(t, e, "SELECT wait_landed FROM tasks WHERE name = ?", "build"); got != 0 {
+		t.Errorf("build's wait_landed = %d, want 0: the default", got)
+	}
+
+	a = s.call(2, "tools/call", map[string]any{"name": "plan_amend", "arguments": map[string]any{
+		"plan": 1,
+		"add":  []any{map[string]any{"name": "verify", "spec": "verify it", "deps": []any{"ship"}, "wait_landed": true}},
+	}})
+	if text, isError := toolText(t, a); isError {
+		t.Fatalf("plan_amend with wait_landed errored: %s", text)
+	}
+	if got := countOf(t, e, "SELECT wait_landed FROM tasks WHERE name = ?", "verify"); got != 1 {
+		t.Errorf("verify's wait_landed = %d, want 1", got)
+	}
+}
+
 // TestIdemKey covers the key's mint (§12.1): one logical call — the
 // same arguments — mints one key; another call mints another.
 func TestIdemKey(t *testing.T) {
@@ -914,4 +967,64 @@ func TestServeCallPlanAccept(t *testing.T) {
 	if text, isError := toolText(t, a); !isError || !strings.Contains(text, "not parked") {
 		t.Errorf("accept an active plan = %q, error %v, want the refusal", text, isError)
 	}
+}
+
+func TestServeCallPlanAmendNote(t *testing.T) {
+	e := newEnvToken(t, foremanTokenFile, "foreman-secret-9")
+	s := start(t, e)
+	a := s.call(1, "tools/call", map[string]any{"name": "plan_create", "arguments": map[string]any{
+		"title": "two steps",
+		"tasks": []any{
+			map[string]any{"name": "a", "spec": "one"},
+			map[string]any{"name": "b", "spec": "two", "deps": []any{"a"}},
+		},
+	}})
+	if text, isError := toolText(t, a); isError {
+		t.Fatalf("plan_create errored: %s", text)
+	}
+	a = s.call(2, "tools/call", map[string]any{"name": "plan_amend", "arguments": map[string]any{
+		"plan": 1,
+		"note": []any{map[string]any{"task": "b", "note": "use the v2 client"}},
+	}})
+	text, isError := toolText(t, a)
+	if isError || !strings.Contains(text, "noted task 2") {
+		t.Fatalf("note = %q, error %v", text, isError)
+	}
+	var note string
+	if err := e.st.View(t.Context(), func(tx *sql.Tx) error {
+		return tx.QueryRow("SELECT COALESCE(note, '') FROM tasks WHERE name = 'b'").Scan(&note)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if note != "use the v2 client" {
+		t.Errorf("note = %q", note)
+	}
+	a = s.call(3, "tools/call", map[string]any{"name": "plan_amend", "arguments": map[string]any{
+		"plan": 1,
+		"note": []any{map[string]any{"task": "ghost", "note": "x"}},
+	}})
+	if _, isError = toolText(t, a); !isError {
+		t.Error("a note on an unknown task was accepted")
+	}
+}
+
+func TestPlanAmendNoteSchema(t *testing.T) {
+	for _, tool := range tools {
+		if tool.Name != "plan_amend" {
+			continue
+		}
+		props := tool.InputSchema.(map[string]any)["properties"].(map[string]any)
+		n, ok := props["note"].(map[string]any)
+		if !ok {
+			t.Fatal("note missing from schema")
+		}
+		fields := n["items"].(map[string]any)["properties"].(map[string]any)
+		for _, field := range []string{"task", "note"} {
+			if _, ok := fields[field]; !ok {
+				t.Errorf("note missing %s", field)
+			}
+		}
+		return
+	}
+	t.Fatal("no plan_amend tool")
 }

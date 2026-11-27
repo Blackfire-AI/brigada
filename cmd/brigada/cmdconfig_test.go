@@ -53,7 +53,7 @@ func TestConfigSavedAgentsAndRunningRunnerOutsideRepo(t *testing.T) {
 	write(filepath.Join(home, ".kimi-code", "config.toml"), "default_model = 'kimi-code/k3'\n[models.\"kimi-code/k3\"]\ndefault_effort = 'high'\napi_key = 'never-print-this'\n")
 	state := testsupport.ShortStateDir(t)
 	config := filepath.Join(state, "machine-config")
-	write(config, "notify = none\nstate_dir = file-state\ncaps.global = 0\ncaps.account.work = 3\ncaps.model.opus = 2\ncost.claude/opus = 2\ntools.claude/sonnet = none\n")
+	write(config, "notify = none\nstate_dir = file-state\ncaps.global = 0\ncaps.account.work = 3\ncaps.model.opus = 2\ncost.claude/opus = 2\ntools.claude/sonnet = none\ntracker.git.example.invalid:3000.token = keychain:brigada-forge\n")
 	dir := filepath.Join(state, "runner")
 	if err := runnerstate.SaveAgents(dir, []string{
 		"harness=claude,model=sonnet,tools=none,account=work",
@@ -93,11 +93,14 @@ func TestConfigSavedAgentsAndRunningRunnerOutsideRepo(t *testing.T) {
 		"task_auto_retry = true (default)", "headroom = true (default)",
 		"foreman_wakes_per_day = 20 (default)", "default_reviewer = none (default)",
 		"rounds.fix = 2 (default)", "rounds.review = 2 (default)", "rounds.restart = 3 (default)",
+		"time_cap_minutes.<kind> = work/fix 40m, review/plan_review 20m, foreman 25m, land none (default)",
 		"review.tier = below (default)", "review.effort = medium (default)",
 		"review.family = prefer (default)",
 		"snapshot_dir = none (default)", "retention_days = 0, keep everything (default)", "caps.plan = no cap (default)",
 		"caps.runner = no cap (default)", "caps.account.<label> = no cap (default)",
 		"caps.model.<model> = no cap (default)", "cost.<harness>/<model> = light 1, standard 2, heavy 3 (default)",
+		// A tracker token key shows its reference, never a resolved secret.
+		"tracker.<host>.token = none (default)", "tracker.git.example.invalid:3000.token = keychain:brigada-forge",
 	} {
 		if !strings.Contains(flat, want) {
 			t.Errorf("missing %q in:\n%s", want, out)

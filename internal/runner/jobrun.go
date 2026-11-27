@@ -142,6 +142,14 @@ func (r *jobRun) execute(ctx context.Context) {
 		return
 	}
 
+	// The land-target sync (§7.1) needs no worker or checkout either: the
+	// runner's credentialed git keeps the target current with the default
+	// branch.
+	if isSyncJob(r.grant) {
+		r.runSyncJob(ctx)
+		return
+	}
+
 	// The worker's kill switch exists before any goroutine that may
 	// fire it: the heartbeat loop (a stall) closes the channel, the
 	// worker's killer goroutine receives it — the field is written once,
@@ -384,6 +392,8 @@ func (r *jobRun) runWorker(ctx context.Context, ad adapter.Adapter, model, workd
 // consults the stall policy: stalled, or past the class time cap, the
 // worker's tree is killed and the run completes with that outcome —
 // and the beats go on, because the completion still needs the lease.
+// The engine's stop_running answer stops the worker the same way, the
+// run completing stalled with the reason stop_running.
 // An engine answer that ends the hold — lost, gone, cancelled, fenced
 // out — aborts the run: the worker's (or the check's) process group is
 // killed and whatever the run produced is dropped, never completed
@@ -419,6 +429,18 @@ func (r *jobRun) heartbeats(ctx context.Context, abort context.CancelFunc, done 
 			}
 			switch ans {
 			case engine.AnsOK:
+			case engine.AnsStopRunning:
+				// The foreman's stop-running restart (§5.6): not an end
+				// of the hold but a stop, exactly as the policy's — the
+				// worker alone is killed and the run completes stalled
+				// through finishStopped, its branch pushed. A beat that
+				// finds no worker up does nothing: one not started yet
+				// is stopped by a later beat, which answers the same,
+				// and one that already exited completes as it ended.
+				if r.workerUp() {
+					r.markStopped(&stop{Outcome: statusStalled, Reason: engine.StopRunningReason})
+					r.killWorker()
+				}
 			case engine.AnsLost, engine.AnsGone, engine.AnsCancelled, engine.AnsStaleEpoch:
 				r.markDropped()
 				r.cfg.Log.WarnContext(ctx, "the engine ended our hold; killing the run's processes",
@@ -436,10 +458,16 @@ func (r *jobRun) heartbeats(ctx context.Context, abort context.CancelFunc, done 
 // and the caps of the class the job's kind belongs to.
 func (r *jobRun) stallPolicy() stallPolicy {
 	caps := r.cfg.ClassCaps[r.grant.Kind]
+	timeCap := caps.TimeCap
+	// The grant's cap is the engine's authoritative value (§5.6); a grant
+	// that names none keeps the runner's own class cap.
+	if r.grant.TimeCap != 0 {
+		timeCap = r.grant.TimeCap
+	}
 	return stallPolicy{
 		StallAfter: r.cfg.StallAfter,
 		ToolCap:    caps.ToolCap,
-		TimeCap:    caps.TimeCap,
+		TimeCap:    timeCap,
 		StartedAt:  r.startedAt,
 	}
 }

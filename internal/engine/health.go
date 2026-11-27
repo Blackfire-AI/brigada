@@ -148,7 +148,7 @@ func (e *Engine) agentOutcomeTx(tx *sql.Tx, job *jobRow, c Completion, now time.
 const limitResetCap = 8 * 24 * time.Hour
 
 // coolAccountTx cools every agent sharing the failed job's agent's
-// account label (§8 "Quota"): until the completion's reset time when it
+// quota scope (§8 "Quota"): until the completion's reset time when it
 // lies ahead, else now plus the configured default. A reset beyond
 // eight days out is suspect and capped there.
 func (e *Engine) coolAccountTx(tx *sql.Tx, job *jobRow, c Completion, now time.Time) error {
@@ -162,10 +162,10 @@ func (e *Engine) coolAccountTx(tx *sql.Tx, job *jobRow, c Completion, now time.T
 	return e.coolUntilTx(tx, job, until, now)
 }
 
-// coolBalanceTx cools the account of a spent balance (§8 "Quota"): the
-// provider refused payment, and no clock resolves that but a top-up, so
-// the window is the cap itself — long enough to keep the dispatcher off
-// the account until the §8 reset lifts it once the account is funded
+// coolBalanceTx cools the quota scope of a spent balance (§8 "Quota"):
+// the provider refused payment, and no clock resolves that but a top-up,
+// so the window is the cap itself — long enough to keep the dispatcher
+// off the scope until the §8 reset lifts it once the account is funded
 // again. A reset time the completion carried anyway is not honored: an
 // empty account stays empty past any clock.
 func (e *Engine) coolBalanceTx(tx *sql.Tx, job *jobRow, now time.Time) error {
@@ -173,34 +173,40 @@ func (e *Engine) coolBalanceTx(tx *sql.Tx, job *jobRow, now time.Time) error {
 }
 
 // coolUntilTx stamps cooling_until on every agent sharing the failed
-// job's agent's account label (§8 "Quota"). An account already cooling
-// past that keeps its later deadline. An agent with no account label
-// shares its quota with no one and cools alone. One plain event names
-// the account and the deadline; no inbox, no wake.
+// job's agent's quota scope (§8 "Quota"): the scope when it has one, the
+// account label otherwise — an old agent with no scope shares its quota
+// with its account, as it always did. A scope or account already cooling
+// past that keeps its later deadline. An agent with neither shares its
+// quota with no one and cools alone. One plain event names the account
+// and the deadline; no inbox, no wake.
 func (e *Engine) coolUntilTx(tx *sql.Tx, job *jobRow, until, now time.Time) error {
-	var account string
-	if err := tx.QueryRow("SELECT account FROM agents WHERE id = ?", job.AgentID).Scan(&account); err != nil {
+	var scope, account string
+	if err := tx.QueryRow("SELECT quota_scope, account FROM agents WHERE id = ?", job.AgentID).Scan(&scope, &account); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
-		return fmt.Errorf("read the account of agent %d: %w", job.AgentID, err)
+		return fmt.Errorf("read the quota scope of agent %d: %w", job.AgentID, err)
+	}
+	key := scope
+	if key == "" {
+		key = account
 	}
 	untilStr := fmtTime(until)
 	query := `UPDATE agents SET cooling_until = ?, updated_at = ?
 		WHERE (cooling_until IS NULL OR cooling_until < ?) AND `
 	args := []any{untilStr, fmtTime(now), untilStr}
-	if account == "" {
+	if key == "" {
 		query += "id = ?"
 		args = append(args, job.AgentID)
 	} else {
-		query += "account = ?"
-		args = append(args, account)
+		query += "(CASE WHEN quota_scope <> '' THEN quota_scope ELSE account END) = ?"
+		args = append(args, key)
 	}
 	if _, err := tx.Exec(query, args...); err != nil {
-		return fmt.Errorf("cool account %q: %w", account, err)
+		return fmt.Errorf("cool quota scope %q: %w", key, err)
 	}
 	_, err := appendEventTx(tx, evAgentCooling, job.ProjectID, job.TaskID, job.ID,
-		eventPayload{Account: account, Until: untilStr}, now)
+		eventPayload{Account: account, QuotaScope: scope, Until: untilStr}, now)
 	return err
 }
 
@@ -473,13 +479,16 @@ type CoolingAgent struct {
 	Harness string `json:"harness"`
 	Model   string `json:"model"`
 	Account string `json:"account"`
-	Until   string `json:"until"`
+	// QuotaScope is the pool the cooling spans; empty when the agent has
+	// none and cools with its account.
+	QuotaScope string `json:"quota_scope,omitempty"`
+	Until      string `json:"until"`
 }
 
 // statusCoolingTx lists the agents cooling at now that are not broken
 // (a broken agent is in the needs-you queue instead).
 func statusCoolingTx(tx *sql.Tx, now time.Time) ([]CoolingAgent, error) {
-	rows, err := tx.Query(`SELECT id, harness, model, account, cooling_until FROM agents
+	rows, err := tx.Query(`SELECT id, harness, model, account, quota_scope, cooling_until FROM agents
 		WHERE health = 'ready' AND cooling_until > ? ORDER BY id`, fmtTime(now))
 	if err != nil {
 		return nil, fmt.Errorf("list the cooling agents: %w", err)
@@ -488,7 +497,7 @@ func statusCoolingTx(tx *sql.Tx, now time.Time) ([]CoolingAgent, error) {
 	out := []CoolingAgent{}
 	for rows.Next() {
 		var a CoolingAgent
-		if err := rows.Scan(&a.ID, &a.Harness, &a.Model, &a.Account, &a.Until); err != nil {
+		if err := rows.Scan(&a.ID, &a.Harness, &a.Model, &a.Account, &a.QuotaScope, &a.Until); err != nil {
 			return nil, fmt.Errorf("list the cooling agents: %w", err)
 		}
 		out = append(out, a)

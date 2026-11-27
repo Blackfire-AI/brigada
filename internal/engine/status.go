@@ -120,6 +120,12 @@ type StatusInfo struct {
 	Instructions     []StatusInstructions     `json:"instructions,omitempty"`
 	RoleInstructions []StatusRoleInstructions `json:"role_instructions,omitempty"`
 	Skills           []StatusSkill            `json:"skills,omitempty"`
+	// LandSyncs lists the projects whose land target lags the default
+	// branch (§7.1): one entry per project with a land target set and a
+	// count above zero. Rendered on the project's line.
+	LandSyncs []StatusLandSync `json:"land_syncs,omitempty"`
+	// PlanScope is set only on a plan-scoped status (StatusForPlan).
+	PlanScope *PlanScope `json:"plan_scope,omitempty"`
 }
 
 // SkillFileDigest is a client's current digests of one skill directory: of
@@ -289,6 +295,13 @@ type StatusTask struct {
 	Continues string `json:"continues,omitempty"`
 	// Skills names the skills the task recorded (§5.10), in order.
 	Skills []string `json:"skills,omitempty"`
+	// WaitLanded is true when the task's release waits for landing, not
+	// mere completion (§6.1): it stays pending until every implement
+	// dependency has actually landed on the target.
+	WaitLanded bool `json:"wait_landed,omitempty"`
+	// Note is the task's pending note (§6.2), verbatim: left by plan_amend
+	// for the task's next job, gone from here once a job carries it.
+	Note string `json:"note,omitempty"`
 }
 
 // LandedLabel words the task's landing state for the per-task lines the
@@ -463,6 +476,9 @@ func (e *Engine) status(ctx context.Context, project int64, withText, all bool) 
 			return err
 		}
 		if info.Instructions, err = statusInstructionsTx(tx, project, withText); err != nil {
+			return err
+		}
+		if info.LandSyncs, err = statusLandSyncsTx(tx, project); err != nil {
 			return err
 		}
 		return nil
@@ -683,7 +699,7 @@ func statusPlanRows(tx *sql.Tx, query string, args ...any) ([]StatusPlan, error)
 
 // statusPlanTasksTx reads one status plan's tasks, in id order.
 func statusPlanTasksTx(tx *sql.Tx, plan int64, now time.Time) ([]StatusTask, error) {
-	rows, err := tx.Query(`SELECT t.id, COALESCE(t.name, ''), t.title, t.class, t.state, COALESCE(t.branch, ''), t.tier, t.effective_tier, t.effort, t.effective_effort, t.review_tier, t.review_effort, t.caps, COALESCE(l.pushed, ''), COALESCE(l.commit_sha, ''), COALESCE(t.land_retry_at, ''), t.land_ready_exit, COALESCE(h.reason, ''), t.skills
+	rows, err := tx.Query(`SELECT t.id, COALESCE(t.name, ''), t.title, t.class, t.state, COALESCE(t.branch, ''), t.tier, t.effective_tier, t.effort, t.effective_effort, t.review_tier, t.review_effort, t.caps, COALESCE(l.pushed, ''), COALESCE(l.commit_sha, ''), COALESCE(t.land_retry_at, ''), t.land_ready_exit, COALESCE(h.reason, ''), t.skills, t.wait_landed, COALESCE(t.note, '')
 		FROM tasks t
 		LEFT JOIN landings l ON l.task_id = t.id
 		LEFT JOIN land_holds h ON h.task_id = t.id AND h.state = 'held'
@@ -697,7 +713,7 @@ func statusPlanTasksTx(tx *sql.Tx, plan int64, now time.Time) ([]StatusTask, err
 		var t StatusTask
 		var capsJSON, pushed, commit, retryAt, holdReason, skills string
 		var exit sql.NullInt64
-		if err := rows.Scan(&t.ID, &t.Name, &t.Title, &t.Class, &t.State, &t.Branch, &t.Tier, &t.EffectiveTier, &t.Effort, &t.EffectiveEffort, &t.ReviewTier, &t.ReviewEffort, &capsJSON, &pushed, &commit, &retryAt, &exit, &holdReason, &skills); err != nil {
+		if err := rows.Scan(&t.ID, &t.Name, &t.Title, &t.Class, &t.State, &t.Branch, &t.Tier, &t.EffectiveTier, &t.Effort, &t.EffectiveEffort, &t.ReviewTier, &t.ReviewEffort, &capsJSON, &pushed, &commit, &retryAt, &exit, &holdReason, &skills, &t.WaitLanded, &t.Note); err != nil {
 			return nil, fmt.Errorf("list the tasks of plan %d: %w", plan, err)
 		}
 		t.Caps = parseTaskCaps(capsJSON)
@@ -1043,6 +1059,15 @@ func statusNeedsYouTx(tx *sql.Tx, reviewFamily string, project int64, now time.T
 		return nil, err
 	}
 	items = append(items, localLands...)
+
+	// A land-target sync whose merge waits at the push gate, or
+	// conflicts, holds the gate until the user clears it (§7.1): one line
+	// for the project, naming the merge or the conflicting files.
+	syncWaits, err := statusSyncTx(tx, project)
+	if err != nil {
+		return nil, err
+	}
+	items = append(items, syncWaits...)
 
 	// A blocked plan's stranded tasks stay done as well (§6.2): each
 	// names the cancelled or failed dependency it can never land on.

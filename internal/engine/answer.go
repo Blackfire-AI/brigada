@@ -174,6 +174,9 @@ func (e *Engine) RestartTask(ctx context.Context, project, taskID int64, note st
 }
 
 func (e *Engine) restartTaskTx(tx *sql.Tx, project, taskID int64, note string, now time.Time) (RestartResult, error) {
+	if err := refuseStopPendingTx(tx, taskID); err != nil {
+		return RestartResult{}, err
+	}
 	if err := parkedTaskTx(tx, project, taskID); err != nil {
 		return RestartResult{}, err
 	}
@@ -216,6 +219,16 @@ func (e *Engine) restartTaskTx(tx *sql.Tx, project, taskID int64, note string, n
 // (issue #205), so the new head's landing is the land rule's to queue
 // once it is approved.
 func (e *Engine) queueTaskRestartTx(tx *sql.Tx, project, taskID int64, note string, agent int64, retry bool, notBefore time.Time, now time.Time) (RestartResult, error) {
+	return e.queueSeededRestartTx(tx, project, taskID, note, agent, retry, notBefore, "", now)
+}
+
+// queueSeededRestartTx is queueTaskRestartTx with a seed: a non-empty seed
+// names the branch the fresh work job's worktree starts from instead of
+// the task's base (§5.6) — the stopped run's pushed branch a stop-running
+// restart carries on. The task's base_ref is the rebuild base all the
+// same, so the review's diff and the landing read the attempt against the
+// task's real base.
+func (e *Engine) queueSeededRestartTx(tx *sql.Tx, project, taskID int64, note string, agent int64, retry bool, notBefore time.Time, seed string, now time.Time) (RestartResult, error) {
 	if err := e.forgetRestartedLandingTx(tx, taskID, now); err != nil {
 		return RestartResult{}, err
 	}
@@ -247,6 +260,7 @@ func (e *Engine) queueTaskRestartTx(tx *sql.Tx, project, taskID int64, note stri
 		Retry:        retry,
 		RequireAgent: agent,
 		NotBefore:    notBefore,
+		SeedBranch:   seed,
 	}, now)
 	if err != nil {
 		return RestartResult{}, err

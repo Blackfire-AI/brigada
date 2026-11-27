@@ -74,12 +74,16 @@ func summary(it Item) string {
 		EffortTo   string `json:"effort_to"`
 		Agent      int64  `json:"agent"`
 		Placement  string `json:"placement"`
+		Layer      string `json:"layer"`
+		Key        string `json:"key"`
 		Prompt     *struct {
 			Template     int      `json:"template"`
 			Instructions string   `json:"instructions"`
 			Reviewer     string   `json:"reviewer"`
 			Skills       []string `json:"skills"`
 		} `json:"prompt"`
+		ToolGrants []string `json:"tool_grants"`
+		Note       string   `json:"note"`
 	}
 	if json.Unmarshal(it.Payload, &p) != nil {
 		return string(it.Payload)
@@ -90,8 +94,11 @@ func summary(it Item) string {
 	if it.Kind == "task_effort_bumped" {
 		return fmt.Sprintf("task effort %s -> %s: %s", p.EffortFrom, p.EffortTo, p.Reason)
 	}
-	if it.Kind == "job_agent_picked" && p.Placement != "" {
-		return pickedPlacement(p.Agent, p.Placement)
+	if it.Kind == "job_agent_picked" {
+		return pickedSummary(it.Payload)
+	}
+	if it.Kind == "job_cap_held" {
+		return capHeldSummary(p.Layer, p.Key)
 	}
 	var parts []string
 	add := func(k, v string) {
@@ -123,6 +130,12 @@ func summary(it Item) string {
 		add("after_land_error", p.AfterLand)
 	}
 	add("reason", p.Reason)
+	if it.Kind == "task_note_set" {
+		if p.Note == "" {
+			p.Note = "(cleared)"
+		}
+		add("note", p.Note)
+	}
 	add("report", p.Report)
 	add("lease", p.Lease)
 	addInt("owner", p.Owner)
@@ -131,6 +144,9 @@ func summary(it Item) string {
 	addInt("epoch", p.Epoch)
 	add("path", p.Path)
 	addInt("bytes", p.Bytes)
+	if len(p.ToolGrants) > 0 {
+		add("tool_grants", strings.Join(p.ToolGrants, ","))
+	}
 	// A leased job's prompt names what it was composed from (§9): the
 	// template version and the digests, shortened to the usual 12.
 	if p.Prompt != nil {
@@ -185,4 +201,103 @@ func pickedPlacement(agent int64, placement string) string {
 		return who + " (unknown: the author's family unknown)"
 	}
 	return who + " (placement " + placement + ")"
+}
+
+// pickedPayload is the decision a job_agent_picked event records (§8):
+// why the lease took its agent.
+type pickedPayload struct {
+	Agent         int64   `json:"agent"`
+	Score         float64 `json:"score"`
+	Pick          string  `json:"pick"`
+	Weight        *int    `json:"weight"`
+	Draw          float64 `json:"draw"`
+	TierAsked     string  `json:"tier_asked"`
+	TierServed    string  `json:"tier_served"`
+	Placement     string  `json:"placement"`
+	FamilyPolicy  string  `json:"family_policy"`
+	Fallback      string  `json:"fallback"`
+	Pin           int64   `json:"pin"`
+	Session       bool    `json:"session"`
+	ExcludeAgents []int64 `json:"exclude_agents"`
+	Removed       []struct {
+		Agent  int64  `json:"agent"`
+		Reason string `json:"reason"`
+	} `json:"removed"`
+}
+
+// pickedSummary words a job_agent_picked event for the timeline (§8): who
+// was picked, its score, cost and draw, the tier asked and served, the
+// placement and any fallback, and the agents the placement dropped with
+// the reason for each. It is the one rendering `brigada history` and the
+// MCP bridge's history share, so the two read the same decision.
+func pickedSummary(payload []byte) string {
+	var p pickedPayload
+	if json.Unmarshal(payload, &p) != nil {
+		return ""
+	}
+	var parts []string
+	if p.Placement != "" {
+		parts = append(parts, pickedPlacement(p.Agent, p.Placement))
+	} else {
+		parts = append(parts, "agent "+strconv.FormatInt(p.Agent, 10))
+	}
+	add := func(k, v string) {
+		if v != "" {
+			parts = append(parts, k+"="+v)
+		}
+	}
+	add("pick", p.Pick)
+	if p.Score != 0 {
+		add("score", strconv.FormatFloat(p.Score, 'f', -1, 64))
+	}
+	if p.Weight != nil {
+		add("weight", strconv.Itoa(*p.Weight))
+	}
+	if p.Draw != 0 {
+		add("draw", strconv.FormatFloat(p.Draw, 'f', -1, 64))
+	}
+	if p.TierAsked != "" || p.TierServed != "" {
+		tier := p.TierAsked
+		if p.TierServed != "" && p.TierServed != p.TierAsked {
+			tier += "->" + p.TierServed
+		}
+		add("tier", tier)
+	}
+	add("family", p.FamilyPolicy)
+	add("fallback", p.Fallback)
+	if p.Pin != 0 {
+		add("pin", strconv.FormatInt(p.Pin, 10))
+	}
+	if p.Session {
+		parts = append(parts, "session")
+	}
+	if len(p.ExcludeAgents) > 0 {
+		ids := make([]string, len(p.ExcludeAgents))
+		for i, id := range p.ExcludeAgents {
+			ids[i] = strconv.FormatInt(id, 10)
+		}
+		add("excluded", strings.Join(ids, ","))
+	}
+	if len(p.Removed) > 0 {
+		rem := make([]string, len(p.Removed))
+		for i, r := range p.Removed {
+			rem[i] = strconv.FormatInt(r.Agent, 10) + ": " + r.Reason
+		}
+		add("removed", strings.Join(rem, ", "))
+	}
+	return strings.Join(parts, " ")
+}
+
+// capHeldSummary words a job_cap_held event for the timeline (§8.1): the
+// layer that had no room and, when the layer names an instance, that
+// instance — the account label, model name, plan id or runner id.
+func capHeldSummary(layer, key string) string {
+	if layer == "" {
+		return ""
+	}
+	s := "held: " + layer
+	if key != "" {
+		s += " on " + key
+	}
+	return s
 }

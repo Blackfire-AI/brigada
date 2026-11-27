@@ -42,6 +42,13 @@ type planTaskArg struct {
 	// Skills (§5.10) names, in order, the project's imported skills the
 	// task's prompts carry; absent or empty = none.
 	Skills []string `json:"skills,omitempty"`
+	// WaitLanded marks a dependent whose release waits for landing, not
+	// mere completion (§6.1); default false.
+	WaitLanded bool `json:"wait_landed,omitempty"`
+	// ToolGrants (§6.1) are the Claude Code permission patterns the task
+	// grants its worker, each one of the allowlist; absent or empty =
+	// none.
+	ToolGrants []string `json:"tool_grants,omitempty"`
 }
 
 // extraRepoArg is one read-only extra repository of a task (§5.8).
@@ -94,7 +101,7 @@ func callPlanCreate(ctx context.Context, c *api.Client, args json.RawMessage) (s
 	a = a.canonical()
 	p := api.PlanCreate{Title: a.Title, Tasks: make([]api.PlanTask, len(a.Tasks))}
 	for i, t := range a.Tasks {
-		p.Tasks[i] = api.PlanTask{Title: t.Title, Name: t.Name, Deps: t.Deps, Base: t.Base, Continue: t.Continue, Spec: t.Spec, Check: t.Check, Class: t.Class, Tier: t.Tier, Effort: t.Effort, ReviewTier: t.ReviewTier, ReviewEffort: t.ReviewEffort, Caps: t.Caps, ExtraRepos: extraRepos(t.ExtraRepos), Skills: t.Skills}
+		p.Tasks[i] = api.PlanTask{Title: t.Title, Name: t.Name, Deps: t.Deps, Base: t.Base, Continue: t.Continue, Spec: t.Spec, Check: t.Check, Class: t.Class, Tier: t.Tier, Effort: t.Effort, ReviewTier: t.ReviewTier, ReviewEffort: t.ReviewEffort, Caps: t.Caps, ExtraRepos: extraRepos(t.ExtraRepos), Skills: t.Skills, WaitLanded: t.WaitLanded, ToolGrants: t.ToolGrants}
 	}
 	res, err := c.CreatePlan(ctx, p, idemKey("plan_create", a))
 	if err != nil {
@@ -230,6 +237,14 @@ type planAmendArgs struct {
 	Retarget []planRetargetArg `json:"retarget"`
 	Retier   []planRetierArg   `json:"retier"`
 	Respec   []planRespecArg   `json:"respec"`
+	Note     []planNoteArg     `json:"note"`
+}
+
+// planNoteArg is one note item (§6.2): the task and the note its next job
+// carries; an empty note clears the pending one.
+type planNoteArg struct {
+	Task taskRef `json:"task"`
+	Note string  `json:"note"`
 }
 
 type planRespecArg struct {
@@ -240,6 +255,9 @@ type planRespecArg struct {
 	// absent keeps them, [] clears them. No omitempty, so the two hash
 	// differently.
 	Skills []string `json:"skills"`
+	// ToolGrants (§6.1) replaces the task's tool grants; absent keeps
+	// them, [] clears them. No omitempty, so the two hash differently.
+	ToolGrants []string `json:"tool_grants"`
 }
 
 type planAddArg struct {
@@ -261,6 +279,10 @@ type planAddArg struct {
 	ExtraRepos []extraRepoArg `json:"extra_repos"`
 	// Skills as planTaskArg's.
 	Skills []string `json:"skills,omitempty"`
+	// WaitLanded as planTaskArg's.
+	WaitLanded bool `json:"wait_landed,omitempty"`
+	// ToolGrants as planTaskArg's.
+	ToolGrants []string `json:"tool_grants,omitempty"`
 }
 
 type planRetierArg struct {
@@ -310,7 +332,7 @@ func callPlanAmend(ctx context.Context, c *api.Client, args json.RawMessage) (st
 		am.Cancel = append(am.Cancel, api.PlanCancel{Task: string(c.Task), Reason: c.Reason})
 	}
 	for _, t := range a.Add {
-		am.Add = append(am.Add, api.PlanTask{Title: t.Title, Name: t.Name, Deps: refStrings(t.Deps), Base: string(t.Base), Continue: string(t.Continue), Spec: t.Spec, Check: t.Check, Class: t.Class, Tier: t.Tier, Effort: t.Effort, ReviewTier: t.ReviewTier, ReviewEffort: t.ReviewEffort, Caps: t.Caps, ExtraRepos: extraRepos(t.ExtraRepos), Skills: t.Skills})
+		am.Add = append(am.Add, api.PlanTask{Title: t.Title, Name: t.Name, Deps: refStrings(t.Deps), Base: string(t.Base), Continue: string(t.Continue), Spec: t.Spec, Check: t.Check, Class: t.Class, Tier: t.Tier, Effort: t.Effort, ReviewTier: t.ReviewTier, ReviewEffort: t.ReviewEffort, Caps: t.Caps, ExtraRepos: extraRepos(t.ExtraRepos), Skills: t.Skills, WaitLanded: t.WaitLanded, ToolGrants: t.ToolGrants})
 	}
 	for _, rt := range a.Retarget {
 		am.Retarget = append(am.Retarget, api.PlanRetarget{Task: string(rt.Task), Deps: refStrings(rt.Deps), Base: string(rt.Base), Continue: string(rt.Continue)})
@@ -319,7 +341,10 @@ func callPlanAmend(ctx context.Context, c *api.Client, args json.RawMessage) (st
 		am.Retier = append(am.Retier, api.PlanRetier{Task: string(rt.Task), Tier: rt.Tier, Effort: rt.Effort, ReviewTier: rt.ReviewTier, ReviewEffort: rt.ReviewEffort, Caps: rt.Caps, Skills: rt.Skills})
 	}
 	for _, rs := range a.Respec {
-		am.Respec = append(am.Respec, api.PlanRespec{Task: string(rs.Task), Spec: rs.Spec, Mode: rs.Mode, Skills: rs.Skills})
+		am.Respec = append(am.Respec, api.PlanRespec{Task: string(rs.Task), Spec: rs.Spec, Mode: rs.Mode, Skills: rs.Skills, ToolGrants: rs.ToolGrants})
+	}
+	for _, n := range a.Note {
+		am.Note = append(am.Note, api.PlanNote{Task: string(n.Task), Note: n.Note})
 	}
 	res, err := c.AmendPlan(ctx, a.Plan, am, idemKey("plan_amend", a))
 	if err != nil {
@@ -348,6 +373,9 @@ func callPlanAmend(ctx context.Context, c *api.Client, args json.RawMessage) (st
 	}
 	for _, id := range res.Respecced {
 		fmt.Fprintf(&b, "\nrespecified task %d", id)
+	}
+	for _, id := range res.Noted {
+		fmt.Fprintf(&b, "\nnoted task %d", id)
 	}
 	for _, t := range res.Started {
 		fmt.Fprintf(&b, "\n%s: work job %d queued", label(t), t.JobID)

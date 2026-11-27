@@ -284,8 +284,10 @@ func TestAmendCycleRefusesWhole(t *testing.T) {
 }
 
 // TestAmendJudgesAddedTasks: an amendment of an active plan is judged by
-// what it adds. Growing the plan past approval_max_tasks no longer holds
-// the whole plan: it stays active and the added tasks run as usual.
+// what it adds — and now against the task-count envelope too: growing the
+// plan past approval_max_tasks holds the tasks it adds at the plan gate
+// with the max_tasks reason naming the post-amendment total, the plan
+// staying active while its earlier work runs on.
 func TestAmendJudgesAddedTasks(t *testing.T) {
 	e := newEnv(t)
 	e.setSettings(`{"approval_max_tasks": 3}`)
@@ -299,8 +301,13 @@ func TestAmendJudgesAddedTasks(t *testing.T) {
 		{Name: "c", Spec: "c", Class: "answer"},
 		{Name: "d", Spec: "d", Class: "answer", Deps: []string{"a"}},
 	}})
-	if am.State != "active" || len(am.Held) != 0 || len(am.Reasons) != 0 {
-		t.Fatalf("amendment = %+v, want active with nothing held and no reasons", am)
+	if am.State != "active" || len(am.Held) != 2 || len(am.Reasons) != 0 {
+		t.Fatalf("amendment = %+v, want active with the two added tasks held and no reasons", am)
+	}
+	for _, h := range am.Held {
+		if !strings.Contains(h.Reason, "4 tasks, over the limit of 3") {
+			t.Errorf("held = %+v, want the max_tasks reason naming the post-amendment total", h)
+		}
 	}
 	if got := e.str("SELECT state FROM plans WHERE id = ?", res.PlanID); got != "active" {
 		t.Errorf("plan state = %q, want active", got)
@@ -308,12 +315,66 @@ func TestAmendJudgesAddedTasks(t *testing.T) {
 	if got := e.int("SELECT COUNT(*) FROM events WHERE kind = 'plan_awaiting_approval'"); got != 0 {
 		t.Errorf("plan_awaiting_approval events = %d, want none", got)
 	}
-	// c waits for nothing and starts at once; d waits on a.
-	if got := e.taskState(am.Added[0].TaskID); got != taskReady || am.Added[0].JobID == 0 {
-		t.Errorf("c = %q job %d, want ready with a job", got, am.Added[0].JobID)
+	// The added tasks hold at the plan gate: neither runs, d's dependency
+	// notwithstanding.
+	for _, a := range am.Added {
+		if got := e.taskState(a.TaskID); got != taskNeedsForeman || a.JobID != 0 {
+			t.Errorf("added task %d = %q job %d, want needs_foreman with no job", a.TaskID, got, a.JobID)
+		}
 	}
-	if got := e.taskState(am.Added[1].TaskID); got != taskPending || am.Added[1].JobID != 0 {
-		t.Errorf("d = %q job %d, want pending with no job", got, am.Added[1].JobID)
+	// The plan's earlier work is untouched: a and b are still ready.
+	for _, task := range res.Tasks {
+		if got := e.taskState(task.TaskID); got != taskReady {
+			t.Errorf("existing task %d = %q, want ready", task.TaskID, got)
+		}
+	}
+	// A plan grown under the limit is not held: the added tasks run.
+	e.setSettings(`{"approval_max_tasks": 5}`)
+	am2 := e.amend(res.PlanID, PlanAmendment{Add: []PlanTask{{Name: "e", Spec: "e", Class: "answer"}}})
+	if am2.State != "active" || len(am2.Held) != 0 {
+		t.Fatalf("amendment under the limit = %+v, want active with nothing held", am2)
+	}
+	if got := e.taskState(am2.Added[0].TaskID); got != taskReady || am2.Added[0].JobID == 0 {
+		t.Errorf("e = %q job %d, want ready with a job", got, am2.Added[0].JobID)
+	}
+}
+
+// TestAmendMaxTasksHoldReleasesAndStopsAsking (§6.3): a task an amendment
+// held for growing the plan past approval_max_tasks releases through
+// brigada plan approve, and --and-stop-asking raises approval_max_tasks
+// to the post-amendment total so the same shape no longer asks.
+func TestAmendMaxTasksHoldReleasesAndStopsAsking(t *testing.T) {
+	e := newEnv(t)
+	e.setSettings(`{"approval_max_tasks": 2}`)
+	res := e.createPlan([]PlanTask{{Name: "a", Spec: "a", Class: "answer"}})
+	e.assertRuns(res, 1)
+
+	am := e.amend(res.PlanID, PlanAmendment{Add: []PlanTask{
+		{Name: "b", Spec: "b", Class: "answer"},
+		{Name: "c", Spec: "c", Class: "answer"},
+	}})
+	if am.State != "active" || len(am.Held) != 2 {
+		t.Fatalf("amendment = %+v, want active with the two added tasks held", am)
+	}
+
+	dec, err := e.eng.ApprovePlanVersion(e.ctx, e.project, res.PlanID, 0, true)
+	if err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+	if len(dec.Settings) != 1 || dec.Settings[0] != "approval_max_tasks=3" {
+		t.Fatalf("settings = %v, want approval_max_tasks raised to the post-amendment total", dec.Settings)
+	}
+	if got := e.str("SELECT settings FROM projects WHERE id = ?", e.project); !strings.Contains(got, `"approval_max_tasks":3`) {
+		t.Errorf("settings = %s, want approval_max_tasks 3", got)
+	}
+	// The held tasks release into the ready wave.
+	for _, h := range am.Held {
+		if got := e.taskState(h.TaskID); got != taskReady {
+			t.Errorf("released task %d = %q, want ready", h.TaskID, got)
+		}
+	}
+	if got := e.int("SELECT COUNT(*) FROM jobs WHERE kind = 'work' AND status = 'queued'"); got != 3 {
+		t.Errorf("queued work jobs = %d, want 3 after the release", got)
 	}
 }
 

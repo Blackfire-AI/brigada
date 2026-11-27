@@ -22,7 +22,11 @@ const (
 // page. Every filter is optional; ProjectID and TaskID narrow to one
 // project or task, JobID to one job's whole story, Since is the cursor
 // the previous page ended on, and Limit bounds the page (kept between
-// 1 and 500, default 100). Last asks for the newest page instead of the
+// 1 and 500, default 100). PlanID narrows to one plan's timeline: the
+// plan's own events (plan_created, plan_amended, plan_reviewed,
+// plan_done and the like, which carry the plan in their payload) plus
+// the events of its tasks and jobs, and the messages those events
+// produced; it composes with the task and job filters. Last asks for the newest page instead of the
 // next one: the filters and Limit still apply, Since must be empty, and
 // the page has no next cursor — to read further back, narrow with the
 // task or job filter, or raise the limit.
@@ -30,6 +34,7 @@ type HistoryQuery struct {
 	ProjectID int64
 	TaskID    int64
 	JobID     int64
+	PlanID    int64
 	Since     string
 	Limit     int
 	Last      bool
@@ -110,6 +115,11 @@ func historyEventsTx(tx *sql.Tx, q HistoryQuery, cursor history.CursorKey) ([]hi
 		where = append(where, "job_id = ?")
 		args = append(args, q.JobID)
 	}
+	if q.PlanID != 0 {
+		clause, planArgs := planEventClause("")
+		where = append(where, clause)
+		args = append(args, planArgs(q.PlanID)...)
+	}
 	if cursor.Type != "" {
 		if cursor.Type == history.TypeEvent {
 			where = append(where, "(created_at > ? OR (created_at = ? AND id > ?))")
@@ -144,6 +154,19 @@ func historyEventsTx(tx *sql.Tx, q HistoryQuery, cursor history.CursorKey) ([]hi
 	return out, rows.Err()
 }
 
+// planEventClause is the SQL condition that selects one plan's events
+// (§9), with the column prefix of the events table in the query, and the
+// function that gives its arguments for a plan id. The events table has
+// no plan column: a plan-level event carries the plan in its payload, so
+// that is read with json_extract, and every other event reaches its plan
+// through its task or its job.
+func planEventClause(prefix string) (string, func(plan int64) []any) {
+	clause := "(json_extract(" + prefix + "payload, '$.plan') = ?" +
+		" OR " + prefix + "task_id IN (SELECT id FROM tasks WHERE plan_id = ?)" +
+		" OR " + prefix + "job_id IN (SELECT j.id FROM jobs j JOIN tasks t ON t.id = j.task_id WHERE t.plan_id = ?))"
+	return clause, func(plan int64) []any { return []any{plan, plan, plan} }
+}
+
 // historyMessagesTx reads the page's messages, oldest first — newest
 // first in Last mode, like the events. A task or
 // job filter reaches a message through the event that produced it —
@@ -165,6 +188,11 @@ func historyMessagesTx(tx *sql.Tx, q HistoryQuery, cursor history.CursorKey) ([]
 	if q.JobID != 0 {
 		where = append(where, "EXISTS (SELECT 1 FROM events e WHERE e.id = m.event_id AND e.job_id = ?)")
 		args = append(args, q.JobID)
+	}
+	if q.PlanID != 0 {
+		clause, planArgs := planEventClause("e.")
+		where = append(where, "EXISTS (SELECT 1 FROM events e WHERE e.id = m.event_id AND "+clause+")")
+		args = append(args, planArgs(q.PlanID)...)
 	}
 	if cursor.Type != "" {
 		if cursor.Type == history.TypeMessage {

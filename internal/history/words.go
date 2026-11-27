@@ -16,6 +16,7 @@ type wordsPayload struct {
 	FromHarness string `json:"from_harness"`
 	FromModel   string `json:"from_model"`
 	Account     string `json:"account"`
+	QuotaScope  string `json:"quota_scope"`
 	Until       string `json:"until"`
 }
 
@@ -79,7 +80,7 @@ func EventWords(it Item, clock func(stamp string) string) (string, bool) {
 	case "agent_recovered":
 		return agent + " recovered", true
 	case "agent_cooling":
-		words := p.Account + " cooling"
+		words := coolingName(p) + " cooling"
 		if p.Until != "" {
 			words += " until " + clock(p.Until)
 		}
@@ -159,7 +160,7 @@ func EventColumns(it Item, clock func(stamp string) string) (EventCols, bool) {
 	case "agent_recovered":
 		return EventCols{Kind: "agent", What: "recovered", Subject: p.Harness + "/" + p.Model}, true
 	case "agent_cooling":
-		subject := p.Account
+		subject := coolingName(p)
 		if p.Until != "" {
 			subject += " until " + clock(p.Until)
 		}
@@ -171,4 +172,13 @@ func EventColumns(it Item, clock func(stamp string) string) (EventCols, bool) {
 			Subject: p.FromHarness + "/" + p.FromModel + " to " + p.Harness + "/" + p.Model}, true
 	}
 	return EventCols{}, false
+}
+
+// coolingName is what an agent_cooling names: the quota scope when the
+// event recorded one, the account for events recorded before scopes.
+func coolingName(p wordsPayload) string {
+	if p.QuotaScope != "" {
+		return p.QuotaScope
+	}
+	return p.Account
 }

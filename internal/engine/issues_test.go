@@ -39,14 +39,14 @@ func TestReadIssueFetchesOwnRepository(t *testing.T) {
 }
 
 // TestReadIssueRefusals covers the reasons the engine answers instead
-// of an issue (§12.2): a repository not on GitHub — the default fetch
-// refuses it before any gh runs — a project that does not exist, and a
+// of an issue (§12.2): a repository not on GitHub with no tracker set —
+// the default fetch refuses it before any gh runs — a project that does not exist, and a
 // number that is not positive.
 func TestReadIssueRefusals(t *testing.T) {
 	e := newEnv(t)
 	_, err := e.eng.ReadIssue(e.ctx, e.project, 5, false)
-	if !errors.Is(err, ErrIssueRead) || !strings.Contains(err.Error(), "not on GitHub") {
-		t.Errorf("ReadIssue of a project off GitHub = %v, want ErrIssueRead saying the repository is not on GitHub", err)
+	if !errors.Is(err, ErrIssueRead) || !strings.Contains(err.Error(), "not on GitHub and the project sets no tracker") {
+		t.Errorf("ReadIssue of a project off GitHub = %v, want ErrIssueRead saying the repository is not on GitHub and no tracker is set", err)
 	}
 	_, err = e.eng.ReadIssue(e.ctx, e.project+100, 5, false)
 	if !errors.Is(err, ErrIssueRead) || !strings.Contains(err.Error(), "no such project") {

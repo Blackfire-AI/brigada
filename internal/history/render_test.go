@@ -93,6 +93,8 @@ func TestRenderCancelReason(t *testing.T) {
 		{"task_cancelled_by_amend", `{"status":"cancelled","plan":3,"reason":"superseded by task 274","caller":"foreman"}`, "status=cancelled reason=superseded by task 274"},
 		{"task_cancelled_by_amend", `{"status":"cancelled","plan":3,"reason":"no reason given","caller":"user"}`, "status=cancelled reason=no reason given"},
 		{"task_retired", `{"status":"retired","reason":"superseded by task 274","caller":"foreman"}`, "status=retired reason=superseded by task 274"},
+		{"task_note_set", `{"note":"use the v2 client","caller":"user"}`, "note=use the v2 client"},
+		{"task_note_set", `{"caller":"user"}`, "note=(cleared)"},
 	} {
 		it := Item{Type: TypeEvent, Kind: tc.kind, Payload: []byte(tc.payload)}
 		if got := summary(it); got != tc.want {
@@ -125,6 +127,15 @@ func TestRenderLanding(t *testing.T) {
 	pushed := Item{Type: TypeEvent, Kind: "task_pushed", Payload: []byte(`{"status":"done","branch":"main","commit":"9f21ab3","pushed":"pushed"}`)}
 	if got := summary(pushed); got != "branch=main status=done commit=9f21ab3 pushed=pushed" {
 		t.Errorf("task_pushed summary = %q", got)
+	}
+}
+
+// TestRenderLeasedToolGrants: a lease event names the task's tool grants (§6.1).
+func TestRenderLeasedToolGrants(t *testing.T) {
+	it := Item{Type: TypeEvent, Kind: "job_leased", Payload: []byte(`{"lease":"abc","tool_grants":["Bash(git merge:*)","Bash(git add:*)"]}`)}
+	want := "lease=abc tool_grants=Bash(git merge:*),Bash(git add:*)"
+	if got := summary(it); got != want {
+		t.Errorf("summary = %q, want %q", got, want)
 	}
 }
 

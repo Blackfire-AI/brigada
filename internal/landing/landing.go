@@ -210,6 +210,53 @@ func LandedCommits(ctx context.Context, dir, ref string) (map[int64][]Candidate,
 	return landed, nil
 }
 
+// SyncCandidate is one commit carrying a sync merge's Brigada-Sync
+// trailer (§7.1): its full sha, and the default branch and head the
+// trailer names in its `default@head` form, split at the last '@' as
+// LandedBranchHead does. Default and Head are "" when the commit carries
+// no such trailer or the trailer names no head.
+type SyncCandidate struct {
+	SHA     string
+	Default string
+	Head    string
+}
+
+// SyncCommits lists the commits in ref's history that carry a
+// Brigada-Sync trailer, newest first (§7.1): how the engine recognizes a
+// sync merge the user pushed to the target by hand under gate_push never.
+// Each candidate carries its commit's default branch and head, split at
+// the last '@'. A ref with no history lists nothing.
+func SyncCommits(ctx context.Context, dir, ref string) ([]SyncCandidate, error) {
+	out, err := text(ctx, dir, "log",
+		"--format=%H%x00%(trailers:key=Brigada-Sync,valueonly)%x01",
+		"-E", "--grep=^Brigada-Sync: ", ref)
+	if err != nil {
+		// An unborn branch has no history to carry a trailer.
+		if !succeeds(ctx, dir, "rev-parse", "--verify", "--quiet", ref) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var syncs []SyncCandidate
+	for _, rec := range strings.Split(out, "\x01") {
+		sha, val, ok := strings.Cut(rec, "\x00")
+		if !ok {
+			continue
+		}
+		val = strings.TrimSpace(val)
+		at := strings.LastIndexByte(val, '@')
+		if at <= 0 || at+1 == len(val) {
+			continue
+		}
+		syncs = append(syncs, SyncCandidate{
+			SHA:     strings.TrimSpace(sha),
+			Default: val[:at],
+			Head:    val[at+1:],
+		})
+	}
+	return syncs, nil
+}
+
 // apply3way applies a patch three-way to the index and the tree.
 func apply3way(ctx context.Context, dir string, patch []byte) error {
 	cmd := exec.CommandContext(ctx, "git", "-C", dir, "apply", "--3way", "--index", "-")

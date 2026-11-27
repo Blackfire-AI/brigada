@@ -278,6 +278,66 @@ func TestTaskRestartEndpoint(t *testing.T) {
 	}
 }
 
+// TestTaskRestartEndpointStopRunning covers stop_running on
+// /v1/tasks/{id}/restart (§5.6): a task whose job a runner holds answers
+// pending, naming the stopping job, with the restart kept on the task; a
+// second restart is refused while it is pending; a task whose live job
+// no runner holds is restarted at once, the job replaced.
+func TestTaskRestartEndpointStopRunning(t *testing.T) {
+	e := newEnv(t)
+	running := seedParked(t, e, e.plan, "task_needs_help", `{"question":"x"}`)
+	e.exec(`UPDATE tasks SET state = 'running' WHERE id = ?`, running)
+	e.exec(`INSERT INTO jobs (project_id, task_id, kind, key, mode, prompt, status, lease_id, created_at, updated_at)
+		VALUES ((SELECT project_id FROM plans WHERE id = ?), ?, 'work', ?, 'fresh', 'prompt', 'running', 'lease-1', ?, ?)`,
+		e.plan, running, fmt.Sprintf("task:%d", running), seedTS, seedTS)
+	live := e.str("SELECT id FROM jobs WHERE task_id = ?", running)
+
+	code, _, data := e.do(http.MethodPost, fmt.Sprintf("/v1/tasks/%d/restart", running), "foreman1", "stop-1",
+		[]byte(`{"note":"carry on","stop_running":true}`))
+	if code != http.StatusOK {
+		t.Fatalf("stop-running restart: %d %s, want 200", code, data)
+	}
+	res := decode[struct {
+		Answer string `json:"answer"`
+		JobID  int64  `json:"job_id"`
+	}](t, data)
+	if res.Answer != "pending" || fmt.Sprint(res.JobID) != live {
+		t.Errorf("stop-running restart = %+v, want pending on job %s", res, live)
+	}
+	if got := e.str("SELECT stop_pending FROM tasks WHERE id = ?", running); got != "carry on" {
+		t.Errorf("tasks.stop_pending = %q, want the note", got)
+	}
+	if got := e.str("SELECT status FROM jobs WHERE id = ?", live); got != "running" {
+		t.Errorf("the running job's status = %q, want it left running", got)
+	}
+	if code, _, data = e.do(http.MethodPost, fmt.Sprintf("/v1/tasks/%d/restart", running), "foreman1", "stop-2",
+		[]byte(`{"stop_running":true}`)); code != http.StatusBadRequest || !strings.Contains(decode[errBody](t, data).Error, "pending") {
+		t.Errorf("second restart while pending: %d %s, want 400 naming the pending restart", code, data)
+	}
+
+	queued := seedParked(t, e, e.plan, "task_needs_help", `{"question":"x"}`)
+	e.exec(`UPDATE tasks SET state = 'ready' WHERE id = ?`, queued)
+	e.exec(`INSERT INTO jobs (project_id, task_id, kind, key, mode, prompt, status, created_at, updated_at)
+		VALUES ((SELECT project_id FROM plans WHERE id = ?), ?, 'work', ?, 'fresh', 'prompt', 'queued', ?, ?)`,
+		e.plan, queued, fmt.Sprintf("task:%d", queued), seedTS, seedTS)
+	old := e.str("SELECT id FROM jobs WHERE task_id = ?", queued)
+	code, _, data = e.do(http.MethodPost, fmt.Sprintf("/v1/tasks/%d/restart", queued), "foreman1", "",
+		[]byte(`{"stop_running":true}`))
+	if code != http.StatusOK || decode[struct {
+		Answer string `json:"answer"`
+	}](t, data).Answer != "created" {
+		t.Fatalf("stop-running restart of a queued job: %d %s, want 200 created", code, data)
+	}
+	if got := e.str("SELECT status FROM jobs WHERE id = ?", old); got != "cancelled" {
+		t.Errorf("the queued job's status = %q, want cancelled", got)
+	}
+
+	// Without stop_running the running task is refused, as before.
+	if code, _, _ = e.do(http.MethodPost, fmt.Sprintf("/v1/tasks/%d/restart", queued), "foreman1", "", []byte(`{}`)); code != http.StatusBadRequest {
+		t.Errorf("plain restart of a ready task: %d, want 400", code)
+	}
+}
+
 // TestTaskRetireEndpoint covers POST /v1/tasks/retire (§6.2, §12.1):
 // the foreman's task_retire and the user's `brigada task retire` both
 // land here — the caller recorded with each retirement is the role that

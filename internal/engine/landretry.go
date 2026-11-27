@@ -157,6 +157,13 @@ func landRetryEligibleTx(tx *sql.Tx, project, taskID int64) error {
 	} else if live != nil {
 		return refuse("task %d has a live %s job (job %d)", taskID, live.Kind, live.ID)
 	}
+	// A live batch reserving the member holds its key as a live job does
+	// (§12.3): its landing is not parked but under way in that batch.
+	if b, err := reservedBatchTx(tx, taskID); err != nil {
+		return err
+	} else if b != nil {
+		return refuse("task %d is reserved in a live land batch (job %d): its landing is not parked", taskID, b.ID)
+	}
 	var kind, payload string
 	kinds := "'" + strings.Join(parkingEventKinds, "', '") + "'"
 	err = tx.QueryRow(`SELECT kind, payload FROM events

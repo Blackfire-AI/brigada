@@ -13,7 +13,7 @@ import (
 )
 
 // Init writes the full defaults (§5.9, §5.10): the four role files and the
-// eight default skills, each under a marked header naming the brigada
+// nine default skills, each under a marked header naming the brigada
 // version and the digest of the generated text. The header is a comment
 // the importer ignores (headerRe): a role file holds it as its first line,
 // a SKILL.md right after its closing frontmatter line. A file is unedited

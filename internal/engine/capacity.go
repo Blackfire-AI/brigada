@@ -92,6 +92,9 @@ type CapacityAgent struct {
 	// --agent effort=, or "default" when none is set.
 	Effort  string `json:"effort"`
 	Account string `json:"account"`
+	// QuotaScope is the pool whose limit cools the agent; empty when it
+	// shares its quota with its account only.
+	QuotaScope string `json:"quota_scope,omitempty"`
 	// Cap is the effective cap — the smallest of the runner, account
 	// and model caps on the agent's path — and CapLayer names the
 	// layer that sets it (the caps package's layer names, or "none").
@@ -176,6 +179,7 @@ type capacityAgent struct {
 	id, runner      int64
 	harness, model  string
 	account, health string
+	quotaScope      string
 	coolingUntil    string
 	tools           string
 	permission      string
@@ -215,14 +219,14 @@ func capacityTx(tx *sql.Tx, cfg Config, projectID int64, now time.Time) (Capacit
 	rows.Close()
 
 	agents := []capacityAgent{}
-	rows, err = tx.Query(`SELECT id, runner_id, harness, model, account, health, COALESCE(cooling_until, ''), tools, permission, effort
+	rows, err = tx.Query(`SELECT id, runner_id, harness, model, account, quota_scope, health, COALESCE(cooling_until, ''), tools, permission, effort
 		FROM agents ORDER BY id`)
 	if err != nil {
 		return CapacitySnapshot{}, fmt.Errorf("list agents: %w", err)
 	}
 	for rows.Next() {
 		var a capacityAgent
-		if err := rows.Scan(&a.id, &a.runner, &a.harness, &a.model, &a.account, &a.health, &a.coolingUntil, &a.tools, &a.permission, &a.effort); err != nil {
+		if err := rows.Scan(&a.id, &a.runner, &a.harness, &a.model, &a.account, &a.quotaScope, &a.health, &a.coolingUntil, &a.tools, &a.permission, &a.effort); err != nil {
 			rows.Close()
 			return CapacitySnapshot{}, fmt.Errorf("list agents: %w", err)
 		}
@@ -341,6 +345,7 @@ func capacityTx(tx *sql.Tx, cfg Config, projectID int64, now time.Time) (Capacit
 			Model:        a.model,
 			Tier:         cfg.Caps.TierOf(a.harness, a.model),
 			Account:      a.account,
+			QuotaScope:   a.quotaScope,
 			Cap:          cap,
 			CapLayer:     layer,
 			Running:      running[a.id],

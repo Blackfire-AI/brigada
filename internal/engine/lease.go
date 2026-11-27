@@ -35,6 +35,11 @@ type LeaseGrant struct {
 	LeaseID    string
 	// LeaseExpiresAt is when the lease lapses without a heartbeat.
 	LeaseExpiresAt time.Time
+	// TimeCap is the job kind's effective wall-time cap (§5.6): the
+	// runner's cap for the kind, zero when the kind has none. The
+	// runner's stall policy takes it when set, its own class cap
+	// otherwise.
+	TimeCap time.Duration
 	// ForemanToken is the lease-scoped foreman token (§12.1, §12.2),
 	// minted with the lease of a foreman turn and empty for every task
 	// job. It is the secret's only appearance: it reaches the runner in
@@ -79,6 +84,11 @@ type LeaseGrant struct {
 	// resumes judged: the runner's diff file holds the commits since it.
 	// Empty for every other job.
 	ReviewSince string
+	// SeedBranch is, for a restart's work job that a stop-running
+	// restart seeded (§5.6), the stopped run's pushed branch: the
+	// worktree starts at its head instead of BaseRef's, while BaseRef
+	// stays the task's base. Empty for every other job.
+	SeedBranch string
 	// LandTarget is, for a land job (§7.1), the branch the task's diff is
 	// squashed onto: land_target, or the project's default branch. Empty
 	// for every other kind.
@@ -125,6 +135,14 @@ type LeaseGrant struct {
 	// refs/brigada/land/<target> before it stacks. False for the push
 	// phase and every other kind.
 	DropWaitingRef bool
+	// LandBatch is true for a batch land job's squash phase (§7.1, §12.3):
+	// LandMembers then names every member the batch owns, in batch order,
+	// and the runner lands them as one stack with one push. The grant's
+	// one-task fields describe the lead. False on every other grant.
+	LandBatch bool
+	// LandMembers is a batch grant's ordered member list (§12.3). Empty
+	// for every other grant.
+	LandMembers []LandMember
 	// SweepTaskIDs is, for a sweep job (§13.2), the exact set of task ids
 	// whose branch families the runner may delete. Empty for every other kind.
 	SweepTaskIDs []int64
@@ -407,6 +425,41 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 				continue
 			}
 		}
+		// The land-target sync (§7.1): a sync leases only once no landing
+		// of the project is in flight; a landing or a task leasing the
+		// target as a base queues behind the one pending sync (the mirror
+		// rule), and the hold keeps the queue TTL from timing out the
+		// leases waiting on it.
+		if j.Kind == KindSync {
+			leasable, err := syncLeasableTx(tx, j.ProjectID)
+			if err != nil {
+				return nil, err
+			}
+			if !leasable {
+				if err := holdForSyncTx(tx, j, now); err != nil {
+					return nil, err
+				}
+				continue
+			}
+		}
+		if j.Kind == KindLand {
+			held, err := e.landLeaseHeldTx(tx, j, now)
+			if err != nil {
+				return nil, err
+			}
+			if held {
+				continue
+			}
+		}
+		if j.Kind == KindWork || j.Kind == KindFix {
+			held, err := e.baseLeaseHeldTx(tx, j, now)
+			if err != nil {
+				return nil, err
+			}
+			if held {
+				continue
+			}
+		}
 		// The harness the job is placed on: a foreman turn's is resolved
 		// from its pair (a turn submitted without a harness runs on the
 		// project's), and a turn with no whole pair is held — no poll takes
@@ -444,13 +497,14 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 		}
 
 		var cands []agentCand
-		if j.Kind == KindLand || j.Kind == KindSweep {
-			// Land and sweep jobs have no worker and no agent: the label
-			// check above is the whole placement, and the runner records
-			// no agent.
+		var removed []Removed
+		if j.Kind == KindLand || j.Kind == KindSweep || j.Kind == KindSync {
+			// Land, sweep and sync jobs have no worker and no agent: the
+			// label check above is the whole placement, and the runner
+			// records no agent.
 			cands = []agentCand{{}}
 		} else {
-			cands, err = leaseAgentsTx(tx, &e.cfg, e.cfg.Rand, owner, j, nowStr)
+			cands, removed, err = leaseAgentsTx(tx, &e.cfg, e.cfg.Rand, owner, j, nowStr)
 			if err != nil {
 				return nil, err
 			}
@@ -630,6 +684,10 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 		if err != nil {
 			return nil, fmt.Errorf("lease job %d: %w", j.ID, err)
 		}
+		// A work or fix job's lease delivers the task's pending note (§6.2).
+		if err := clearDeliveredNoteTx(tx, j, j.FirstLeased == ""); err != nil {
+			return nil, err
+		}
 		usage.Add(cjob.Runner, cjob.Account, cjob.Model, cjob.Plan)
 		if usesKeySession(j) {
 			// The session now sits on this runner: later session jobs on
@@ -673,6 +731,13 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 			}
 		}
 		leased := eventPayload{Lease: leasePrefix(leaseID), Owner: owner, Attempt: j.Attempts + 1}
+		if j.TaskID != 0 {
+			var grants string
+			if err := tx.QueryRow("SELECT tool_grants FROM tasks WHERE id = ?", j.TaskID).Scan(&grants); err != nil {
+				return nil, fmt.Errorf("read the tool grants of task %d: %w", j.TaskID, err)
+			}
+			leased.ToolGrants = parseTaskToolGrants(grants)
+		}
 		if j.PromptMeta != "" {
 			var meta promptMeta
 			if err := json.Unmarshal([]byte(j.PromptMeta), &meta); err == nil {
@@ -694,11 +759,17 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 		}
 		// Why this agent (§8): plain log, no inbox row and no wake. The
 		// agents ranked above the pick were passed over for cap room and
-		// are named, and every candidate's weight and draw is recorded.
+		// are named, every candidate's weight and draw is recorded, and
+		// the agents the placement dropped are listed with the reason.
 		if agent != 0 && j.Kind != KindForeman {
 			weight := chosen.weight
 			payload := eventPayload{Agent: agent, Score: chosen.score, Pick: pickPinned, Weight: &weight,
-				TierAsked: chosen.tierAsked, TierServed: chosen.tierServed}
+				TierAsked: chosen.tierAsked, TierServed: chosen.tierServed,
+				Pin: j.RequireAgent, Session: j.Mode == ModeSession,
+				ExcludeAgents: j.ExcludeAgents, Removed: removed}
+			if j.Kind == KindReview || j.Kind == KindPlanReview {
+				payload.FamilyPolicy = e.cfg.Review.Family
+			}
 			if j.Kind == KindReview && j.Mode == ModeSession {
 				payload.Pick = pickResumed // a re-review's agent is the previous review's (§7)
 			}
@@ -713,6 +784,13 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 				}
 			}
 			payload.Placement = placement
+			// The family-preference fallback (§7): under prefer a review
+			// that landed on a same-family reviewer or the author's own
+			// agent fell back from the preferred cross-family group.
+			if (j.Kind == KindReview || j.Kind == KindPlanReview) && familyPrefer(e.cfg.Review.Family) &&
+				(placement == placeSameFamily || placement == placeSameAgent) {
+				payload.Fallback = placement
+			}
 			if _, err := appendEventTx(tx, evJobAgentPicked, j.ProjectID, j.TaskID, j.ID, payload, now); err != nil {
 				return nil, err
 			}
@@ -732,6 +810,9 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 		}
 		if j.Kind == KindSweep {
 			return e.sweepLeaseGrantTx(tx, j, owner, leaseID, expires)
+		}
+		if j.Kind == KindSync {
+			return e.syncLeaseGrantTx(tx, j, owner, leaseID, expires)
 		}
 		repo, baseRef, checkCmd, branch, err := taskInfoTx(tx, j)
 		if err != nil {
@@ -859,6 +940,7 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 			LeaseID:        leaseID,
 			LeaseExpiresAt: expires,
 			ForemanToken:   foremanToken,
+			TimeCap:        e.cfg.ClassCaps[j.Kind],
 
 			Effort:          effort,
 			ForemanEffort:   foremanEffort,
@@ -875,6 +957,7 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 			ExtraRepos:      extraRepos,
 			ReviewBranch:    reviewBranch,
 			ReviewSince:     reviewSince,
+			SeedBranch:      j.SeedBranch,
 			Branch:          jobBranch,
 			Attempt:         j.Attempts + 1,
 			ResumeSessionID: resume,
@@ -1028,7 +1111,7 @@ func ranksBefore(a, b *agentCand) bool {
 // outright: that agent or none, never ranked against another. Empty
 // when the runner advertises no such agent — the caller then refuses
 // the lease, unless the runner advertises nothing at all.
-func leaseAgentsTx(tx *sql.Tx, cfg *Config, rnd func() float64, runner int64, j *jobRow, now string) ([]agentCand, error) {
+func leaseAgentsTx(tx *sql.Tx, cfg *Config, rnd func() float64, runner int64, j *jobRow, now string) ([]agentCand, []Removed, error) {
 	return eligibleAgentsTx(tx, cfg, rnd, runner, j, kindClass(j.Kind), now)
 }
 
@@ -1040,7 +1123,7 @@ func leaseAgentsTx(tx *sql.Tx, cfg *Config, rnd func() float64, runner int64, j 
 // the capability floor (issue #126, #263). An agent capped at exactly 0 for
 // the job's kind is never returned (issue #195), so an automatic retry
 // never pins one.
-func eligibleAgentsTx(tx *sql.Tx, cfg *Config, rnd func() float64, runner int64, j *jobRow, class, now string) ([]agentCand, error) {
+func eligibleAgentsTx(tx *sql.Tx, cfg *Config, rnd func() float64, runner int64, j *jobRow, class, now string) ([]agentCand, []Removed, error) {
 	return qualifyingAgentsTx(tx, cfg, rnd, runner, j, class, now, false)
 }
 
@@ -1075,11 +1158,11 @@ func eligibleAgentsTx(tx *sql.Tx, cfg *Config, rnd func() float64, runner int64,
 // the preference it is (§7): the lift is decided inside
 // qualifyingAgentRowsTx, so the tier choice, the candidates and the hold
 // all read the same exclusion.
-func qualifyingAgentsTx(tx *sql.Tx, cfg *Config, rnd func() float64, runner int64, j *jobRow, class, now string, unavailable bool) ([]agentCand, error) {
+func qualifyingAgentsTx(tx *sql.Tx, cfg *Config, rnd func() float64, runner int64, j *jobRow, class, now string, unavailable bool) ([]agentCand, []Removed, error) {
 	limits := cfg.Caps
 	foreman, err := foremanAccountSetTx(tx, limits, j.ProjectID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	// The tier the job asks for (§8): the task's effective tier for a work
 	// or fix job, the review tier for a review (jobTierTx); a plan review
@@ -1088,25 +1171,27 @@ func qualifyingAgentsTx(tx *sql.Tx, cfg *Config, rnd func() float64, runner int6
 	asked := ""
 	if j.TaskID != 0 && j.Kind != KindForeman {
 		if asked, err = jobTierTx(tx, cfg.Review, j); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	} else if j.Kind == KindPlanReview {
 		if asked, err = planReviewTierTx(tx, cfg, j); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
-	rows, err := qualifyingAgentRowsTx(tx, cfg.Review.Family, 0, j, class, now)
+	rows, removed, err := qualifyingAgentRowsTx(tx, cfg.Review.Family, 0, j, class, now)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	rows = dropZeroCapped(limits, foreman, j.Kind, rows)
+	var dropped []Removed
+	rows, dropped = dropZeroCapped(limits, foreman, j.Kind, rows)
+	removed = append(removed, dropped...)
 
 	prefer := familyPrefer(cfg.Review.Family) && (j.Kind == KindReview || j.Kind == KindPlanReview)
 	var author int64
 	var authorFamily string
 	if prefer {
 		if author, authorFamily, err = reviewAuthorKnownFamilyTx(tx, j); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 	// The capability floor, then the declared preference, pick the served
@@ -1121,15 +1206,21 @@ func qualifyingAgentsTx(tx *sql.Tx, cfg *Config, rnd func() float64, runner int6
 	}
 	var cands []agentCand
 	for _, c := range rows {
-		if runner != 0 && c.runner != runner {
-			continue
-		}
 		tier := limits.TierOf(c.harness, c.model)
 		if served != "" && tier != served {
+			removed = append(removed, Removed{Agent: c.id, Reason: "tier " + tier + " (served " + served + ")"})
 			continue
 		}
 		if !unavailable && (c.health != "ready" || c.cooling > now) {
+			reason := "broken"
+			if c.health == "ready" {
+				reason = "cooling until " + c.cooling
+			}
+			removed = append(removed, Removed{Agent: c.id, Reason: reason})
 			continue
+		}
+		if runner != 0 && c.runner != runner {
+			continue // another runner's agent: not offered here, not removed
 		}
 		if asked != "" {
 			c.tierAsked, c.tierServed = asked, tier
@@ -1157,7 +1248,7 @@ func qualifyingAgentsTx(tx *sql.Tx, cfg *Config, rnd func() float64, runner int6
 	} else {
 		rankAgents(cands, rnd)
 	}
-	return cands, nil
+	return cands, removed, nil
 }
 
 // tierServedRows picks the served tier over a given set of qualifying
@@ -1248,15 +1339,19 @@ func zeroCapLayer(limits caps.Limits, foreman map[string]bool, kind Kind, accoun
 }
 
 // dropZeroCapped removes the agents zeroCapLayer shuts out of a job of
-// the given kind, keeping the rest in order.
-func dropZeroCapped(limits caps.Limits, foreman map[string]bool, kind Kind, rows []agentCand) []agentCand {
+// the given kind, keeping the rest in order, and reports each removal and
+// the layer that caused it.
+func dropZeroCapped(limits caps.Limits, foreman map[string]bool, kind Kind, rows []agentCand) ([]agentCand, []Removed) {
 	kept := rows[:0:0]
+	var removed []Removed
 	for _, c := range rows {
-		if zeroCapLayer(limits, foreman, kind, c.account, c.model) == "" {
-			kept = append(kept, c)
+		if layer := zeroCapLayer(limits, foreman, kind, c.account, c.model); layer != "" {
+			removed = append(removed, Removed{Agent: c.id, Reason: "capped at 0 at the " + layer + " layer"})
+			continue
 		}
+		kept = append(kept, c)
 	}
-	return kept
+	return kept, removed
 }
 
 // tierServed prefers the asked tier, then climbs to the next tier up. The
@@ -1287,10 +1382,10 @@ func tierServed(asked string, hasReady map[string]bool) string {
 // the lease's candidates, the tier choice and the structural reviewer
 // checks all read the same set. Structural reviewer checks also use
 // this: broken or cooling reviewers still exist.
-func qualifyingAgentRowsTx(tx *sql.Tx, reviewFamily string, runner int64, j *jobRow, class, now string) ([]agentCand, error) {
+func qualifyingAgentRowsTx(tx *sql.Tx, reviewFamily string, runner int64, j *jobRow, class, now string) ([]agentCand, []Removed, error) {
 	author, err := reviewAuthorTx(tx, j)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	// A foreman turn runs on the harness AND model its project chose: only
 	// an agent offering exactly that pair qualifies, and a turn whose pair
@@ -1299,10 +1394,10 @@ func qualifyingAgentRowsTx(tx *sql.Tx, reviewFamily string, runner int64, j *job
 	if j.Kind == KindForeman {
 		pair, err := foremanPairTx(tx, j)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if !pair.ok() {
-			return nil, nil
+			return nil, nil, nil
 		}
 		harness, model = pair.harness, pair.model
 	}
@@ -1330,23 +1425,24 @@ func qualifyingAgentRowsTx(tx *sql.Tx, reviewFamily string, runner int64, j *job
 	}
 	rows, err := tx.Query(query+" ORDER BY a.id", args...)
 	if err != nil {
-		return nil, fmt.Errorf("pick the agent of runner %d: %w", runner, err)
+		return nil, nil, fmt.Errorf("pick the agent of runner %d: %w", runner, err)
 	}
 	defer rows.Close()
 	authorFamily := ""
 	if familyPrefer(reviewFamily) && (j.ExcludeFamily != "" || j.Kind == KindReview || j.Kind == KindPlanReview) {
 		if _, authorFamily, err = reviewAuthorKnownFamilyTx(tx, j); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 	var cands []agentCand
+	var removed []Removed
 	for rows.Next() {
 		var id int64
 		var attempts, successes int
 		var family, harness, classes, model, health, cooling, adapterName, account, classCooling string
 		var runnerID int64
 		if err := rows.Scan(&id, &family, &harness, &classes, &model, &health, &cooling, &attempts, &successes, &adapterName, &account, &runnerID, &classCooling); err != nil {
-			return nil, fmt.Errorf("pick the agent of runner %d: %w", runner, err)
+			return nil, nil, fmt.Errorf("pick the agent of runner %d: %w", runner, err)
 		}
 		// The class-scoped reliability cooldown (§8) reads as cooling:
 		// the agent cannot take this class until the later of its
@@ -1360,9 +1456,11 @@ func qualifyingAgentRowsTx(tx *sql.Tx, reviewFamily string, runner int64, j *job
 		// the retry was queued; do not reject that pin for lacking implement.
 		pinnedRetry := j.Kind == KindWork && j.Restart && j.RequireAgent != 0
 		if class != "" && j.Kind != KindForeman && !pinnedRetry && !agentOffersClass(classes, class) {
+			removed = append(removed, Removed{Agent: id, Reason: "class " + class + " not offered"})
 			continue
 		}
 		if slices.Contains(j.ExcludeAgents, id) {
+			removed = append(removed, Removed{Agent: id, Reason: "excluded: failed the attempt"})
 			continue
 		}
 		if j.ExcludeFamily != "" || j.Kind == KindReview || j.Kind == KindPlanReview {
@@ -1373,9 +1471,15 @@ func qualifyingAgentRowsTx(tx *sql.Tx, reviewFamily string, runner int64, j *job
 				// placement.
 			case familyPrefer(reviewFamily):
 				if !reviewAgentQualifiesPrefer(id, family, classes, authorFamily, author) {
+					removed = append(removed, Removed{Agent: id, Reason: "author"})
 					continue
 				}
 			case !reviewAgentQualifies(id, family, classes, j.ExcludeFamily, j.ExcludeAgents, author):
+				reason := "family (review.family=require)"
+				if id == author {
+					reason = "author"
+				}
+				removed = append(removed, Removed{Agent: id, Reason: reason})
 				continue
 			}
 		}
@@ -1383,12 +1487,12 @@ func qualifyingAgentRowsTx(tx *sql.Tx, reviewFamily string, runner int64, j *job
 			family: family, runner: runnerID, account: account, attempts: attempts, success: successes, score: Score(attempts, successes)})
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("pick the agent of runner %d: %w", runner, err)
+		return nil, nil, fmt.Errorf("pick the agent of runner %d: %w", runner, err)
 	}
 	for i := range cands {
 		cands[i].rank = i
 	}
-	return cands, nil
+	return cands, removed, nil
 }
 
 // kindClass is the dispatch class for ordinary leases (§8): work and fix

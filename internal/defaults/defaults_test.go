@@ -12,7 +12,7 @@ import (
 
 func TestTexts(t *testing.T) {
 	roles := map[string]bool{"foreman.md": false, "plan_review.md": false, "worker.md": false, "reviewer.md": false}
-	skills := map[string]bool{"cli-flag": false, "config-setting": false, "bugfix": false, "surface-parity": false, "dependency": false, "schema-migration": false, "refactor": false, "docs-change": false}
+	skills := map[string]bool{"cli-flag": false, "config-setting": false, "bugfix": false, "surface-parity": false, "dependency": false, "schema-migration": false, "refactor": false, "docs-change": false, "early-verification": false}
 	err := fs.WalkDir(Texts, ".", func(name string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -72,8 +72,12 @@ func TestDigest(t *testing.T) {
 	}
 }
 
+// skillSince names the version that introduced a skill shipped after 1.0.0;
+// older directories never change, so they hold no such skill.
+var skillSince = map[string]string{"early-verification": "1.3.0"}
+
 // TestArchiveHoldsEveryVersionWhole: every shipped version's directory
-// carries exactly the twelve texts — four roles, eight skills — and
+// carries exactly the texts of its version — four roles and the skills it shipped — and
 // nothing else, so a version is retrievable whole by version and name.
 func TestArchiveHoldsEveryVersionWhole(t *testing.T) {
 	versions, err := Versions()
@@ -111,6 +115,9 @@ func TestArchiveHoldsEveryVersionWhole(t *testing.T) {
 			want = append(want, r+".md")
 		}
 		for _, s := range Skills {
+			if since, ok := skillSince[s]; ok && ver < since {
+				continue
+			}
 			want = append(want, "skills/"+s+"/SKILL.md")
 		}
 		for _, w := range want {
@@ -189,14 +196,15 @@ var numberRe = regexp.MustCompile(`^(\d+)\. `)
 // skillPhrases names the key phrases each skill's procedure must carry,
 // so a rewrite that loses an item fails the test by name.
 var skillPhrases = map[string][]string{
-	"bugfix":           {"fails on the current code", "pass", "after it", "the cause", "documented behavior"},
-	"cli-flag":         {"Register the flag", "help text", "usage text", "synopsis", "success test", "usage-error test", "compatibility", "sibling surfaces"},
-	"config-setting":   {"Parse", "Validate", "Default", "Precedence", "table row", "test row"},
-	"dependency":       {"lockfile", "license", "notices", "vulnerabilities"},
-	"docs-change":      {"present tense", "against the code", "commands", "cross-links"},
-	"refactor":         {"no public API change", "untouched", "renamed names"},
-	"schema-migration": {"next migration number", "never renumber", "old data", "where the state lives"},
-	"surface-parity":   {"CLI", "API", "MCP", "UI", "why not"},
+	"bugfix":             {"fails on the current code", "pass", "after it", "the cause", "documented behavior"},
+	"cli-flag":           {"Register the flag", "help text", "usage text", "synopsis", "success test", "usage-error test", "compatibility", "sibling surfaces"},
+	"config-setting":     {"Parse", "Validate", "Default", "Precedence", "table row", "test row"},
+	"dependency":         {"lockfile", "license", "notices", "vulnerabilities"},
+	"docs-change":        {"present tense", "against the code", "commands", "cross-links"},
+	"early-verification": {"representative surfaces", "every target language", "viewport", "one batch"},
+	"refactor":           {"no public API change", "untouched", "renamed names"},
+	"schema-migration":   {"next migration number", "never renumber", "old data", "where the state lives"},
+	"surface-parity":     {"CLI", "API", "MCP", "UI", "why not"},
 }
 
 // TestSkillProcedures: every skill carries a concrete numbered procedure

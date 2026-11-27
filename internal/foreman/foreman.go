@@ -266,6 +266,37 @@ func refNote(c Checkout) string {
 	}
 }
 
+// LandHeads is what the opening prompt says of the project's two heads
+// (§7.1, §4.2): the default branch the user merges and the land target
+// brigada lands on, each with the head the last sync recorded (empty when
+// no sync has), and the count of default commits the target lacks.
+type LandHeads struct {
+	Default, Target         string
+	DefaultHead, TargetHead string
+	Behind                  int
+}
+
+// LandHeadsNote names both heads so a foreman never mistakes the branch
+// the user merges for the branch brigada lands on; empty when no land
+// target is set off the default branch.
+func LandHeadsNote(h *LandHeads) string {
+	if h == nil {
+		return ""
+	}
+	head := func(branch, commit string) string {
+		if commit == "" {
+			return fmt.Sprintf("%q (no head recorded yet)", neutralize(branch))
+		}
+		return fmt.Sprintf("%q at %s", neutralize(branch), neutralize(commit))
+	}
+	note := fmt.Sprintf("\nThe project's default branch, which the user merges, is %s. The land target, which brigada lands approved work on, is %s; the heads are those the last sync recorded.\n",
+		head(h.Default, h.DefaultHead), head(h.Target, h.TargetHead))
+	if h.Behind > 0 {
+		note += fmt.Sprintf("The land target is %d commits behind %q.\n", h.Behind, neutralize(h.Default))
+	}
+	return note
+}
+
 // ComposePrompt composes the contract, optional foreman role text, then the
 // events and user's messages. It resolves no files or settings.
 func ComposePrompt(text string, events []string, messages []UserMessage) string {

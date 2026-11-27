@@ -130,6 +130,7 @@ func TestInitForemanOnlyAgent(t *testing.T) {
 	initBinary = binary
 	t.Cleanup(func() { initBinary = old })
 	importRepo(t)
+	initPushURL(t)
 	fakeInitPATH(t, "claude", "codex")
 	state := testsupport.ShortStateDir(t)
 	t.Cleanup(func() {

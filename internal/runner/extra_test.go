@@ -16,8 +16,9 @@ import (
 )
 
 // baseNoteRE matches the note the runner appends to a task job's prompt
-// (issue #129): the base ref and the commit the worktree was built on.
-var baseNoteRE = regexp.MustCompile(`^\n+Base note: your worktree was built on "[^"]+" at commit [0-9a-f]{40}\.$`)
+// (issue #129): the base ref and the commit the worktree was built on,
+// and the wait_landed verification task's head-naming ask (§6.1).
+var baseNoteRE = regexp.MustCompile(`^\n+Base note: your worktree was built on "[^"]+" at commit [0-9a-f]{40}\. If your task is a wait_landed verification task, name in your result summary the head commit you verified\.$`)
 
 // setTaskExtra records extra repositories on the task, as the engine does at
 // the task's creation (§5.8).

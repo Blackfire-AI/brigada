@@ -69,6 +69,10 @@ type jobRow struct {
 	// the landing of a job that carries the mark spends it. False on
 	// every other job.
 	DropWaitingRef bool
+	// SeedBranch is the branch a restart's fresh work job starts its
+	// worktree from instead of the task's base (§5.6): the pushed branch
+	// of the run a stop-running restart stopped. '' for every other job.
+	SeedBranch string
 }
 
 // jobColumns reads a job whole; COALESCE turns NULL into the zero value
@@ -82,7 +86,7 @@ const jobColumns = `id, project_id, COALESCE(task_id, 0), kind, key, mode, promp
 	COALESCE(leased_seconds, 0), harness, model, effort, labels, restart, retry,
 	COALESCE(released_by, 0), COALESCE(released_until, ''), COALESCE(release_note, ''),
 	COALESCE(released_lease, ''), COALESCE(done_lease, ''), COALESCE(not_before, ''), COALESCE(prompt_meta, ''),
-	skip_land_ready, drop_waiting_ref`
+	skip_land_ready, drop_waiting_ref, COALESCE(seed_branch, '')`
 
 // scanJob scans one job from a *sql.Row or *sql.Rows.
 func scanJob(row interface{ Scan(dest ...any) error }) (*jobRow, error) {
@@ -96,7 +100,7 @@ func scanJob(row interface{ Scan(dest ...any) error }) (*jobRow, error) {
 		&j.CapHeldAt, &j.CapHeldLayer, &j.CapHeldKey,
 		&j.LeasedSeconds, &j.Harness, &j.Model, &j.Effort, &j.Labels, &j.Restart, &j.Retry,
 		&j.ReleasedBy, &j.ReleasedUntil, &j.ReleaseNote, &j.ReleasedLease,
-		&j.DoneLease, &j.NotBefore, &j.PromptMeta, &j.SkipLandReady, &j.DropWaitingRef)
+		&j.DoneLease, &j.NotBefore, &j.PromptMeta, &j.SkipLandReady, &j.DropWaitingRef, &j.SeedBranch)
 	if err != nil {
 		return nil, err
 	}
@@ -268,4 +272,13 @@ func boolInt(b bool) int {
 // write — for Submit, the one-live-job-per-key index (§12.1).
 func isUniqueViolation(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "UNIQUE")
+}
+
+// nullIfEmpty stores an empty string as NULL, for the nullable text
+// columns whose absence reads as NULL (jobs.seed_branch).
+func nullIfEmpty(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
 }

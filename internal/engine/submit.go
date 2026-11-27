@@ -85,6 +85,10 @@ type SubmitParams struct {
 	// land_ready gate's hold (issue #87): the runner runs no command and
 	// lands. False on every other job.
 	SkipLandReady bool
+	// SeedBranch is the branch a restart's work job starts its worktree
+	// from instead of the task's base (§5.6): the stopped run's pushed
+	// branch a stop-running restart carries on. '' for every other job.
+	SeedBranch string
 	// PromptMeta is what the job records beside its composed prompt
 	// (§5.9 'Versioning'): the template's version and the digests of
 	// the instruction and skill texts the prompt carried, so a
@@ -143,9 +147,9 @@ func (e *Engine) submitTx(tx *sql.Tx, p SubmitParams, now time.Time) (SubmitResu
 	switch {
 	case p.Key == "":
 		return SubmitResult{}, fmt.Errorf("key is required")
-	case (p.Kind == KindForeman || p.Kind == KindSweep) && p.TaskID != 0:
+	case (p.Kind == KindForeman || p.Kind == KindSweep || p.Kind == KindSync) && p.TaskID != 0:
 		return SubmitResult{}, fmt.Errorf("kind %s belongs to no task", p.Kind)
-	case p.Kind != KindForeman && p.Kind != KindReview && p.Kind != KindPlanReview && p.Kind != KindSweep && p.TaskID == 0:
+	case p.Kind != KindForeman && p.Kind != KindReview && p.Kind != KindPlanReview && p.Kind != KindSweep && p.Kind != KindSync && p.TaskID == 0:
 		return SubmitResult{}, fmt.Errorf("kind %s needs a task", p.Kind)
 	case p.Kind == KindReview && p.TaskID == 0 && p.Branch == "":
 		return SubmitResult{}, fmt.Errorf("a review without a task needs a branch")
@@ -218,11 +222,11 @@ func (e *Engine) submitTx(tx *sql.Tx, p SubmitParams, now time.Time) (SubmitResu
 		notBefore = fmtTime(p.NotBefore)
 	}
 	res, err := tx.Exec(`INSERT INTO jobs (project_id, task_id, kind, key, mode, prompt, prompt_meta, status,
-		harness, model, labels, restart, retry, round, exclude_family, exclude_agents, require_agent, branch, queued_at, not_before, skip_land_ready, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		harness, model, labels, restart, retry, round, exclude_family, exclude_agents, require_agent, branch, queued_at, not_before, skip_land_ready, seed_branch, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		p.ProjectID, nullIfZero(p.TaskID), string(p.Kind), p.Key, string(p.Mode), p.Prompt, p.PromptMeta,
 		p.Harness, p.Model, string(labelsJSON), boolInt(p.Restart), boolInt(p.Retry), round, p.ExcludeFamily, string(excludeJSON),
-		nullIfZero(p.RequireAgent), branch, nowStr, notBefore, boolInt(p.SkipLandReady), nowStr, nowStr)
+		nullIfZero(p.RequireAgent), branch, nowStr, notBefore, boolInt(p.SkipLandReady), nullIfEmpty(p.SeedBranch), nowStr, nowStr)
 	if err != nil {
 		if !isUniqueViolation(err) {
 			return SubmitResult{}, fmt.Errorf("create job: %w", err)

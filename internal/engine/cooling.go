@@ -2,6 +2,7 @@ package engine
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"strconv"
 	"time"
@@ -14,6 +15,12 @@ import (
 // model never names it — but it holds like one: cap_held_at keeps the
 // queue TTL clock from running, and the status lists the job as held.
 const layerCooling = "cooling"
+
+// defaultCoolingWait is how long a queued task job waits for its cooling
+// agents to reset before the sweep parks it (§8.1): a quota reset a
+// job waits on is usually a window of a few hours, and a wait past this
+// bound is a limit the user should see, never a silent multi-day hold.
+const defaultCoolingWait = 6 * time.Hour
 
 // The cooling rule of the queue TTL (§8.1). A queued job whose every
 // qualifying agent is cooling — a fix round pinned to its author's
@@ -83,7 +90,7 @@ func (e *Engine) holdCoolingTx(tx *sql.Tx, now time.Time) error {
 		// The lookup leaves out an agent capped at exactly 0 for the
 		// job's kind (zeroCapLayer, issue #195): it never frees up, so a
 		// job whose only agent is one is not held but parked by the TTL.
-		agents, err := qualifyingAgentsTx(tx, &e.cfg, nil, 0, j, kindClass(j.Kind), nowStr, true)
+		agents, _, err := qualifyingAgentsTx(tx, &e.cfg, nil, 0, j, kindClass(j.Kind), nowStr, true)
 		if err != nil {
 			return err
 		}
@@ -102,15 +109,23 @@ func (e *Engine) holdCoolingTx(tx *sql.Tx, now time.Time) error {
 		}
 		if free || soonest == nil {
 			if j.CapHeldLayer == layerCooling {
-				if _, err := tx.Exec(`UPDATE jobs SET cap_held_at = ?, cap_held_layer = NULL, cap_held_key = NULL, slot_hold = 0, updated_at = ?
+				if _, err := tx.Exec(`UPDATE jobs SET cap_held_at = ?, cap_held_layer = NULL, cap_held_key = NULL, slot_hold = 0, cooling_since = NULL, updated_at = ?
 					WHERE id = ?`, nowStr, nowStr, j.ID); err != nil {
 					return fmt.Errorf("lift the cooling hold of job %d: %w", j.ID, err)
 				}
 			}
 			continue
 		}
+		fresh := j.CapHeldLayer != layerCooling
 		if err := holdCoolingJobTx(tx, j, soonest.id, now); err != nil {
 			return err
+		}
+		if fresh {
+			// The bound's clock starts when the hold begins, not on every
+			// sweep; a later renewal keeps the first stamp.
+			if _, err := tx.Exec(`UPDATE jobs SET cooling_since = ? WHERE id = ?`, nowStr, j.ID); err != nil {
+				return fmt.Errorf("stamp the cooling hold's start on job %d: %w", j.ID, err)
+			}
 		}
 	}
 	return nil
@@ -125,6 +140,76 @@ func holdCoolingJobTx(tx *sql.Tx, j *jobRow, agent int64, now time.Time) error {
 	}
 	if _, err := tx.Exec("UPDATE jobs SET cap_held_key = ? WHERE id = ?", strconv.FormatInt(agent, 10), j.ID); err != nil {
 		return fmt.Errorf("stamp the cooling agent of job %d: %w", j.ID, err)
+	}
+	return nil
+}
+
+// parkCoolingBoundTx fails a queued job that has waited on its cooling
+// agents past CoolingWait (§8.1). The bound makes a quota reset days
+// away a visible park — the reason names the soonest-cooling agent, its
+// reset and the bound — instead of a silent multi-day hold. The sweep
+// runs it after holdCoolingTx, so only a job still cooling-held (its
+// cooling_since stamp is live) is read. A job of a paused scope is
+// never read (§8.3); the lift that frees it shifts the clock.
+func (e *Engine) parkCoolingBoundTx(tx *sql.Tx, now time.Time) error {
+	if e.cfg.CoolingWait <= 0 {
+		return nil
+	}
+	rows, err := tx.Query(`SELECT id, project_id, COALESCE(task_id, 0), COALESCE(cap_held_key, '')
+		FROM jobs
+		WHERE status = 'queued' AND cap_held_layer = '`+layerCooling+`' AND cooling_since IS NOT NULL AND cooling_since <= ?
+		AND `+notPausedSQL("jobs"), fmtTime(now.Add(-e.cfg.CoolingWait)))
+	if err != nil {
+		return fmt.Errorf("sweep cooling wait: %w", err)
+	}
+	type coolingTimedOut struct {
+		id            int64
+		project, task int64
+		agent         string
+	}
+	var timedOut []coolingTimedOut
+	for rows.Next() {
+		var x coolingTimedOut
+		if err := rows.Scan(&x.id, &x.project, &x.task, &x.agent); err != nil {
+			rows.Close()
+			return fmt.Errorf("sweep cooling wait: %w", err)
+		}
+		timedOut = append(timedOut, x)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("sweep cooling wait: %w", err)
+	}
+	rows.Close()
+
+	for _, x := range timedOut {
+		reason := fmt.Sprintf("cooling wait exceeded: no runner leased the job within %s", capText(e.cfg.CoolingWait))
+		var harness, model, until string
+		err := tx.QueryRow("SELECT harness, model, COALESCE(cooling_until, '') FROM agents WHERE id = ?", x.agent).
+			Scan(&harness, &model, &until)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("read the cooling agent %s of job %d: %w", x.agent, x.id, err)
+		}
+		if err == nil {
+			reason = fmt.Sprintf("cooling wait exceeded: %s/%s is cooling until %s; no runner leased the job within %s",
+				harness, model, until, capText(e.cfg.CoolingWait))
+		}
+		if err := failJobTx(tx, x.id, reason, 0, now); err != nil {
+			return err
+		}
+		if _, err := appendEventTx(tx, evJobQueueTimedOut, x.project, x.task, x.id,
+			eventPayload{Status: statusFailed, Reason: reason}, now); err != nil {
+			return err
+		}
+		if err := e.sweptForemanFinishedTx(tx, x.id, x.project, now); err != nil {
+			return err
+		}
+		if x.task != 0 {
+			if err := e.needsForemanTx(tx, &jobRow{ID: x.id, ProjectID: x.project, TaskID: x.task},
+				evTaskFailed, eventPayload{Reason: boundNote(reason)}, now); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }

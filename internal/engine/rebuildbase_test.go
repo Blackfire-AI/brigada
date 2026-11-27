@@ -27,6 +27,7 @@ func rebuildChain(t *testing.T, e *env, author, reviewer int64) (lib, app int64)
 		t.Fatalf("create plan: %v", err)
 	}
 	lib, app = res.Tasks[0].TaskID, res.Tasks[1].TaskID
+	e.driveSync(author) // lib's work leases the target only once the sync is current (§7.1)
 	g := e.leaseAny(author)
 	if g == nil || g.TaskID != lib {
 		t.Fatalf("lease = %+v, want lib's work", g)
@@ -58,6 +59,7 @@ func restartOnto(t *testing.T, e *env, author, app int64, want string) {
 	if got := e.str("SELECT base_ref FROM tasks WHERE id = ?", app); got != want {
 		t.Errorf("app base_ref after the restart = %q, want %q", got, want)
 	}
+	e.driveSync(author) // a restart onto the target waits on the sync (§7.1)
 	g := e.leaseAny(author)
 	if g == nil || g.TaskID != app {
 		t.Fatalf("lease = %+v, want app's restarted work", g)

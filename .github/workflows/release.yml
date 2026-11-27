@@ -60,8 +60,49 @@ jobs:
             tar -C stage --sort=name --owner=0 --group=0 --numeric-owner \
               --mtime=@0 -cf - brigada | gzip -n > "dist/${name}.tar.gz"
           done
+      # nfpm stays out of go.mod: a pinned release archive checked against the
+      # release's own checksums file, as CI does for gitleaks.
+      - name: install nfpm
+        env:
+          NFPM_VERSION: 2.49.0
+        run: |
+          set -euo pipefail
+          dir="$(mktemp -d)"
+          base="https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}"
+          archive="nfpm_${NFPM_VERSION}_Linux_x86_64.tar.gz"
+          curl -fsSL -o "$dir/$archive" "$base/$archive"
+          curl -fsSL -o "$dir/checksums.txt" "$base/checksums.txt"
+          (cd "$dir" && grep " $archive\$" checksums.txt | sha256sum -c -)
+          tar -xzf "$dir/$archive" -C "$dir" nfpm
+          sudo install "$dir/nfpm" /usr/local/bin/nfpm
+      # One .deb and one .rpm per arch from dist/brigada-linux-<arch> (never
+      # stage/brigada, which the build loop overwrites). A tag v<base>-<suffix>
+      # becomes nfpm's version <base> and prerelease <suffix>; nfpm renders the
+      # deb prerelease with a tilde and carries the same tilde form into the
+      # rpm Version (Release defaults to 1), so a prerelease sorts before the
+      # final and no dash ever lands in an rpm Version.
+      - name: packages
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME#v}"
+          export VERSION="${tag%%-*}"
+          PRERELEASE=""
+          if [[ "$tag" == *-* ]]; then
+            PRERELEASE="${tag#*-}"
+          fi
+          export PRERELEASE
+          for arch in amd64 arm64; do
+            for packager in deb rpm; do
+              ARCH="$arch" nfpm package --config .nfpm.yaml --packager "$packager" --target dist/
+            done
+          done
+      # The packages must exist before SHA256SUMS is written, so they are
+      # checksummed and attested like the tarballs.
+      - name: checksums
+        run: |
+          set -euo pipefail
           cd dist
-          sha256sum brigada-* > SHA256SUMS
+          sha256sum brigada-* brigada_*.deb > SHA256SUMS
           ls -l
       # Signs a provenance attestation for every checksum in SHA256SUMS, which
       # lists each file the release publishes. Users check it with
@@ -119,3 +160,68 @@ jobs:
             git commit -m "brigada ${GITHUB_REF_NAME#v}"
             git push
           fi
+
+  # Installs the just-published amd64 packages in clean distro containers and
+  # runs `brigada version`. amd64 only: running arm64 containers on this
+  # runner needs emulation, which is out of scope. The job-level container
+  # runs every step inside the image, which ships neither git nor curl, so the
+  # bootstrap step installs them before anything uses them. No checkout is
+  # needed: the packages come from the release by curl.
+  install:
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: debian:stable-slim
+            bootstrap: apt-get update && apt-get install -y git curl ca-certificates
+            install: apt-get install -y
+            asset: deb
+          - image: ubuntu:latest
+            bootstrap: apt-get update && apt-get install -y git curl ca-certificates
+            install: apt-get install -y
+            asset: deb
+          - image: fedora:latest
+            bootstrap: dnf install -y git curl
+            install: dnf install -y
+            asset: rpm
+    container:
+      image: ${{ matrix.image }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: bootstrap
+        run: ${{ matrix.bootstrap }}
+      - name: download
+        run: |
+          set -euo pipefail
+          base="https://github.com/Blackfire-AI/brigada/releases/download/${GITHUB_REF_NAME}"
+          mkdir pkg
+          cd pkg
+          curl --fail --location --retry 3 "$base/SHA256SUMS" --output SHA256SUMS
+          # The file names carry the version (a prerelease has a tilde), so
+          # they are read from the checksums file.
+          deb="$(awk '{print $2}' SHA256SUMS | grep -E '^brigada_.*_amd64\.deb$')"
+          rpm="$(awk '{print $2}' SHA256SUMS | grep -E '^brigada-.*\.x86_64\.rpm$')"
+          for f in "$deb" "$rpm"; do
+            curl --fail --location --retry 3 "$base/$f" --output "$f"
+          done
+          printf '%s\n' "$deb" "$rpm" > names
+          # Verify before anything is installed.
+          grep -F -e " $deb" -e " $rpm" SHA256SUMS | sha256sum -c -
+      - name: install package
+        run: |
+          set -euo pipefail
+          cd pkg
+          if [ "${{ matrix.asset }}" = deb ]; then
+            f="$(grep '\.deb$' names)"
+          else
+            f="$(grep '\.rpm$' names)"
+          fi
+          ${{ matrix.install }} "./$f"
+      - name: brigada version
+        run: brigada version

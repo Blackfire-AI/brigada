@@ -63,9 +63,11 @@ const (
 	evTaskTierBumped          = "task_tier_bumped"           // rule escalation; TierAsked is the old tier, TierServed the new tier, Reason the trigger (§8)
 	evTaskEffortBumped        = "task_effort_bumped"         // rule escalation on the same tier; EffortFrom is the old effort, EffortTo the new, Reason the trigger (§8)
 	evTaskRestarted           = "task_restarted"             // a foreman or automatic restart queued a fresh work attempt (§3, §5.6)
+	evTaskStopRequested       = "task_stop_requested"        // a task_restart with stop_running on a task whose job is leased or running: the job is told to stop and push, and its end queues the fresh attempt (§5.6); Job names the stopping job, Reason the restart's note
 	evTaskFailed              = "task_failed"                // the run failed or said nothing usable; the foreman decides (§3)
 	evTaskRetired             = "task_retired"               // a task that will not land was retired (§6.2); Reason carries the caller's words verbatim, Caller who asked — foreman or user
 	evTaskCancelledByAmend    = "task_cancelled_by_amend"    // a plan_amend newly cancelled the task (§6.2); Plan names the plan, Reason carries the caller's words verbatim, "no reason given" when blank, Caller who asked — foreman or user
+	evTaskNoteSet             = "task_note_set"              // a plan_amend set, replaced or cleared the task's pending note (§6.2); Note carries it verbatim ('' = cleared), Caller who asked — foreman or user
 	evTaskLoop                = "task_loop"                  // the worker repeats itself: the same check failure across fix rounds, or the same tool call in a window; the foreman decides (§5.6)
 	evReviewChanges           = "review_changes"             // the reviewer wants changes; a fix round answers them (§3, §7)
 	evReviewNoVerdict         = "review_no_verdict"          // the review ended without a usable verdict; the retry is spent or impossible (§7)
@@ -88,6 +90,11 @@ const (
 	evTaskLandNotReady        = "task_land_not_ready"        // the land_ready gate answered not ready (issue #87); the landing is requeued after the backoff, Until names the next try
 	evLandRetried             = "land_retried"               // the foreman queued again the landing of a task a rejected push, an environment failure or a failed land check parked (#133); Status is the task's state after, Reason the outcome — queued (the event's job is the land job), held with the gate's rule, or stale_base with both refs; no gate passed, no restart spent
 	evTaskBaseStale           = "task_base_stale"            // the task is held on a stale base (issue #124): its stacked dependency was restarted after the task started and finished again from a new branch; Reason names the superseded base and the dependency's current branch, Branch the latter
+	evSyncCurrent             = "sync_current"               // the land-target sync (§7.1) found the target current, or pushed its merge: the gate opens and the queued leases go; Count is the commits behind (0)
+	evSyncLanded              = "sync_landed"                // the sync recorded a merge waiting at the push gate (§7.1): Branch the target, Commit the merge, Pushed waiting or local, PushCmd the hand push under never, Count the commits behind
+	evSyncPushed              = "sync_pushed"                // a waiting sync merge reached the target (§7.1) — the push phase pushed it, or the runner's trailer scan read it on the target after a hand push under never: Branch the target, Commit the merge
+	evSyncConflict            = "sync_conflict"              // the sync's merge conflicts (§7.1): the gate holds, nothing lands until the target is current; Reason names the files, Count the commits behind
+	evSyncBehindStack         = "sync_behind_stack"          // the sync queues behind a waiting push stack (§7.1): it merges once the last waiting landing settles; Count the commits behind
 	evDepRebuilt              = "dep_rebuilt"                // a dependency finished again from a new result branch after a restart (issue #124): one wake names it and every started dependent held on its old round — parked at needs_foreman or refused at the land gate — until each is restarted on the new base
 	evProjectForemanSet       = "project_foreman_set"        // setup: the project's foreman harness and model were chosen (§4.1)
 	evForemanTurnMoved        = "foreman_turn_moved"         // a foreman switch or requeue carried the turn to another harness/model pair; Harness and Model name the new pair, FromHarness and FromModel the old (§8.1)
@@ -157,20 +164,22 @@ type eventPayload struct {
 	// (§6.2): the foreman or the user, recorded beside the reason on each
 	// task_retired and task_cancelled_by_amend event.
 	Caller      string `json:"caller,omitempty"`
+	Note        string `json:"note,omitempty"`   // a task_note_set event's note, verbatim (§6.2)
 	Origin      string `json:"origin,omitempty"` // the origin a dispatch_paused or dispatch_resumed event names: user or drain (§8.3)
 	Harness     string `json:"harness,omitempty"`
 	Model       string `json:"model,omitempty"`
 	FromHarness string `json:"from_harness,omitempty"` // a moved foreman turn's old pair; Harness and Model name the new one
 	FromModel   string `json:"from_model,omitempty"`
-	Effort      string `json:"effort,omitempty"`  // a foreman setting's reasoning-effort level
-	Account     string `json:"account,omitempty"` // the quota account a cooling names (§8)
-	Until       string `json:"until,omitempty"`   // a deadline, RFC3339: a foreman limit's reset, a probe's next attempt; absent when unknown (§4.4)
-	Job         int64  `json:"job,omitempty"`     // a job the event names besides its own job_id column
-	Hold        int64  `json:"hold,omitempty"`    // the attach hold the event names (§4.2)
-	Cause       string `json:"cause,omitempty"`   // a land cause key: the error class and the shared resource every task it fails parks under (issue #116)
-	Count       int64  `json:"count,omitempty"`   // how many of something the event counts (§4.2, §4.3)
-	Path        string `json:"path,omitempty"`    // a snapshot's file (§6.4)
-	Bytes       int64  `json:"bytes,omitempty"`   // a snapshot's size (§6.4)
+	Effort      string `json:"effort,omitempty"`      // a foreman setting's reasoning-effort level
+	Account     string `json:"account,omitempty"`     // the quota account a cooling names (§8)
+	QuotaScope  string `json:"quota_scope,omitempty"` // the quota scope a cooling names, when the agent has one (§8)
+	Until       string `json:"until,omitempty"`       // a deadline, RFC3339: a foreman limit's reset, a probe's next attempt; absent when unknown (§4.4)
+	Job         int64  `json:"job,omitempty"`         // a job the event names besides its own job_id column
+	Hold        int64  `json:"hold,omitempty"`        // the attach hold the event names (§4.2)
+	Cause       string `json:"cause,omitempty"`       // a land cause key: the error class and the shared resource every task it fails parks under (issue #116)
+	Count       int64  `json:"count,omitempty"`       // how many of something the event counts (§4.2, §4.3)
+	Path        string `json:"path,omitempty"`        // a snapshot's file (§6.4)
+	Bytes       int64  `json:"bytes,omitempty"`       // a snapshot's size (§6.4)
 	// The agent pick's why (§8): the agent, its score, how the rank
 	// chose it (pickSampled), its cost weight and draw, every ranked
 	// candidate's weight and draw in rank order, and the better-ranked
@@ -182,12 +191,15 @@ type eventPayload struct {
 	// Prompt is what a leased job's prompt was composed from (§5.9
 	// 'Versioning', §9): the template version and the digests of the
 	// instruction and skill texts it carried.
-	Prompt  *promptMeta `json:"prompt,omitempty"`
-	Classes []string    `json:"classes,omitempty"`
-	Paths   []string    `json:"paths,omitempty"`
-	Agent   int64       `json:"agent,omitempty"`
-	Score   float64     `json:"score,omitempty"`
-	Pick    string      `json:"pick,omitempty"`
+	Prompt *promptMeta `json:"prompt,omitempty"`
+	// ToolGrants are the task's tool grants (§6.1) a leased task job
+	// ran under; absent when it granted none.
+	ToolGrants []string `json:"tool_grants,omitempty"`
+	Classes    []string `json:"classes,omitempty"`
+	Paths      []string `json:"paths,omitempty"`
+	Agent      int64    `json:"agent,omitempty"`
+	Score      float64  `json:"score,omitempty"`
+	Pick       string   `json:"pick,omitempty"`
 	// Placement is how a review job's picked reviewer relates to its
 	// author (issue #126): cross_family, same_family, same_agent — or
 	// unknown when the author's family is not known. Computed at the
@@ -203,6 +215,30 @@ type eventPayload struct {
 	Weight     *int     `json:"weight,omitempty"`
 	Draw       float64  `json:"draw,omitempty"`
 	Candidates []Ranked `json:"candidates,omitempty"`
+	// FamilyPolicy is the review.family setting in force for a review or
+	// plan-review job's pick (§7): prefer or require. A non-review pick
+	// carries none.
+	FamilyPolicy string `json:"family_policy,omitempty"`
+	// Pin is the explicit agent a job is pinned to (§3): the require_agent
+	// the placement names, 0 when none. Session is true when the job
+	// resumes a session — a fix round on the author's, a re-review on the
+	// reviewer's — rather than ranking afresh.
+	Pin     int64 `json:"pin,omitempty"`
+	Session bool  `json:"session,omitempty"`
+	// Fallback is the family-preference fallback a review took under
+	// review.family=prefer: same_family or same_agent when no reviewer of
+	// the preferred group was available (§7). Empty when none was taken.
+	Fallback string `json:"fallback,omitempty"`
+	// ExcludeAgents is the retry exclusions in force for the job's
+	// logical attempt (§7): the agents that failed it and may never take
+	// it again.
+	ExcludeAgents []int64 `json:"exclude_agents,omitempty"`
+	// Removed names the agents the placement dropped and why (§8): a
+	// candidate that did not offer the class, failed a family or
+	// exclusion rule, sat capped at 0, below the floor, broken or
+	// cooling. The better-ranked agents passed over for cap room stay in
+	// PassedOver, as before.
+	Removed []Removed `json:"removed,omitempty"`
 	// A foreman session rotation's why (§4.2): the input tokens the last
 	// turn read, the threshold it crossed, and the generation it opened.
 	Tokens    int64 `json:"tokens,omitempty"`
@@ -219,6 +255,15 @@ type Ranked struct {
 	Agent  int64   `json:"agent"`
 	Weight int     `json:"weight"`
 	Draw   float64 `json:"draw"`
+}
+
+// Removed is one agent the placement dropped, and why (§8): the reason
+// words the rule that removed it — class, family, exclusion, a zero cap,
+// the tier floor, health or cooling — so an operator reading the pick can
+// tell what was not considered and why.
+type Removed struct {
+	Agent  int64  `json:"agent"`
+	Reason string `json:"reason"`
 }
 
 // appendEventTx adds one row to the event log inside the caller's

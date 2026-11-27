@@ -37,6 +37,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request, id ident
 			Adapter: a.Adapter, Harness: a.Harness, Model: a.Model,
 			Family: a.Family, Account: a.Account, Classes: a.Classes,
 			Effort: a.Effort, Tools: a.Tools, Permission: a.Permission,
+			QuotaScope: a.QuotaScope,
 		}
 	}
 	var startedAt time.Time
@@ -157,7 +158,7 @@ func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request, runnerI
 		return
 	}
 	var expiry *time.Time
-	if ans == engine.AnsOK {
+	if ans == engine.AnsOK || ans == engine.AnsStopRunning {
 		t := expires
 		expiry = &t
 	}
@@ -333,6 +334,9 @@ type agentAdvert struct {
 	Family  string   `json:"family"`
 	Account string   `json:"account"`
 	Classes []string `json:"classes"`
+	// QuotaScope is the quota pool the agent cools with (§8); empty for an
+	// older runner that does not advertise one.
+	QuotaScope string `json:"quota_scope,omitempty"`
 	// Effort is the agent's reasoning-effort level; empty when unset.
 	Effort string `json:"effort,omitempty"`
 	Tools  string `json:"tools,omitempty"`
@@ -406,7 +410,11 @@ type jobGrant struct {
 	Prompt         string    `json:"prompt"`
 	LeaseID        string    `json:"lease_id"`
 	LeaseExpiresAt time.Time `json:"lease_expires_at"`
-	Harness        string    `json:"harness"`
+	// TimeCap is the job kind's effective wall-time cap (§5.6), carried
+	// from the engine's lease grant: the runner's stall policy takes it
+	// when set, its own class cap otherwise. Zero means none.
+	TimeCap time.Duration `json:"time_cap,omitempty"`
+	Harness string        `json:"harness"`
 	// Agent is the harness of the agent the lease picked for the job
 	// (§8): the runner runs the job with that agent's adapter and model,
 	// never with the job's own harness constraint, which placed the job
@@ -440,6 +448,11 @@ type jobGrant struct {
 	// the diff file then holds the branch's commits since it. Empty for
 	// every other job.
 	ReviewSince string `json:"review_since,omitempty"`
+	// SeedBranch is the branch a stop-running restart's fresh work job
+	// starts its worktree from (§5.6): the stopped run's pushed branch,
+	// whose head the worktree is built at instead of BaseRef's. Empty for
+	// every other job.
+	SeedBranch string `json:"seed_branch,omitempty"`
 	// Branch is the branch the engine names a work or fix job to work
 	// on (§5.1): the worktree is built on it and the run's work is
 	// pushed to it. Empty for a review and a foreman turn — and for an
@@ -487,6 +500,12 @@ type jobGrant struct {
 	// refs/brigada/land/<target> before it stacks. False for the push
 	// phase and every other kind.
 	DropWaitingRef bool `json:"drop_waiting_ref,omitempty"`
+	// LandBatch marks a batch land job's squash phase (§7.1, §12.3):
+	// LandMembers names every member the batch owns, in batch order, and
+	// the runner lands them as one stack with one push.
+	LandBatch bool `json:"land_batch,omitempty"`
+	// LandMembers is a batch grant's ordered member list (§12.3).
+	LandMembers []engine.LandMember `json:"land_members,omitempty"`
 	// SweepTaskIDs is, for a sweep job (§13.2), the exact set of task ids
 	// whose branch families the runner may delete. Empty for every other kind.
 	SweepTaskIDs []int64 `json:"sweep_task_ids,omitempty"`
@@ -528,6 +547,7 @@ func jobGrantOf(g *engine.LeaseGrant) *jobGrant {
 		Prompt:          g.Prompt,
 		LeaseID:         g.LeaseID,
 		LeaseExpiresAt:  g.LeaseExpiresAt,
+		TimeCap:         g.TimeCap,
 		Harness:         g.Harness,
 		Agent:           g.Agent,
 		AgentAdapter:    g.AgentAdapter,
@@ -540,6 +560,7 @@ func jobGrantOf(g *engine.LeaseGrant) *jobGrant {
 		ExtraRepos:      g.ExtraRepos,
 		ReviewBranch:    g.ReviewBranch,
 		ReviewSince:     g.ReviewSince,
+		SeedBranch:      g.SeedBranch,
 		Branch:          g.Branch,
 		ApprovedHead:    g.ApprovedHead,
 		LandTarget:      g.LandTarget,
@@ -551,6 +572,8 @@ func jobGrantOf(g *engine.LeaseGrant) *jobGrant {
 		LandReady:       g.LandReady,
 		SkipLandReady:   g.SkipLandReady,
 		DropWaitingRef:  g.DropWaitingRef,
+		LandBatch:       g.LandBatch,
+		LandMembers:     g.LandMembers,
 		SweepTaskIDs:    g.SweepTaskIDs,
 		LandMessage:     g.LandMessage,
 		Attempt:         g.Attempt,

@@ -186,8 +186,9 @@ func (e *env) landJobs() int64 {
 }
 
 // TestLandRuleCreatesOneLandJob: a done, approved implement task with no
-// dependencies gets exactly one land job, on the task's own key, tagged
-// with the git label the runner must offer.
+// dependencies gets exactly one land job — a batch of one, on the
+// project's land-batch key, the task its lead and reserved in it (§7.1)
+// — tagged with the git label the runner must offer.
 func TestLandRuleCreatesOneLandJob(t *testing.T) {
 	e := newEnv(t)
 	author := e.agented("author", "anthropic", "implement")
@@ -197,8 +198,12 @@ func TestLandRuleCreatesOneLandJob(t *testing.T) {
 	if n := e.landJobs(); n != 1 {
 		t.Fatalf("land jobs = %d, want 1", n)
 	}
-	if key := e.str("SELECT key FROM jobs WHERE task_id = ? AND kind = 'land'", e.task); key != keyOf(e.task) {
-		t.Errorf("land job key = %q, want the task's own %q", key, keyOf(e.task))
+	if key := e.str("SELECT key FROM jobs WHERE task_id = ? AND kind = 'land'", e.task); key != landBatchKey(e.project) {
+		t.Errorf("land job key = %q, want the project's %q", key, landBatchKey(e.project))
+	}
+	if got, want := e.int("SELECT COALESCE(land_batch_job, 0) FROM tasks WHERE id = ?", e.task),
+		e.int("SELECT id FROM jobs WHERE task_id = ? AND kind = 'land'", e.task); got != want {
+		t.Errorf("land_batch_job = %d, want the batch job %d", got, want)
 	}
 	if labels := e.str("SELECT labels FROM jobs WHERE task_id = ? AND kind = 'land'", e.task); labels != `["git"]` {
 		t.Errorf("land job labels = %q, want [\"git\"]", labels)

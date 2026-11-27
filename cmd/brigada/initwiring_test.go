@@ -235,15 +235,18 @@ func TestInitApplyPromptFileCounts(t *testing.T) {
 	for _, tc := range []struct {
 		files   int
 		running bool
+		probe   bool
 		want    string
 	}{
-		{1, false, "Write 1 file and start the runner?"},
-		{1, true, "Write 1 file?"},
-		{5, false, "Write 5 files and start the runner?"},
-		{5, true, "Write 5 files?"},
+		{1, false, true, "Write 1 file, push and delete a scratch commit and start the runner?"},
+		{1, true, true, "Write 1 file, push and delete a scratch commit?"},
+		{5, false, true, "Write 5 files, push and delete a scratch commit and start the runner?"},
+		{5, true, true, "Write 5 files, push and delete a scratch commit?"},
+		{1, false, false, "Write 1 file and start the runner?"},
+		{0, false, true, "Start the runner, push and delete a scratch commit?"},
 	} {
-		if got := initApplyPrompt(tc.files, tc.running); got != tc.want {
-			t.Errorf("initApplyPrompt(%d, %v) = %q, want %q", tc.files, tc.running, got, tc.want)
+		if got := initApplyPrompt(tc.files, tc.running, tc.probe); got != tc.want {
+			t.Errorf("initApplyPrompt(%d, %v, %v) = %q, want %q", tc.files, tc.running, tc.probe, got, tc.want)
 		}
 	}
 }

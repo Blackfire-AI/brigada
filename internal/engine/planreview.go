@@ -92,16 +92,30 @@ type planReviewTaskView struct {
 	Tier     string
 	Effort   string
 	Deps     []string
+	DepIDs   []int64 // the same dependencies by task id, for the shape
 	Base     string
 	Continue string
 	Skills   []planReviewSkillView
+	// Caps is the task's round-caps override (§6.1), nil for the engine
+	// defaults, as the shape's invocation count reads it.
+	Caps map[string]int
 }
 
-// planReviewPlanView is the plan under review: its id, title and tasks.
+// planReviewPlanView is the plan under review: its id, title and tasks,
+// the engine's round caps and the project's approval controls (§6.3) the
+// shape section shows beside them.
 type planReviewPlanView struct {
 	ID    int64
 	Title string
 	Tasks []planReviewTaskView
+	// RoundCaps are the engine's round caps (§6.1) a task's caps
+	// override key by key.
+	RoundCaps RoundCaps
+	// MaxTasks is the resolved approval_max_tasks (§6.3), 0 or negative
+	// when the count rule is off.
+	MaxTasks int
+	// Budget is the project's approval_budget (§6.3), "" when none.
+	Budget string
 }
 
 // otherPlanTaskView is one task of another active plan, as the input's
@@ -120,6 +134,98 @@ type otherPlanView struct {
 	Tasks []otherPlanTaskView
 }
 
+// planShape is the plan's deterministic structural shape (§6.2): the task
+// count, the critical-path length, the expected worker, fix and review
+// invocations, and the planned verification runs — graph facts and round
+// caps only, no historical estimates.
+type planShape struct {
+	tasks    int
+	critical int
+	worker   int
+	fix      int
+	review   int
+	verify   int
+}
+
+// planShapeOf computes the plan review's structural shape (§6.2) from the
+// view's graph and round caps: the task count; the critical path, the
+// longest dependency chain; the expected invocations — the sum over the
+// tasks of one worker plus fix_rounds fix rounds plus review_rounds
+// review rounds, times the restart allowance (the restart cap plus one)
+// — and the planned verification runs, one per review-class task (a
+// branch review). Pure: the same view yields the same shape.
+func planShapeOf(v planReviewPlanView) planShape {
+	s := planShape{tasks: len(v.Tasks)}
+	idx := make(map[int64]int, len(v.Tasks))
+	for i, t := range v.Tasks {
+		idx[t.ID] = i
+	}
+	depth := make([]int, len(v.Tasks))
+	for i := range depth {
+		depth[i] = -1
+	}
+	var walk func(int) int
+	walk = func(i int) int {
+		if depth[i] >= 0 {
+			return depth[i]
+		}
+		d := 1
+		for _, dep := range v.Tasks[i].DepIDs {
+			if j, ok := idx[dep]; ok {
+				if dj := walk(j) + 1; dj > d {
+					d = dj
+				}
+			}
+		}
+		depth[i] = d
+		return d
+	}
+	for i, t := range v.Tasks {
+		if d := walk(i); d > s.critical {
+			s.critical = d
+		}
+		fix := v.RoundCaps.Fix
+		if c, ok := t.Caps[roundFix]; ok {
+			fix = c
+		}
+		review := v.RoundCaps.Review
+		if c, ok := t.Caps[roundReview]; ok {
+			review = c
+		}
+		restart := v.RoundCaps.Restart
+		if c, ok := t.Caps[roundRestart]; ok {
+			restart = c
+		}
+		allowance := restart + 1
+		s.worker += allowance
+		s.fix += fix * allowance
+		s.review += review * allowance
+		class := t.Class
+		if class == "" {
+			class = classImplement
+		}
+		if class == string(KindReview) {
+			s.verify++
+		}
+	}
+	return s
+}
+
+// approvalControlsText renders the project's approval controls (§6.3)
+// beside the shape: approval_max_tasks, off at 0 or below, and
+// approval_budget, none when unset.
+func approvalControlsText(maxTasks int, budget string) string {
+	mt := "approval_max_tasks off"
+	if maxTasks > 0 {
+		mt = fmt.Sprintf("approval_max_tasks %d", maxTasks)
+	}
+	b := "approval_budget none"
+	if budget != "" {
+		b = "approval_budget " + budget
+	}
+	return mt + ", " + b
+}
+
 // composePlanReviewInput builds the plan review's input (§6.2): the
 // plan — every task with its spec verbatim, its check, class, tier,
 // effort and place in the graph, and its state whenever it is not one
@@ -132,6 +238,14 @@ func composePlanReviewInput(round int, plan planReviewPlanView, others []otherPl
 	var b strings.Builder
 	fmt.Fprintf(&b, "Plan review input, round %d of %d.\n", round, maxPlanReviewRounds)
 	fmt.Fprintf(&b, "The plan under review is plan %d %q, %d tasks.\n", plan.ID, plan.Title, len(plan.Tasks))
+	// The plan's structural shape (§6.2): deterministic graph facts and
+	// the round caps, with the project's approval controls beside them.
+	// The reviewer recomputes the invocations from the formula stated.
+	shape := planShapeOf(plan)
+	fmt.Fprintf(&b, "Plan shape: %d tasks; critical path %s (the longest dependency chain); expected invocations %d; planned verification runs %d (review-class tasks).\n",
+		shape.tasks, countNoun(int64(shape.critical), "task"), shape.worker+shape.fix+shape.review, shape.verify)
+	b.WriteString("Expected invocations are the sum over the tasks of (1 worker + fix_rounds fixes + review_rounds reviews), times the restart allowance (restart + 1).\n")
+	fmt.Fprintf(&b, "Approval controls: %s.\n", approvalControlsText(plan.MaxTasks, plan.Budget))
 	if prevVerdict != "" {
 		b.WriteString("\nThe previous round's verdict was " + prevVerdict + ".\n")
 		if prevFindings != "" {
@@ -252,7 +366,7 @@ func foremanFamilyTx(tx *sql.Tx, project int64) (string, error) {
 // missing one is not.
 func planReviewerAvailableTx(tx *sql.Tx, reviewFamily string, project int64, family string) (bool, error) {
 	review := &jobRow{ProjectID: project, Kind: KindPlanReview, ExcludeFamily: family}
-	agents, err := qualifyingAgentRowsTx(tx, reviewFamily, 0, review, string(KindReview), "")
+	agents, _, err := qualifyingAgentRowsTx(tx, reviewFamily, 0, review, string(KindReview), "")
 	if err != nil {
 		return false, err
 	}
@@ -280,7 +394,7 @@ func planReviewPlanTx(tx *sql.Tx, plan int64) (planReviewPlanView, error) {
 		return planReviewPlanView{}, fmt.Errorf("read plan %d: %w", plan, err)
 	}
 	rows, err := tx.Query(`SELECT t.id, t.name, t.title, t.spec, COALESCE(t.check_cmd, ''), t.state, t.class,
-			t.tier, COALESCE(NULLIF(t.effort, ''), 'default'), COALESCE(t.skills, '')
+			t.tier, COALESCE(NULLIF(t.effort, ''), 'default'), COALESCE(t.skills, ''), COALESCE(t.caps, '')
 		FROM tasks t WHERE t.plan_id = ? ORDER BY t.id`, plan)
 	if err != nil {
 		return planReviewPlanView{}, fmt.Errorf("read the tasks of plan %d: %w", plan, err)
@@ -288,11 +402,12 @@ func planReviewPlanTx(tx *sql.Tx, plan int64) (planReviewPlanView, error) {
 	var tasks []planReviewTaskView
 	for rows.Next() {
 		var t planReviewTaskView
-		var rawSkills string
-		if err := rows.Scan(&t.ID, &t.Name, &t.Title, &t.Spec, &t.Check, &t.State, &t.Class, &t.Tier, &t.Effort, &rawSkills); err != nil {
+		var rawSkills, rawCaps string
+		if err := rows.Scan(&t.ID, &t.Name, &t.Title, &t.Spec, &t.Check, &t.State, &t.Class, &t.Tier, &t.Effort, &rawSkills, &rawCaps); err != nil {
 			rows.Close()
 			return planReviewPlanView{}, fmt.Errorf("read the tasks of plan %d: %w", plan, err)
 		}
+		t.Caps = parseTaskCaps(rawCaps)
 		if rawSkills != "" {
 			var recorded []TaskSkill
 			if err := json.Unmarshal([]byte(rawSkills), &recorded); err != nil {
@@ -337,6 +452,7 @@ func planReviewPlanTx(tx *sql.Tx, plan int64) (planReviewPlanView, error) {
 		} else {
 			tasks[i].Deps = append(tasks[i].Deps, fmt.Sprintf("#%d", dep))
 		}
+		tasks[i].DepIDs = append(tasks[i].DepIDs, dep)
 		if isBase {
 			tasks[i].Base = name
 		}
@@ -526,6 +642,15 @@ func (e *Engine) queuePlanReviewRoundTx(tx *sql.Tx, project, plan, round int64, 
 	if err != nil {
 		return err
 	}
+	// The structural shape (§6.2) reads the engine's round caps and the
+	// project's approval controls beside the plan's own graph.
+	view.RoundCaps = e.cfg.RoundCaps
+	approval, err := projectApprovalTx(tx, project)
+	if err != nil {
+		return err
+	}
+	view.MaxTasks = *approval.MaxTasks
+	view.Budget = approval.Budget
 	others, err := otherActivePlansTx(tx, project, plan)
 	if err != nil {
 		return err

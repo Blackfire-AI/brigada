@@ -79,7 +79,9 @@ func (s *Server) handleArtifactUpload(w http.ResponseWriter, r *http.Request, ru
 // project or all of them; a foreman token is walled into its own (§12.1)
 // — an explicit ask for another project is refused, no ask means its
 // own. Any non-empty last reads the newest page instead of the next one;
-// it has no next cursor and cannot be combined with since.
+// it has no next cursor and cannot be combined with since. plan narrows
+// to one plan's timeline — its own events and its tasks' and jobs' — and
+// composes with task and job.
 func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request, id identity) {
 	if !requireMethod(w, r, http.MethodGet) {
 		return
@@ -103,6 +105,9 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request, id identi
 		return
 	}
 	if q.JobID, err = queryInt64(w, r, "job"); err != nil {
+		return
+	}
+	if q.PlanID, err = queryInt64(w, r, "plan"); err != nil {
 		return
 	}
 	if q.Limit, err = queryInt(w, r, "limit"); err != nil {

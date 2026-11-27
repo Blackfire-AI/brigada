@@ -80,6 +80,10 @@ type Agent struct {
 	Family  string   `json:"family"`
 	Account string   `json:"account"`
 	Classes []string `json:"classes"`
+	// QuotaScope is the quota pool the agent cools with (§8): empty for an
+	// older runner that does not advertise one, which the engine treats as
+	// the account.
+	QuotaScope string `json:"quota_scope,omitempty"`
 	// Effort is the agent's reasoning-effort level; empty when unset.
 	Effort string `json:"effort,omitempty"`
 	// Tools is a claude worker's tool scope (§5.2), "+"-joined or
@@ -105,6 +109,7 @@ func (c *Client) Register(ctx context.Context, agents []Agent, maxParallel int) 
 			Adapter: a.Adapter, Harness: a.Harness, Model: a.Model,
 			Family: a.Family, Account: a.Account, Classes: a.Classes,
 			Effort: a.Effort, Tools: a.Tools, Permission: a.Permission,
+			QuotaScope: a.QuotaScope,
 		}
 	}
 	var out struct {
@@ -242,6 +247,20 @@ func (c *Client) RecordLanded(ctx context.Context, repoURL, branch string, lande
 	return c.call(ctx, http.MethodPost, "/v1/landed", body, nil)
 }
 
+// RecordSync reports sync merges detected from the project's landing
+// branch's Brigada-Sync trailer (§7.1): each entry is one commit
+// carrying a Brigada-Sync trailer, newest first, with the trailer's
+// default branch and head. The engine clears a waiting merge whose
+// recorded commit and trailer match.
+func (c *Client) RecordSync(ctx context.Context, repoURL, branch string, sync []engine.SyncCommit) error {
+	body := struct {
+		RepoURL string              `json:"repo_url"`
+		Branch  string              `json:"branch"`
+		Sync    []engine.SyncCommit `json:"sync"`
+	}{repoURL, branch, sync}
+	return c.call(ctx, http.MethodPost, "/v1/synced", body, nil)
+}
+
 // DueProbes lists the runner's due broken-agent probes (§8 "Health"):
 // the failure-broken agents whose next probe is due, for the runner to
 // probe and report.
@@ -294,6 +313,7 @@ type HistoryQuery struct {
 	ProjectID int64
 	TaskID    int64
 	JobID     int64
+	PlanID    int64
 	Since     string
 	Limit     int
 	Last      bool
@@ -314,6 +334,7 @@ func (c *Client) History(ctx context.Context, q HistoryQuery) (history.Page, err
 	add("project", q.ProjectID)
 	add("task", q.TaskID)
 	add("job", q.JobID)
+	add("plan", q.PlanID)
 	if q.Since != "" {
 		vals.Set("since", q.Since)
 	}

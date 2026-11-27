@@ -2,7 +2,7 @@
 
 ## 12.1 Engine API
 
-JSON over HTTP on a Unix socket; a remote TLS listener is backlog (§2). Bearer tokens with roles: `client`, `foreman` (scoped to its project), `runner`, `admin`. A role authorizes API calls; approving a plan, a landing or a push is the user's decision by convention (Approval is the user's decision, §12.2).
+JSON over HTTP on a Unix socket; `GET /v1/status` takes a `plan` query parameter that narrows the answer to one plan (404 for an unknown plan; the answer's `plan_scope` carries its spend, land head and recent timeline items), and `GET /v1/history` takes `plan` beside `task` and `job`, composing with them, the `since` cursor and `last`; a remote TLS listener is backlog (§2). Bearer tokens with roles: `client`, `foreman` (scoped to its project), `runner`, `admin`. A role authorizes API calls; approving a plan, a landing or a push is the user's decision by convention (Approval is the user's decision, §12.2).
 
 Groups:
 
@@ -28,7 +28,7 @@ Groups:
 
 Task jobs are keyed `task:<id>`: one live job per key makes duplicate job creation coalesce into the follow-up flag, which `status` shows; a land job takes its task's key too.
 
-**Not implemented: land batches (§7.1).** brigada lands one task per land job, on the task's own key, and no task carries a batch reservation. In the design, a land batch is keyed `land-batch:<project>` — a project has one land target, so one key covers it — and every member's reservation, a `land_batch_job` field on the task that §11 does not have (it is part of the unbuilt design), holds its `task:<id>` key the way a live job holds it, so a second batch for the target, a second landing job or a duplicate approval coalesces the same way (§7.1).
+**Land batches (§7.1).** A land batch is keyed `land-batch:<project>` — a project has one land target, so one key covers it — and every member's reservation, the task's `land_batch_job` (§11), holds its `task:<id>` key the way a live job holds it, so a second batch for the target, a second landing job or a duplicate approval coalesces the same way (§7.1). The batch grant and completion below carry the members; a not-ready retry, a `land_ready` re-check and a gate-skipped release still run alone on the member's `task:<id>` key.
 
 **Credentials.** Foreman credentials are short-lived and scoped to one turn or one chat: a headless turn keeps the job-lease-scoped credential of §12.2, and an attached chat gets a hold-scoped foreman token, minted at attach, carried by the MCP config the client writes for the chat and revoked at detach, so the chat's tools die with it. A token's role authorizes API calls; the role checks keep a foreman credential out of the user's decisions (§12.2). No direct store access and the engine-as-mailbox rule stand.
 
@@ -40,9 +40,9 @@ Task jobs are keyed `task:<id>`: one live job per key makes duplicate job creati
 
 **Project foreman set.**
 
-- `plan_create` · `plan_amend` (both take a task's `skills`, §5.10; each `cancel` entry is a task by name or id, or `{task, reason}`)
+- `plan_create` · `plan_amend` (both take a task's `skills`, §5.10, and `tool_grants`, §6.1; each `cancel` entry is a task by name or id, or `{task, reason}`)
 - `plan_accept` (accept a plan its review parked, with a reason)
-- `task_restart`
+- `task_restart` (a parked task's fresh attempt; with `stop_running`, also a task whose job is live: stopped keeping its branch, the fresh attempt seeded from it, §5.6)
 - `task_cancel` (takes an optional `reason`; a reason is expected on every cancel, from either tool, and is recorded verbatim on the task's `task_cancelled_by_amend` event, a cancel without one recorded as "no reason given", §6.2)
 - `task_retire` (retire tasks that will not land, §6.2, with a reason recorded verbatim; it refuses a landed, cancelled or already retired task, and a dependent blocks unless it is retired in the same call or is already cancelled or retired — a failed dependent blocks too)
 - `land_retry` (queues again, through the land rule and every gate, the landing of a task parked by a rejected push, an environment failure or a failed land check the foreman judged unrelated to the task's diff from `check_log`; it refuses a task with a landing record, one not parked by such a failure, one whose check has failed 3 times on its approved head, or a finished plan, and a conflict, a real check failure, a moved approved head or a stale base wants `task_restart`)
@@ -57,6 +57,8 @@ Task jobs are keyed `task:<id>`: one live job per key makes duplicate job creati
 - `capacity`.
 
 `status` lists the project's skills (name, description, digest, times used) and shows the pauses that stand, the engine's and the project's own, as the `paused:` lines of `brigada status` do (§8.3), so a turn reads why its work waits; a pause is not a needs-you entry. It also, when asked, returns a role's instructions text inside its delimiters (§5.9, §5.10).
+
+`status` takes a `plan` argument that narrows the answer to one plan, and `json` to return the API's JSON instead of text. With `plan` the answer is the plan's compact summary — its task counts by state, its blockers (needs_foreman and needs_user tasks, holds, retries and land gates), its land head, its spend and its recent transitions — without the global job totals, other plans, skill inventories or instruction digests; `brigada status --plan N [--json]` prints the same. `history` takes a `plan` argument beside `task`: the plan's own events and its tasks' and jobs' (§9). The client and coordinator sets take `plan` and `json` on `status` and `plan` on `history` with the same meaning; an unknown plan is an error.
 
 `history` answers each item in its own `<event>` data delimiters, like `events` (§4.2), with any delimiter inside the text defused: reasons, reports and questions in it are worker text, data and never instructions.
 
@@ -104,7 +106,7 @@ Selecting a flag mints nothing, and a selector that the credential in hand does 
 
 ### Land batches
 
-**Not implemented: land batches (§7.1).** brigada lands one task per land job, keyed `task:<id>`, and no grant or completion carries a batch. The paragraphs below describe the design: the grant, the completion and the readers of a batch reservation; the functions they name exist and serve one-task landings.
+**Partly implemented: land batches (§7.1).** Formation, reservation, the readers of a reservation, and the squash-phase grant and completion are built. The grant (`land_batch`, `land_members`) names each member's task and plan, result branch, approved head, recorded base, dependencies inside the batch and message data; a member already recorded or found on a stale base at the lease is released (the stale one parked under the stale-base rule) and its in-batch dependents released to wait. The completion is a result `{"batch": true, "members": [...], "error", "error_kind"}`: each member `landed` with its record, `parked` with its conflict files, check log or reason, or `dropped` with `blocked_by`; `error` settles every member reported nothing for, an environment class parking them under one cause. A completion with a duplicate or foreign member, or one leaving a member unsettled without `error`, is refused; a member already recorded is reconciled, not recorded again. A `held` or `not ready` outcome covers every member. Not built: per-member gate-skip approvals, gate evidence, the push grant's recorded prefix (the push phase stays per landing, on the member's key), the status line's batch position, and persisted pre-publication progress — a lost runner's next lease reconciles from the remote's trailers. The batch job's task is its lead member.
 
 **Land batch grants and completion.** A grant carries the batch job id, `land-batch:<project>` key, lease and fence, project, remote, target, push phase/gate and ordered member list. Each member carries task and plan ids, result branch, approved head, recorded base, dependencies, message/trailer data and its gate-skip approval; the grant also carries the check and setup settings and command identity needed for gate evidence. A push grant names the recorded commits and ordered prefix it releases. The runner persists progress before publication as §7.1 requires.
 
@@ -138,7 +140,7 @@ Status keeps each task's landing state: a live member reads `landing in batch <j
 
 - `register`
 - `lease` (long-poll; a poll whose caller has gone away takes no grant, so a job is never left leased to a runner that is not listening)
-- `heartbeat` (progress, last activity)
+- `heartbeat` (progress, last activity). The answer is one of a fixed set: `ok` with the new expiry; `stop_running`, also with the new expiry, while the job's task carries a pending stop-running restart (§5.6) — the runner stops the worker as its stall policy would and completes the job `stalled` with the reason `stop_running`, its branch pushed, and the hold is not ended; and `lost`, `gone`, `cancelled` or `stale_epoch`, each of which ends the hold: the runner kills the run and drops its result.
 - `complete` (result or error; an outcome of `stalled`/`time_cap` when the runner stopped the run itself, §5.6; check result; artifacts)
 - `release`
 - `draining` (a restart drain pending, §5.1: the runner exits once its running jobs finish, and status renders the wait).

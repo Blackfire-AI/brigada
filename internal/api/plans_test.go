@@ -492,3 +492,143 @@ type engineEvent struct {
 	Reason string `json:"reason"`
 	Caller string `json:"caller"`
 }
+
+// TestPlanWaitLandedRoundTrip: the wait_landed task field rides
+// plan_create over the HTTP body and plan_amend over the client to the
+// store, and status shows it (§6.1). A task that omits it reads false.
+func TestPlanWaitLandedRoundTrip(t *testing.T) {
+	ctx := t.Context()
+	e := newEnv(t)
+
+	// plan_create over HTTP: the body's wait_landed reaches the store.
+	body := `{"title":"barrier","tasks":[{"name":"build","spec":"build it"},{"name":"ship","spec":"ship it","deps":["build"],"wait_landed":true}]}`
+	code, _, data := e.do(http.MethodPost, "/v1/plans", "foreman1", "wl-1", []byte(body))
+	if code != http.StatusOK {
+		t.Fatalf("plan_create: %d %s", code, data)
+	}
+	res := decode[planCreateBody](t, data)
+	waitOf := func(task int64) bool {
+		t.Helper()
+		var n int
+		if err := e.st.View(ctx, func(tx *sql.Tx) error {
+			return tx.QueryRow("SELECT wait_landed FROM tasks WHERE id = ?", task).Scan(&n)
+		}); err != nil {
+			t.Fatalf("read wait_landed of task %d: %v", task, err)
+		}
+		return n == 1
+	}
+	build := res.TaskID
+	var ship int64
+	if err := e.st.View(ctx, func(tx *sql.Tx) error {
+		return tx.QueryRow("SELECT id FROM tasks WHERE plan_id = ? AND name = 'ship'", res.PlanID).Scan(&ship)
+	}); err != nil {
+		t.Fatalf("read ship: %v", err)
+	}
+	if waitOf(build) {
+		t.Error("the build task omitted wait_landed but reads true")
+	}
+	if !waitOf(ship) {
+		t.Error("the ship task's wait_landed was not stored")
+	}
+
+	// plan_amend over the client: an added task's wait_landed reaches the
+	// store.
+	c := NewClientWithHTTPClient(&http.Client{Transport: funcTransport(func(r *http.Request) (*http.Response, error) {
+		w := httptest.NewRecorder()
+		e.api.Handler().ServeHTTP(w, r)
+		return w.Result(), nil
+	})}, e.secrets["foreman1"])
+	if _, err := c.AmendPlan(ctx, res.PlanID, PlanAmend{Add: []PlanTask{{Name: "verify", Spec: "verify it", Deps: []string{"ship"}, WaitLanded: true}}}, "wl-2"); err != nil {
+		t.Fatalf("amend: %v", err)
+	}
+	var verify int64
+	if err := e.st.View(ctx, func(tx *sql.Tx) error {
+		return tx.QueryRow("SELECT id FROM tasks WHERE plan_id = ? AND name = 'verify'", res.PlanID).Scan(&verify)
+	}); err != nil {
+		t.Fatalf("read verify: %v", err)
+	}
+	if !waitOf(verify) {
+		t.Error("the verify task's wait_landed was not stored through plan_amend")
+	}
+
+	// status shows it.
+	info, err := e.eng.Status(ctx, e.project1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[int64]bool{}
+	for _, p := range info.Plans {
+		if p.ID != res.PlanID {
+			continue
+		}
+		for _, tk := range p.Tasks {
+			got[tk.ID] = tk.WaitLanded
+		}
+	}
+	if !got[ship] || !got[verify] {
+		t.Errorf("status wait_landed = %v, want ship and verify true", got)
+	}
+	if got[build] {
+		t.Error("status shows build waiting for landing, want false")
+	}
+}
+
+// TestPlanAmendNoteRoundTrip: the amend endpoint carries a note item to
+// the engine and back, an empty note clears, and a settled task is refused
+// naming its state (§6.2).
+func TestPlanAmendNoteRoundTrip(t *testing.T) {
+	ctx := t.Context()
+	st := openFreshStore(t, filepath.Join(t.TempDir(), "store.db"))
+	t.Cleanup(func() { st.Close() })
+	eng := engine.New(st, engine.Config{PlanReview: &planReviewOff})
+	if _, err := eng.SetProjectForeman(ctx, "https://example.invalid/note.git", "claude", "sonnet"); err != nil {
+		t.Fatal(err)
+	}
+	tokens := filepath.Join(t.TempDir(), "tokens")
+	if err := os.WriteFile(tokens, []byte(tokenFileBody), 0600); err != nil {
+		t.Fatal(err)
+	}
+	srv, err := New(ctx, st, eng, nil, tokens)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := NewClientWithHTTPClient(&http.Client{Transport: funcTransport(func(r *http.Request) (*http.Response, error) {
+		w := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(w, r)
+		return w.Result(), nil
+	})}, "foreman-secret-1")
+	plan, err := c.CreatePlan(ctx, PlanCreate{Title: "note", Tasks: []PlanTask{
+		{Name: "build", Spec: "build it"},
+		{Name: "ship", Spec: "ship it", Deps: []string{"build"}},
+	}}, "note-plan")
+	if err != nil {
+		t.Fatal(err)
+	}
+	note := func() (n sql.NullString) {
+		if err := st.View(ctx, func(tx *sql.Tx) error {
+			return tx.QueryRow("SELECT note FROM tasks WHERE name = 'ship'").Scan(&n)
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	res, err := c.AmendPlan(ctx, plan.PlanID, PlanAmend{Note: []PlanNote{{Task: "ship", Note: "use the v2 client"}}}, "note-call")
+	if err != nil || len(res.Noted) != 1 {
+		t.Fatalf("amend = %+v (%v)", res, err)
+	}
+	if got := note(); got.String != "use the v2 client" {
+		t.Errorf("note = %+v", got)
+	}
+	if _, err := c.AmendPlan(ctx, plan.PlanID, PlanAmend{Note: []PlanNote{{Task: "ship", Note: ""}}}, "note-clear"); err != nil {
+		t.Fatal(err)
+	}
+	if got := note(); got.Valid {
+		t.Errorf("note after the clear = %+v, want NULL", got)
+	}
+	if _, err := c.AmendPlan(ctx, plan.PlanID, PlanAmend{Cancel: []PlanCancel{{Task: "ship"}}}, "note-cancel"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.AmendPlan(ctx, plan.PlanID, PlanAmend{Note: []PlanNote{{Task: "ship", Note: "late"}}}, "note-late"); err == nil || !strings.Contains(err.Error(), "cancelled") {
+		t.Errorf("note on a cancelled task: err = %v, want the state named", err)
+	}
+}

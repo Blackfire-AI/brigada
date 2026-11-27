@@ -168,7 +168,7 @@ func TestOpenCreatesEveryTable(t *testing.T) {
 	}
 	want := []string{
 		"agents", "artifacts", "attach_holds", "class_cooldown", "events", "foreman_inbox", "hold_tokens",
-		"idempotency", "jobs", "land_holds", "landings", "lease_tokens", "messages", "meta", "outcomes", "pauses", "plan_mirror_dirty", "plans",
+		"idempotency", "jobs", "land_holds", "land_syncs", "landings", "lease_tokens", "messages", "meta", "outcomes", "pauses", "plan_mirror_dirty", "plans",
 		"projects", "questions", "role_instructions", "runners", "sessions", "skills", "stale_land_refs", "task_deps", "tasks", "tokens",
 	}
 	got := queryStrings(t, s.db, "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
@@ -1022,6 +1022,8 @@ func TestSchemaEditsMatchTheirMigrations(t *testing.T) {
 		64: "role_instructions",
 		71: "task_retired",
 		79: "task_branch_sweep",
+		84: "land_sync",
+		89: "land_batch",
 	}
 	migs, err := allMigrations()
 	if err != nil {
@@ -1053,14 +1055,12 @@ func TestSchemaEditsMatchTheirMigrations(t *testing.T) {
 // landing record and the gate hold.
 func TestLandJobMigration(t *testing.T) {
 	f := newFixture(t)
-	// A land job always belongs to a task, so the pairing CHECK holds for
-	// it without change; a land job without a task is refused.
+	// A land job belongs to a task; 0089 also admits the task-less batch
+	// land job (§7.1), so a land job without a task is accepted too.
 	exec(t, f.db, `INSERT INTO jobs (project_id, task_id, kind, key, mode, prompt, status, created_at, updated_at)
 		VALUES (?, ?, 'land', 'land-key', 'fresh', '', 'queued', ?, ?)`, f.project, f.task, ts, ts)
-	if _, err := f.db.Exec(`INSERT INTO jobs (project_id, task_id, kind, key, mode, prompt, status, created_at, updated_at)
-		VALUES (?, NULL, 'land', 'land-without-task', 'fresh', '', 'queued', ?, ?)`, f.project, ts, ts); err == nil || !strings.Contains(err.Error(), "CHECK") {
-		t.Errorf("land job without a task: err = %v; want a CHECK failure", err)
-	}
+	exec(t, f.db, `INSERT INTO jobs (project_id, task_id, kind, key, mode, prompt, status, created_at, updated_at)
+		VALUES (?, NULL, 'land', 'land-batch:1', 'fresh', '', 'queued', ?, ?)`, f.project, ts, ts)
 
 	exec(t, f.db, `INSERT INTO landings (task_id, project_id, target_branch, commit_sha, pushed, created_at)
 		VALUES (?, ?, 'main', 'abc123', 'pushed', ?)`, f.task, f.project, ts)
@@ -1155,6 +1155,113 @@ func TestTaskSettledAtMigrationKeepsTheRows(t *testing.T) {
 	exec(t, s.db, "UPDATE tasks SET settled_at = ? WHERE id = ?", ts, task)
 	if got := queryString(t, s.db, "SELECT settled_at FROM tasks WHERE id = ?", task); got != ts {
 		t.Errorf("settled_at = %q, want %q", got, ts)
+	}
+}
+
+// TestTaskWaitLandedMigrationBackfillsFalse builds the store of a binary
+// that predates 0086_task_wait_landed — a task mid-flight — and opens it
+// with this binary: the column exists, every old row reads 0 (nothing
+// waited for landing under the old binary's writes), and the column
+// takes only 0 or 1.
+func TestTaskWaitLandedMigrationBackfillsFalse(t *testing.T) {
+	migs, err := allMigrations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := 0
+	for _, m := range migs {
+		if m.name == "task_wait_landed" {
+			before = m.version - 1
+			break
+		}
+	}
+	if before == 0 {
+		t.Fatal("task_wait_landed migration not found in allMigrations")
+	}
+	path := filepath.Join(t.TempDir(), "store.db")
+	db, err := sql.Open("sqlite", dsn(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range migs[:before] {
+		exec(t, db, m.sql)
+	}
+	exec(t, db, "PRAGMA user_version = "+strconv.Itoa(before))
+	project := insertProject(t, db)
+	plan := insertPlan(t, db, project)
+	task := insertTask(t, db, plan)
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s := openStore(t, path)
+	if cols := queryStrings(t, s.db, "SELECT name FROM pragma_table_info('tasks')"); !slices.Contains(cols, "wait_landed") {
+		t.Errorf("tasks after upgrade has no wait_landed column: %v", cols)
+	}
+	if got := queryInt(t, s.db, "SELECT wait_landed FROM tasks WHERE id = ?", task); got != 0 {
+		t.Errorf("existing task wait_landed = %d, want 0: no old row waited for landing", got)
+	}
+	exec(t, s.db, "UPDATE tasks SET wait_landed = 1 WHERE id = ?", task)
+	if got := queryInt(t, s.db, "SELECT wait_landed FROM tasks WHERE id = ?", task); got != 1 {
+		t.Errorf("wait_landed = %d, want 1 after the update", got)
+	}
+	if _, err := s.db.Exec("UPDATE tasks SET wait_landed = 2 WHERE id = ?", task); err == nil || !strings.Contains(err.Error(), "CHECK") {
+		t.Errorf("wait_landed = 2: err = %v; want a CHECK failure", err)
+	}
+}
+
+// TestTaskToolGrantsMigrationKeepsTheRows builds the store of a binary
+// that predates 0087_task_tool_grants — the store carrying 0086 — and
+// opens it with this binary: the column exists, every old row grants
+// none (the empty default), the rows keep their values, and the column
+// takes the JSON array the engine writes, never NULL.
+func TestTaskToolGrantsMigrationKeepsTheRows(t *testing.T) {
+	migs, err := allMigrations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := 0
+	for _, m := range migs {
+		if m.name == "task_tool_grants" {
+			before = m.version - 1
+			break
+		}
+	}
+	if before != 86 {
+		t.Fatalf("task_tool_grants applies after version %d, want 86 (0086_task_wait_landed)", before)
+	}
+	path := filepath.Join(t.TempDir(), "store.db")
+	db, err := sql.Open("sqlite", dsn(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range migs[:before] {
+		exec(t, db, m.sql)
+	}
+	exec(t, db, "PRAGMA user_version = "+strconv.Itoa(before))
+	project := insertProject(t, db)
+	plan := insertPlan(t, db, project)
+	task := insertTask(t, db, plan)
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s := openStore(t, path)
+	if cols := queryStrings(t, s.db, "SELECT name FROM pragma_table_info('tasks')"); !slices.Contains(cols, "tool_grants") {
+		t.Errorf("tasks after upgrade has no tool_grants column: %v", cols)
+	}
+	if got := queryString(t, s.db, "SELECT tool_grants FROM tasks WHERE id = ?", task); got != "" {
+		t.Errorf("old task tool_grants = %q, want '': no old row grants anything", got)
+	}
+	if got := queryString(t, s.db, "SELECT state FROM tasks WHERE id = ?", task); got != "ready" {
+		t.Errorf("existing task state = %q, want ready untouched", got)
+	}
+	// The column takes the JSON array of patterns the engine writes.
+	grants := `["Bash(git merge:*)","Bash(git checkout:*)"]`
+	exec(t, s.db, "UPDATE tasks SET tool_grants = ? WHERE id = ?", grants, task)
+	if got := queryString(t, s.db, "SELECT tool_grants FROM tasks WHERE id = ?", task); got != grants {
+		t.Errorf("tool_grants = %q, want %q", got, grants)
+	}
+	if _, err := s.db.Exec("UPDATE tasks SET tool_grants = NULL WHERE id = ?", task); err == nil {
+		t.Error("tool_grants took NULL, want the NOT NULL refusal")
 	}
 }
 
@@ -1305,5 +1412,109 @@ func TestForemanSessionCwdMigrationClearsForemanSessions(t *testing.T) {
 		if got := queryString(t, s.db, "SELECT COALESCE(harness_session_id, '') FROM sessions WHERE key = ?", key); got != want {
 			t.Errorf("session %s = %q, want %q", key, got, want)
 		}
+	}
+}
+
+// TestTaskNoteMigrationKeepsTheRows builds the store of a binary that
+// predates 0088_task_note — the store carrying 0087 — and opens it with
+// this binary: the column exists, every old row has no pending note
+// (NULL), the rows keep their values, and the column takes a note.
+func TestTaskNoteMigrationKeepsTheRows(t *testing.T) {
+	migs, err := allMigrations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := 0
+	for _, m := range migs {
+		if m.name == "task_note" {
+			before = m.version - 1
+			break
+		}
+	}
+	if before != 87 {
+		t.Fatalf("task_note applies after version %d, want 87 (0087_task_tool_grants)", before)
+	}
+	path := filepath.Join(t.TempDir(), "store.db")
+	db, err := sql.Open("sqlite", dsn(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range migs[:before] {
+		exec(t, db, m.sql)
+	}
+	exec(t, db, "PRAGMA user_version = "+strconv.Itoa(before))
+	project := insertProject(t, db)
+	plan := insertPlan(t, db, project)
+	task := insertTask(t, db, plan)
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s := openStore(t, path)
+	if cols := queryStrings(t, s.db, "SELECT name FROM pragma_table_info('tasks')"); !slices.Contains(cols, "note") {
+		t.Errorf("tasks after upgrade has no note column: %v", cols)
+	}
+	if got := queryInt(t, s.db, "SELECT note IS NULL FROM tasks WHERE id = ?", task); got != 1 {
+		t.Errorf("old task note is not NULL: no old row has a pending note")
+	}
+	if got := queryString(t, s.db, "SELECT state FROM tasks WHERE id = ?", task); got != "ready" {
+		t.Errorf("existing task state = %q, want ready untouched", got)
+	}
+	exec(t, s.db, "UPDATE tasks SET note = 'use v2' WHERE id = ?", task)
+	if got := queryString(t, s.db, "SELECT note FROM tasks WHERE id = ?", task); got != "use v2" {
+		t.Errorf("note = %q", got)
+	}
+}
+
+// TestTaskStopPendingMigrationKeepsTheRows builds the store of a binary
+// that predates 0090_task_stop_pending — the store carrying 0089 — and
+// opens it with this binary: both columns exist, every old task has no
+// pending stop-running restart and every old job no seed (NULL), the
+// rows keep their values, and the columns take values.
+func TestTaskStopPendingMigrationKeepsTheRows(t *testing.T) {
+	migs, err := allMigrations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := 0
+	for _, m := range migs {
+		if m.name == "task_stop_pending" {
+			before = m.version - 1
+			break
+		}
+	}
+	if before != 89 {
+		t.Fatalf("task_stop_pending applies after version %d, want 89 (0089_land_batch)", before)
+	}
+	path := filepath.Join(t.TempDir(), "store.db")
+	db, err := sql.Open("sqlite", dsn(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range migs[:before] {
+		exec(t, db, m.sql)
+	}
+	exec(t, db, "PRAGMA user_version = "+strconv.Itoa(before))
+	project := insertProject(t, db)
+	plan := insertPlan(t, db, project)
+	task := insertTask(t, db, plan)
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s := openStore(t, path)
+	if cols := queryStrings(t, s.db, "SELECT name FROM pragma_table_info('tasks')"); !slices.Contains(cols, "stop_pending") {
+		t.Errorf("tasks after upgrade has no stop_pending column: %v", cols)
+	}
+	if cols := queryStrings(t, s.db, "SELECT name FROM pragma_table_info('jobs')"); !slices.Contains(cols, "seed_branch") {
+		t.Errorf("jobs after upgrade has no seed_branch column: %v", cols)
+	}
+	if got := queryInt(t, s.db, "SELECT stop_pending IS NULL FROM tasks WHERE id = ?", task); got != 1 {
+		t.Errorf("old task stop_pending is not NULL: no old row has a pending restart")
+	}
+	if got := queryString(t, s.db, "SELECT state FROM tasks WHERE id = ?", task); got != "ready" {
+		t.Errorf("existing task state = %q, want ready untouched", got)
+	}
+	exec(t, s.db, "UPDATE tasks SET stop_pending = '' WHERE id = ?", task)
+	if got := queryInt(t, s.db, "SELECT stop_pending IS NOT NULL FROM tasks WHERE id = ?", task); got != 1 {
+		t.Errorf("an empty pending note did not read as pending")
 	}
 }

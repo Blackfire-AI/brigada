@@ -70,7 +70,7 @@ func reviewAuthorTx(tx *sql.Tx, j *jobRow) (int64, error) {
 // structurally, the retry is unservable and the task parks — an agent
 // that failed the attempt never takes it again.
 func noReviewAgentTx(tx *sql.Tx, reviewFamily string, j *jobRow) (bool, error) {
-	agents, err := qualifyingAgentRowsTx(tx, reviewFamily, 0, j, string(KindReview), "")
+	agents, _, err := qualifyingAgentRowsTx(tx, reviewFamily, 0, j, string(KindReview), "")
 	return len(agents) == 0, err
 }
 

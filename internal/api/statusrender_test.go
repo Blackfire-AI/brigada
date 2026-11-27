@@ -251,6 +251,43 @@ func TestStatusSectionsShowsSkills(t *testing.T) {
 	}
 }
 
+// TestStatusSectionsShowsWaitLanded: a task whose release waits for
+// landing (§6.1) carries the marker beside tier and effort; one that
+// does not shows no word.
+func TestStatusSectionsShowsWaitLanded(t *testing.T) {
+	st := Status{Plans: []engine.StatusPlan{{ID: 1, Tasks: []engine.StatusTask{
+		{ID: 1, Title: "gated", State: "pending", WaitLanded: true},
+		{ID: 2, Title: "plain", State: "pending"},
+	}}}}
+	got := StatusSections(st)
+	if !strings.Contains(got, "  task #1 pending gated  wait-landed") {
+		t.Errorf("status lacks the wait-landed marker beside the task:\n%s", got)
+	}
+	if strings.Contains(got, "task #2 pending plain  wait-landed") {
+		t.Errorf("a task that does not wait for landing shows the marker:\n%s", got)
+	}
+}
+
+// TestStatusSectionsShowsPendingNote: a task's pending note (§6.2) rides
+// its line, on one line and bounded; a task without one shows none.
+func TestStatusSectionsShowsPendingNote(t *testing.T) {
+	st := Status{Plans: []engine.StatusPlan{{ID: 1, Tasks: []engine.StatusTask{
+		{ID: 1, Title: "noted", State: "pending", Note: "use the v2\nclient"},
+		{ID: 2, Title: "long", State: "pending", Note: strings.Repeat("x", 200)},
+		{ID: 3, Title: "plain", State: "pending"},
+	}}}}
+	got := StatusSections(st)
+	if !strings.Contains(got, `note: "use the v2 client"`) {
+		t.Errorf("status lacks the pending note:\n%s", got)
+	}
+	if !strings.Contains(got, strings.Repeat("x", 80)+"…") || strings.Contains(got, strings.Repeat("x", 81)) {
+		t.Errorf("a long note is not cut at 80 runes:\n%s", got)
+	}
+	if strings.Contains(got, "plain  note") || strings.Count(got, "note:") != 2 {
+		t.Errorf("a task without a note shows one:\n%s", got)
+	}
+}
+
 // TestStatusSectionsLandReadyStates: the land_ready gate's target state
 // (issue #87) rides the task line — ready, the hold, and the not-ready
 // backoff's wait.
@@ -363,5 +400,37 @@ func TestOneLineCutsOnARune(t *testing.T) {
 		if got != tc.want || !utf8.ValidString(got) {
 			t.Errorf("oneLine(%q, %d) = %q, want %q", tc.s, tc.max, got, tc.want)
 		}
+	}
+}
+
+// TestStatusSectionsCoolingNamesScope: the cooling line names the quota
+// scope when the agent has one and the account when it has none.
+func TestStatusSectionsCoolingNamesScope(t *testing.T) {
+	got := StatusSections(Status{Cooling: []engine.CoolingAgent{
+		{ID: 1, Harness: "opencode", Model: "zai-coding-plan/glm-5.4", Account: "work", QuotaScope: "opencode/zai-coding-plan", Until: "U1"},
+		{ID: 2, Harness: "claude", Model: "sonnet", Account: "work", Until: "U2"},
+	}})
+	for _, want := range []string{
+		"cooling: opencode/zai-coding-plan/glm-5.4 until U1 (scope opencode/zai-coding-plan)",
+		"cooling: claude/sonnet until U2 (account work)",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("status = %q, want the line %q", got, want)
+		}
+	}
+}
+
+// TestStatusSectionsLandTargetLag: the lag line (§7.1) rides on status
+// only for a project that reports one — the engine lists a project only
+// with a land target set and a count above zero — and reads the same on
+// the CLI and the MCP tool, which share StatusSections.
+func TestStatusSectionsLandTargetLag(t *testing.T) {
+	line := "land target is 3 commits behind main (project #1)"
+	lag := Status{LandSyncs: []engine.StatusLandSync{{ProjectID: 1, DefaultBranch: "main", TargetBranch: "brigada/landed", Behind: 3}}}
+	if got := StatusSections(lag); !strings.Contains(got, line) {
+		t.Errorf("status sections = %q, want the line %q", got, line)
+	}
+	if got := StatusSections(Status{}); strings.Contains(got, "commits behind") {
+		t.Errorf("status without a lag = %q, want no lag line", got)
 	}
 }

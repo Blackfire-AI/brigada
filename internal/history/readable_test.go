@@ -43,6 +43,7 @@ func TestEventWords(t *testing.T) {
 		{"agent_recovered", readableEvent("agent_recovered", 0, 0, `{"harness":"codex","model":"gpt-5"}`), "codex/gpt-5 recovered"},
 		{"agent_cooling", readableEvent("agent_cooling", 3, 5, `{"account":"work","until":"U"}`), "work cooling until <U>"},
 		{"agent_cooling without a deadline", readableEvent("agent_cooling", 3, 5, `{"account":"work"}`), "work cooling"},
+		{"agent_cooling names the scope", readableEvent("agent_cooling", 3, 5, `{"account":"work","quota_scope":"opencode/zai-coding-plan","until":"U"}`), "opencode/zai-coding-plan cooling until <U>"},
 		{"foreman_report", readableEvent("foreman_report", 0, 41, `{"report":"all landed"}`), "report #41"},
 		{"foreman_turn_moved", readableEvent("foreman_turn_moved", 0, 41, `{"harness":"codex","model":"default","from_harness":"claude","from_model":"opus"}`), "foreman turn #41 moved claude/opus to codex/default"},
 	}
@@ -183,6 +184,7 @@ func TestEventColumns(t *testing.T) {
 		{readableEvent("agent_recovered", 0, 0, `{"harness":"codex","model":"gpt-5"}`), EventCols{Kind: "agent", What: "recovered", Subject: "codex/gpt-5"}},
 		{readableEvent("agent_cooling", 3, 5, `{"account":"work","until":"U"}`), EventCols{Kind: "agent", What: "cooling", Subject: "work until <U>"}},
 		{readableEvent("agent_cooling", 3, 5, `{"account":"work"}`), EventCols{Kind: "agent", What: "cooling", Subject: "work"}},
+		{readableEvent("agent_cooling", 3, 5, `{"account":"work","quota_scope":"zai"}`), EventCols{Kind: "agent", What: "cooling", Subject: "zai"}},
 		{readableEvent("foreman_report", 0, 41, `{}`), EventCols{Kind: "report", What: "#41"}},
 		{readableEvent("foreman_turn_moved", 0, 41, `{"harness":"codex","model":"default","from_harness":"claude","from_model":"opus"}`),
 			EventCols{Kind: "foreman", What: "turn moved", Subject: "claude/opus to codex/default"}},

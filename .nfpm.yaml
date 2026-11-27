@@ -1,0 +1,23 @@
+# nfpm package config for the release workflow's .deb and .rpm files. The
+# workflow sets ARCH (amd64 or arm64), VERSION (the tag without its leading v
+# and any -suffix) and PRERELEASE (the suffix, empty for a final tag), and runs:
+#   nfpm package --config .nfpm.yaml --packager <deb|rpm> --target dist/
+name: brigada
+arch: ${ARCH}
+platform: linux
+version: ${VERSION}
+prerelease: ${PRERELEASE}
+maintainer: Evgeny Dolgov <504068+the-mad-dog@users.noreply.github.com>
+description: Talk to the foreman. It splits the work into tasks; brigada gives each task to the agent with the best measured record on your repo among those with quota left, checks and cross-reviews the result, and learns from the outcome.
+vendor: Blackfire AI
+homepage: https://github.com/Blackfire-AI/brigada
+license: Apache-2.0
+depends:
+  - git
+contents:
+  # nfpm expands ${ARCH} in a content source only when expand is set.
+  - src: dist/brigada-linux-${ARCH}
+    dst: /usr/bin/brigada
+    expand: true
+    file_info:
+      mode: 0755

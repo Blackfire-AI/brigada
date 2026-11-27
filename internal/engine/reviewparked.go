@@ -46,7 +46,13 @@ func reviewParkedText(tx *sql.Tx, job *jobRow, outcome, why string) (string, err
 	if branch != "" {
 		review = "brigada review --branch " + branch
 	}
-	b.WriteString("\noptions: task_restart with a note, or review it by hand (" + review + ") and land it")
+	// The offers are the three ways a spent review retry moves forward
+	// without redoing the implementation: retry the review alone (the
+	// hand review, on the completed head), raise the review tier and
+	// review again, or change the review policy — add a reviewer, or
+	// change review.family. task_restart is never offered: that is new
+	// implementation work, which the completed head does not need.
+	b.WriteString("\noptions: retry the review alone (" + review + ") and land it; raise the review tier with plan_amend and review again; or change the review policy (add a reviewer, or review.family)")
 	return boundNote(b.String()), nil
 }
 

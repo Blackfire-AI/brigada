@@ -17,7 +17,7 @@ import (
 // selects an archive directory when it names one, and its digest verifies
 // the text found there; when no directory matches, [FindByDigest] finds
 // the text by digest alone.
-const Version = "1.1.0"
+const Version = "1.3.0"
 
 // Texts holds the role texts and skill files at their package-relative paths.
 //
@@ -40,7 +40,7 @@ var Roles = []string{"foreman", "plan_review", "reviewer", "worker"}
 
 // Skills are the task-shape skills the package carries, each at
 // skills/<name>/SKILL.md.
-var Skills = []string{"bugfix", "cli-flag", "config-setting", "dependency", "docs-change", "refactor", "schema-migration", "surface-parity"}
+var Skills = []string{"bugfix", "cli-flag", "config-setting", "dependency", "docs-change", "early-verification", "refactor", "schema-migration", "surface-parity"}
 
 // Digest returns the lowercase SHA-256 digest of an instruction text.
 func Digest(text string) string {

@@ -30,7 +30,7 @@ func TestServeCallIssueRead(t *testing.T) {
 	issueFetchStub = func(_ context.Context, repoURL string, number int, comments bool) (*engine.Issue, error) {
 		gotRepo, gotNumber, gotComments = repoURL, number, comments
 		return &engine.Issue{Number: number, Title: "Fix the frobnicator", Body: "it frobs", Author: "octocat",
-			PullRequest: true, Comments: []engine.IssueComment{{Author: "reviewer", Body: "seconded"}}}, nil
+			PullRequest: true, State: "closed", Labels: []string{"bug", "help wanted"}, Comments: []engine.IssueComment{{Author: "reviewer", Body: "seconded"}}}, nil
 	}
 	t.Cleanup(func() { issueFetchStub = old })
 	e := newEnvToken(t, foremanTokenFile, "foreman-secret-9")
@@ -45,6 +45,8 @@ func TestServeCallIssueRead(t *testing.T) {
 		"\n<issue>\n",
 		"#12 Fix the frobnicator (pull request)",
 		"by octocat",
+		"state: closed",
+		"labels: bug, help wanted",
 		"it frobs",
 		"comment by reviewer:",
 		"seconded",

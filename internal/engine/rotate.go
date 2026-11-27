@@ -175,7 +175,11 @@ func foremanPromptTx(tx *sql.Tx, reviewFamily string, project int64, inbox Forem
 	if err != nil {
 		return "", err
 	}
-	return foreman.ComposePromptDigest(text, digest, inbox.Events, inbox.UserMessages), nil
+	heads, err := landHeadsTx(tx, project)
+	if err != nil {
+		return "", err
+	}
+	return foreman.ComposePromptDigest(text, digest, inbox.Events, inbox.UserMessages) + foreman.LandHeadsNote(heads), nil
 }
 
 // foremanDigestTx writes the digest a fresh session starts from (§4.2):

@@ -148,6 +148,12 @@ func (e *Engine) heartbeatTx(tx *sql.Tx, owner, jobID int64, leaseID string, pro
 			if err := e.foremanFinishedTx(tx, job, statusFailed, now); err != nil {
 				return "", time.Time{}, err
 			}
+			// A capped job whose task waited on a stop-running restart
+			// ends without a stop completion: the restart is consumed
+			// here, unseeded (§5.6).
+			if _, err := e.consumeStopPendingTx(tx, job.ProjectID, job.TaskID, "", now); err != nil {
+				return "", time.Time{}, err
+			}
 			return AnsLost, time.Time{}, nil
 		}
 	}
@@ -187,6 +193,15 @@ func (e *Engine) heartbeatTx(tx *sql.Tx, owner, jobID int64, leaseID string, pro
 	// token to the same expiry (§12.1).
 	if err := extendLeaseTokensTx(tx, job.ID, expires); err != nil {
 		return "", time.Time{}, err
+	}
+	// A pending stop-running restart (§5.6) asks the runner to stop the
+	// worker, push and complete stalled; the lease is extended all the
+	// same, since that completion still needs it. Every beat repeats the
+	// answer until the job ends, a re-lease's included.
+	if stop, err := stopRunningTx(tx, job); err != nil {
+		return "", time.Time{}, err
+	} else if stop {
+		return AnsStopRunning, expires, nil
 	}
 	return AnsOK, expires, nil
 }
@@ -346,6 +361,13 @@ func (e *Engine) completeTx(tx *sql.Tx, owner, jobID int64, leaseID string, c Co
 			return "", err
 		}
 	}
+	// A sync attempt drops the same stale ref (§7.1): the landings that
+	// waited on it land again, and the waiting sync's merge is forgotten.
+	if job.Kind == KindSync && c.StaleDropped != "" {
+		if err := e.syncStaleDroppedTx(tx, job, c.StaleDropped, now); err != nil {
+			return "", err
+		}
+	}
 
 	// A stop outcome ends the job as stalled (§5.6); the land_ready
 	// gate's outcomes (issue #87) end it done, for the gate answered.
@@ -404,11 +426,11 @@ func (e *Engine) completeTx(tx *sql.Tx, owner, jobID int64, leaseID string, c Co
 	if err != nil {
 		return "", err
 	}
-	if c.Result != "" && job.Kind != KindLand && job.Kind != KindSweep {
+	if c.Result != "" && job.Kind != KindLand && job.Kind != KindSweep && job.Kind != KindSync {
 		// The run's answer is a conversation item too (§9): what the
-		// worker ended saying, kept with the event that ended the job. Land
-		// and sweep jobs have no worker; their internal records are the job's
-		// result and the events below, never a worker's words.
+		// worker ended saying, kept with the event that ended the job. Land,
+		// sweep and sync jobs have no worker; their internal records are the
+		// job's result and the events below, never a worker's words.
 		if err := appendMessageTx(tx, job.ProjectID, eventID, msgKindWorkerResult,
 			authorWorker, workerResultMessage(c.Result), now); err != nil {
 			return "", err
@@ -464,6 +486,12 @@ func (e *Engine) completeTx(tx *sql.Tx, owner, jobID int64, leaseID string, c Co
 		// A landing (§7.1): the completion's payload is the landing
 		// record, and the task lands or parks on its outcome.
 		return AnsOK, e.landCompletedTx(tx, job, c, now)
+	}
+	if job.Kind == KindSync {
+		// The land-target sync (§7.1): the completion's payload is the
+		// sync record; the project's standing record and gate move on its
+		// outcome, and no task parks.
+		return AnsOK, e.syncCompletedTx(tx, job, c, now)
 	}
 	if job.Kind == KindPlanReview {
 		// A plan review (§6.2): the verdict block moves the plan,
@@ -615,6 +643,13 @@ func (e *Engine) cancelTx(tx *sql.Tx, job *jobRow, reason string, now time.Time)
 	}
 	if err := revokeLeaseTokensTx(tx, job.ID); err != nil {
 		return "", err
+	}
+	// A cancelled task job leaves no stop-running restart to consume
+	// (§5.6): its stop never completes.
+	if job.TaskID != 0 && job.Key == fmt.Sprintf("task:%d", job.TaskID) {
+		if err := clearStopPendingTx(tx, job.TaskID, now); err != nil {
+			return "", err
+		}
 	}
 	if _, err := appendEventTx(tx, evJobCancelled, job.ProjectID, job.TaskID, job.ID,
 		eventPayload{Reason: reason}, now); err != nil {

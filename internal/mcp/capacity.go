@@ -51,8 +51,12 @@ func callCapacity(ctx context.Context, c *api.Client, _ json.RawMessage) (string
 		case a.Permission != "":
 			tools = " permission=" + a.Permission
 		}
-		fmt.Fprintf(&b, "agent %d %s/%s tier=%s effort=%s account=%s cap=%s running=%d quota=%s cost=%d%s\n",
-			a.ID, a.Harness, a.Model, a.Tier, a.Effort, a.Account, cap, a.Running, quota, a.Cost, tools)
+		scope := ""
+		if a.QuotaScope != "" {
+			scope = " scope=" + a.QuotaScope
+		}
+		fmt.Fprintf(&b, "agent %d %s/%s tier=%s effort=%s account=%s%s cap=%s running=%d quota=%s cost=%d%s\n",
+			a.ID, a.Harness, a.Model, a.Tier, a.Effort, a.Account, scope, cap, a.Running, quota, a.Cost, tools)
 	}
 	for _, l := range snap.Layers {
 		name := l.Layer

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	mrand "math/rand"
+	"net/http"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -32,6 +33,7 @@ const (
 	KindLand       Kind = "land"        // a landing (§7.1): no worker, a runner with git
 	KindPlanReview Kind = "plan_review" // a plan review (§6.2): no task, an agent of a family other than the foreman's
 	KindSweep      Kind = "sweep"       // dead task branches (§13.2): no task or worker, a runner with git
+	KindSync       Kind = "sync"        // the land-target sync (§7.1): no task or worker, a runner with git
 )
 
 // Mode is how the runner starts the job (§5.6): a fresh session, or a
@@ -117,7 +119,17 @@ const (
 	AnsLost       Answer = "lost"        // the lease belongs to someone else now
 	AnsStaleEpoch Answer = "stale_epoch" // fenced out by a recover (§6.4)
 	AnsExpired    Answer = "expired"     // attach release: the hold lapsed first; the session id was still written
+	// AnsStopRunning is a heartbeat's answer while the job's task carries
+	// a pending stop-running restart (§5.6, §12.3): the lease is extended
+	// as for ok, and the runner stops the worker as its own stall policy
+	// would, pushes the branch and completes the job stalled, the result
+	// block's reason StopRunningReason.
+	AnsStopRunning Answer = "stop_running"
 )
+
+// StopRunningReason is the reason a run stopped by AnsStopRunning names
+// in its stalled result block (§5.6).
+const StopRunningReason = "stop_running"
 
 // RoundCaps are the per-task caps on feedback rounds and restarts (§7,
 // §6.1). Fix caps
@@ -155,6 +167,16 @@ type Config struct {
 	// job's current lease (§5.6). Entries here override the
 	// defaults for their kind only.
 	HardCaps map[Kind]time.Duration
+	// ClassCaps are the runner's effective wall-time caps per job kind
+	// (§5.6): what a runner stops a run at, one 5-minute margin under
+	// the engine's own hard cap so the runner saves the work first. A
+	// job's lease grant carries its kind's entry, and the runner's stall
+	// policy takes it over its own default. Zero — the value for a kind
+	// with no runner cap, and the default when nothing sets the map —
+	// lets the runner decide its own cap. The engine's lifecycle fills
+	// this from the runner's defaults and the config file's
+	// time_cap_minutes keys.
+	ClassCaps map[Kind]time.Duration
 	// RoundCaps are the default per-task round caps; a task's caps JSON
 	// (fix_rounds, review_rounds, restart) overrides them per task.
 	RoundCaps RoundCaps
@@ -207,6 +229,12 @@ type Config struct {
 	// LimitCooling is how long a task job's limit with no known reset
 	// cools its account (§8 "Quota"); zero keeps 30 minutes.
 	LimitCooling time.Duration
+	// CoolingWait is how long a queued task job waits for its cooling
+	// agents to reset before the sweep parks it with a needs-you line
+	// naming the agent, its reset and the bound (§8.1); zero keeps the
+	// default. It bounds a cooling hold, so a job never waits silently
+	// on a quota reset days away.
+	CoolingWait time.Duration
 	// FailureStreak is how many consecutive failed completions by one
 	// agent mark it broken (§8 "Health"); zero keeps 2.
 	FailureStreak int
@@ -254,10 +282,24 @@ type Config struct {
 	// Nil keeps the git-backed default; tests inject it.
 	BranchTrailers func(ctx context.Context, repoURL, base, branch string) (string, error)
 	// IssueFetch reads one issue or pull request of the repository at
-	// repoURL (§12.2 issue_read): GET requests alone. Nil keeps the
-	// gh-backed default — the user's own gh login on the engine's host;
+	// repoURL (§12.2 issue_read) for a project whose tracker is github or
+	// unset; gitea reads through TrackerHTTP and none reads nothing. GET
+	// requests alone. Nil keeps the gh-backed default — the user's own gh login on the engine's host;
 	// tests inject it so no test reaches the network.
 	IssueFetch func(ctx context.Context, repoURL string, number int, comments bool) (*Issue, error)
+	// TrackerToken resolves the token of the forge at host (host[:port] of
+	// a project's tracker_url) from the machine config's
+	// tracker.<host>.token reference, at the moment an issue is fetched;
+	// ok is false when no reference is configured. Nil = no token is
+	// configured for any host. The engine hands the token to the forge
+	// request alone: never to a job's environment, the store, a log or an
+	// error.
+	TrackerToken func(host string) (token string, ok bool, err error)
+	// TrackerHTTP is the client a gitea tracker is read with (§12.2), GET
+	// requests alone. Nil keeps a plain client with a 30 s timeout; tests
+	// inject one, and point tracker_url at a local test server, so no
+	// test reaches the network.
+	TrackerHTTP *http.Client
 	// Warnf logs the warnings of work the engine does best-effort, the
 	// plan-file mirror's failed pushes among them; nil logs to the
 	// standard logger.
@@ -294,6 +336,7 @@ func DefaultConfig() Config {
 		NewLeaseToken:     newLeaseToken,
 		Rand:              mrand.Float64,
 		LimitCooling:      defaultLimitCooling,
+		CoolingWait:       defaultCoolingWait,
 		FailureStreak:     defaultFailureStreak,
 		RunnerStale:       defaultRunnerStale,
 		ProbeDelay:        defaultProbeDelay,
@@ -426,6 +469,14 @@ func New(s *store.Store, cfg Config) *Engine {
 			def.HardCaps[kind] = limit
 		}
 	}
+	for kind, limit := range cfg.ClassCaps {
+		if limit > 0 {
+			if def.ClassCaps == nil {
+				def.ClassCaps = map[Kind]time.Duration{}
+			}
+			def.ClassCaps[kind] = limit
+		}
+	}
 	if cfg.RoundCaps.Fix > 0 {
 		def.RoundCaps.Fix = cfg.RoundCaps.Fix
 	}
@@ -483,6 +534,9 @@ func New(s *store.Store, cfg Config) *Engine {
 	if cfg.LimitCooling > 0 {
 		def.LimitCooling = cfg.LimitCooling
 	}
+	if cfg.CoolingWait > 0 {
+		def.CoolingWait = cfg.CoolingWait
+	}
 	if cfg.FailureStreak > 0 {
 		def.FailureStreak = cfg.FailureStreak
 	}
@@ -513,6 +567,8 @@ func New(s *store.Store, cfg Config) *Engine {
 	if cfg.IssueFetch != nil {
 		def.IssueFetch = cfg.IssueFetch
 	}
+	def.TrackerToken = cfg.TrackerToken
+	def.TrackerHTTP = cfg.TrackerHTTP
 	if cfg.SnapshotEvery > 0 {
 		def.SnapshotEvery = cfg.SnapshotEvery
 	}

@@ -157,42 +157,47 @@ dsh (experimental): init can't check sign-in.
               agent's permission=
     qwen-code edit files and run any command without asking
   [1mFiles[0m in this repository (brigada never commits them):
-    [38;2;95;215;95mnew[0m        .brigada/project.yaml                      [38;2;138;143;152mthe settings above[0m
-    [38;2;95;215;95mnew[0m        .brigada/instructions/foreman.md           [38;2;138;143;152mdefault foreman
-                                                          instructions[0m
-    [38;2;95;215;95mnew[0m        .brigada/instructions/plan_review.md       [38;2;138;143;152mdefault plan_review
-                                                          instructions[0m
-    [38;2;95;215;95mnew[0m        .brigada/instructions/worker.md            [38;2;138;143;152mdefault worker
-                                                          instructions[0m
-    [38;2;95;215;95mnew[0m        .brigada/instructions/reviewer.md          [38;2;138;143;152mdefault reviewer
-                                                          instructions[0m
-    [38;2;95;215;95mnew[0m        .brigada/skills/bugfix/SKILL.md            [38;2;138;143;152mdefault skill bugfix[0m
-    [38;2;95;215;95mnew[0m        .brigada/skills/cli-flag/SKILL.md          [38;2;138;143;152mdefault skill
-                                                          cli-flag[0m
-    [38;2;95;215;95mnew[0m        .brigada/skills/config-setting/SKILL.md    [38;2;138;143;152mdefault skill
-                                                          config-setting[0m
-    [38;2;95;215;95mnew[0m        .brigada/skills/dependency/SKILL.md        [38;2;138;143;152mdefault skill
-                                                          dependency[0m
-    [38;2;95;215;95mnew[0m        .brigada/skills/docs-change/SKILL.md       [38;2;138;143;152mdefault skill
-                                                          docs-change[0m
-    [38;2;95;215;95mnew[0m        .brigada/skills/refactor/SKILL.md          [38;2;138;143;152mdefault skill
-                                                          refactor[0m
-    [38;2;95;215;95mnew[0m        .brigada/skills/schema-migration/SKILL.md  [38;2;138;143;152mdefault skill
-                                                          schema-migration[0m
-    [38;2;95;215;95mnew[0m        .brigada/skills/surface-parity/SKILL.md    [38;2;138;143;152mdefault skill
-                                                          surface-parity[0m
-    [38;2;138;143;152munchanged[0m  .git/info/exclude                          [38;2;138;143;152mremoves the exclude
-                                                          line that hid the
-                                                          private Claude Code
-                                                          settings[0m
+    [38;2;95;215;95mnew[0m        .brigada/project.yaml                        [38;2;138;143;152mthe settings above[0m
+    [38;2;95;215;95mnew[0m        .brigada/instructions/foreman.md             [38;2;138;143;152mdefault foreman
+                                                            instructions[0m
+    [38;2;95;215;95mnew[0m        .brigada/instructions/plan_review.md         [38;2;138;143;152mdefault plan_review
+                                                            instructions[0m
+    [38;2;95;215;95mnew[0m        .brigada/instructions/worker.md              [38;2;138;143;152mdefault worker
+                                                            instructions[0m
+    [38;2;95;215;95mnew[0m        .brigada/instructions/reviewer.md            [38;2;138;143;152mdefault reviewer
+                                                            instructions[0m
+    [38;2;95;215;95mnew[0m        .brigada/skills/bugfix/SKILL.md              [38;2;138;143;152mdefault skill
+                                                            bugfix[0m
+    [38;2;95;215;95mnew[0m        .brigada/skills/cli-flag/SKILL.md            [38;2;138;143;152mdefault skill
+                                                            cli-flag[0m
+    [38;2;95;215;95mnew[0m        .brigada/skills/config-setting/SKILL.md      [38;2;138;143;152mdefault skill
+                                                            config-setting[0m
+    [38;2;95;215;95mnew[0m        .brigada/skills/dependency/SKILL.md          [38;2;138;143;152mdefault skill
+                                                            dependency[0m
+    [38;2;95;215;95mnew[0m        .brigada/skills/docs-change/SKILL.md         [38;2;138;143;152mdefault skill
+                                                            docs-change[0m
+    [38;2;95;215;95mnew[0m        .brigada/skills/early-verification/SKILL.md  [38;2;138;143;152mdefault skill
+                                                            early-verification[0m
+    [38;2;95;215;95mnew[0m        .brigada/skills/refactor/SKILL.md            [38;2;138;143;152mdefault skill
+                                                            refactor[0m
+    [38;2;95;215;95mnew[0m        .brigada/skills/schema-migration/SKILL.md    [38;2;138;143;152mdefault skill
+                                                            schema-migration[0m
+    [38;2;95;215;95mnew[0m        .brigada/skills/surface-parity/SKILL.md      [38;2;138;143;152mdefault skill
+                                                            surface-parity[0m
+    [38;2;138;143;152munchanged[0m  .git/info/exclude                            [38;2;138;143;152mremoves the exclude
+                                                            line that hid the
+                                                            private Claude Code
+                                                            settings[0m
     [38;2;138;143;152m(show full contents: --verbose)[0m
   [1mOperator skill:[0m your own coding agent works with brigada through the
     brigada-operator skill, which init does not install. Add -g to install it
     globally; npx skills update advances it. Install it with:
     [38;2;108;198;224mnpx skills add Blackfire-AI/brigada --skill brigada-operator[0m
+  [1mPush probe:[0m push a scratch ref to origin and delete it, to verify the push
+    path before anything is written
   [1mIn the background:[0m a runner starts now and keeps going (log:
     ~/.local/state/brigada/runner.log; stop it with: [38;2;108;198;224mbrigada stop[0m). The engine
     starts when needed and stops after 30 idle minutes.
 
-[1mWrite 13 files and start the runner? [0m[38;2;108;198;224m[y/N][0m[1m:[0m
+[1mWrite 14 files, push and delete a scratch commit and start the runner? [0m[38;2;108;198;224m[y/N][0m[1m:[0m
 Declined; nothing written or started.

@@ -56,6 +56,9 @@ type Config struct {
 	// Rounds are the config file's default round caps; unnamed keys keep
 	// the engine defaults.
 	Rounds RoundsConfig
+	// TimeCaps are the config file's per-kind job time caps (§5.6);
+	// unnamed kinds keep the runner defaults.
+	TimeCaps TimeCapConfig
 	// Review is the config file's default tier, effort and family rule of
 	// a review; unnamed keys keep the engine defaults.
 	Review engine.ReviewConfig
@@ -68,6 +71,10 @@ type Config struct {
 	// DefaultReviewer is the harness a standalone review goes to when its
 	// author's family cannot be told; empty = none.
 	DefaultReviewer string
+	// TrackerTokens are the config file's tracker.<host>.token references
+	// by host[:port] (§12.2). The engine resolves one each time it reads
+	// that forge; a reference is never a value.
+	TrackerTokens map[string]string
 	// IdleTick is how often busyness is checked; zero derives a tick
 	// from Idle, clamped to [200ms, 30s].
 	IdleTick time.Duration
@@ -160,7 +167,10 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 	defer st.Close()
 	roundCaps := cfg.Rounds.Caps()
-	eng := engine.New(st, engine.Config{Now: cfg.Now, SweepInterval: cfg.IdleTick, Caps: cfg.Caps, PlanFiles: true, SnapshotDir: cfg.SnapshotDir, Retention: cfg.Retention, TaskAutoRetry: cfg.TaskAutoRetry, ForemanWakeBudget: cfg.ForemanWakeBudget, DefaultReviewer: cfg.DefaultReviewer, ExactRoundCaps: &roundCaps, Review: cfg.Review})
+	eng := engine.New(st, engine.Config{Now: cfg.Now, SweepInterval: cfg.IdleTick, Caps: cfg.Caps, PlanFiles: true, SnapshotDir: cfg.SnapshotDir, Retention: cfg.Retention, TaskAutoRetry: cfg.TaskAutoRetry, ForemanWakeBudget: cfg.ForemanWakeBudget, DefaultReviewer: cfg.DefaultReviewer, ExactRoundCaps: &roundCaps, ClassCaps: cfg.TimeCaps.ClassCaps(), HardCaps: cfg.TimeCaps.HardCaps(), Review: cfg.Review,
+		TrackerToken: func(host string) (string, bool, error) {
+			return ResolveTrackerToken(cfg.TrackerTokens, host, nil)
+		}})
 	// Project identities are canonical repo URLs (design §13.1): rows
 	// written in an older form are rewritten once, before anything reads
 	// them. Rows that cannot be, or that name one repository twice, stay

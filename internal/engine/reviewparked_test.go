@@ -30,7 +30,7 @@ func TestSpentReviewRetryEventSaysTheTaskWaitsForTheForeman(t *testing.T) {
 	}
 	for _, want := range []string{
 		"first/google-1: thin approve", "second/meta-1: no verdict",
-		"options: task_restart with a note, or review it by hand (brigada review --branch brigada/task-1) and land it",
+		"options: retry the review alone (brigada review --branch brigada/task-1) and land it; raise the review tier with plan_amend and review again; or change the review policy (add a reviewer, or review.family)",
 	} {
 		if !strings.Contains(p.Reason, want) {
 			t.Errorf("event text = %q, want %q in it", p.Reason, want)

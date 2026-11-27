@@ -17,6 +17,11 @@ You need macOS or Linux, a git repository with a remote, and a supported agent C
    brew install blackfire-ai/tap/brigada
    ```
 
+   On Linux, a release's `.deb` and `.rpm` packages install the same binary
+   directly (`sudo apt install ./brigada_<version>_amd64.deb`,
+   `sudo dnf install ./brigada-<version>.x86_64.rpm`); no apt or dnf
+   repository is hosted, so they do not update on their own.
+
 2. Initialize your repository. Init asks which agents to use and which checks to run, then starts brigada:
 
    ```sh
@@ -24,7 +29,7 @@ You need macOS or Linux, a git repository with a remote, and a supported agent C
    brigada init
    ```
 
-   Review, commit, and push the `.brigada/` files it writes so the foreman can read them; init never commits or pushes for you.
+   Review, commit, and push the `.brigada/` files it writes so the foreman can read them; init never commits or pushes work for you — aside from its quick push probe, which pushes a scratch ref to your remote and deletes it to verify the push path.
 
 3. Install the operator skill into your coding agent (the installer requires Node.js 22.20 or newer):
 
@@ -52,7 +57,7 @@ Workers run locally in git worktrees under your harness permissions. Use brigada
 
 Sign in to each agent CLI with its own login flow, then run `brigada init` inside your repository. Init asks you to choose the foreman, which agents may run tasks, how many tasks run at once, and the project check.
 
-It shows the complete plan before changing anything. After you confirm, it writes the project settings, role instructions, and task skills under `.brigada/`, then starts the engine and runner. Review, commit, and push those files so the foreman can read them; init never commits or pushes for you.
+It shows the complete plan before changing anything. After you confirm, it verifies the push path with a quick probe (a scratch ref pushed to your remote and deleted), writes the project settings, role instructions, and task skills under `.brigada/`, then starts the engine and runner. Review, commit, and push those files so the foreman can read them; init never commits or pushes work for you.
 
 Init also prints the operator-skill installation command without running it or writing harness configuration.
 

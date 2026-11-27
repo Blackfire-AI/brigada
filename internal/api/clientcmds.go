@@ -171,6 +171,12 @@ type Status struct {
 	Instructions     []engine.StatusInstructions     `json:"instructions,omitempty"`
 	RoleInstructions []engine.StatusRoleInstructions `json:"role_instructions,omitempty"`
 	Skills           []engine.StatusSkill            `json:"skills,omitempty"`
+	// LandSyncs lists the projects whose land target lags the default
+	// branch (§7.1), rendered on the project's line.
+	LandSyncs []engine.StatusLandSync `json:"land_syncs,omitempty"`
+	// PlanScope is set when the status was asked for one plan: its
+	// spend, land head and newest timeline items.
+	PlanScope *engine.PlanScope `json:"plan_scope,omitempty"`
 }
 
 // Status reads the engine's own state (§13): which process it is, since
@@ -192,6 +198,21 @@ func (c *Client) StatusWithInstructions(ctx context.Context) (Status, error) {
 // StatusWithInstructions's flag.
 func (c *Client) StatusAll(ctx context.Context, withText bool) (Status, error) {
 	return c.status(ctx, withText, true)
+}
+
+// StatusPlan is the status narrowed to one plan (§10): `plan` on
+// /v1/status — `brigada status --plan`, the MCP status tool's plan
+// argument. Its PlanScope is set; the global sections are empty.
+func (c *Client) StatusPlan(ctx context.Context, plan int64) (Status, error) {
+	var st Status
+	path := "/v1/status?plan=" + strconv.FormatInt(plan, 10)
+	if c.readProject != 0 {
+		path += "&project=" + strconv.FormatInt(c.readProject, 10)
+	}
+	if err := c.call(ctx, http.MethodGet, path, nil, &st); err != nil {
+		return Status{}, err
+	}
+	return st, nil
 }
 
 func (c *Client) status(ctx context.Context, withText, all bool) (Status, error) {
@@ -273,6 +294,10 @@ type TaskSubmit struct {
 	// Skills names, in order, the project's imported skills the task's
 	// prompts carry (§5.10); nil or empty = none.
 	Skills []string
+	// ToolGrants are the Claude Code permission patterns the task grants
+	// its worker (§6.1), each one of engine.ToolGrantAllowlist; nil or
+	// empty = none.
+	ToolGrants []string
 }
 
 // TaskSubmitResult names what the submit created.
@@ -288,15 +313,16 @@ type TaskSubmitResult struct {
 // debug path until the foreman's plan tools exist).
 func (c *Client) SubmitTask(ctx context.Context, t TaskSubmit) (TaskSubmitResult, error) {
 	body := taskSubmitRequest{
-		RepoURL:  t.RepoURL,
-		BaseRef:  t.BaseRef,
-		Title:    t.Title,
-		Spec:     t.Spec,
-		CheckCmd: t.CheckCmd,
-		Class:    t.Class,
-		Harness:  t.Harness,
-		Labels:   t.Labels,
-		Skills:   t.Skills,
+		RepoURL:    t.RepoURL,
+		BaseRef:    t.BaseRef,
+		Title:      t.Title,
+		Spec:       t.Spec,
+		CheckCmd:   t.CheckCmd,
+		Class:      t.Class,
+		Harness:    t.Harness,
+		Labels:     t.Labels,
+		Skills:     t.Skills,
+		ToolGrants: t.ToolGrants,
 	}
 	var out taskSubmitResponse
 	if err := c.call(ctx, http.MethodPost, "/v1/tasks", body, &out); err != nil {
@@ -351,6 +377,13 @@ type PlanTask struct {
 	// Skills names, in order, the project's imported skills the task's
 	// prompts carry (§5.10); nil or empty = none.
 	Skills []string `json:"skills,omitempty"`
+	// WaitLanded marks a dependent whose release waits for landing, not
+	// mere completion (§6.1); default false.
+	WaitLanded bool `json:"wait_landed,omitempty"`
+	// ToolGrants are the Claude Code permission patterns the task grants
+	// its worker (§6.1), each one of engine.ToolGrantAllowlist; nil or
+	// empty = none.
+	ToolGrants []string `json:"tool_grants,omitempty"`
 }
 
 // PlanCreateResult names what the call created: the plan, the first
@@ -384,7 +417,7 @@ type PlanCreatedTask struct {
 func (c *Client) CreatePlan(ctx context.Context, p PlanCreate, idemKey string) (PlanCreateResult, error) {
 	body := planCreateRequest{RepoURL: p.RepoURL, Title: p.Title, Tasks: make([]planTaskBody, len(p.Tasks))}
 	for i, t := range p.Tasks {
-		body.Tasks[i] = planTaskBody{Title: t.Title, Name: t.Name, Deps: t.Deps, Base: t.Base, Continue: t.Continue, Spec: t.Spec, Check: t.Check, Class: t.Class, Tier: t.Tier, Effort: t.Effort, ReviewTier: t.ReviewTier, ReviewEffort: t.ReviewEffort, Caps: t.Caps, ExtraRepos: t.ExtraRepos, Skills: t.Skills}
+		body.Tasks[i] = planTaskBody{Title: t.Title, Name: t.Name, Deps: t.Deps, Base: t.Base, Continue: t.Continue, Spec: t.Spec, Check: t.Check, Class: t.Class, Tier: t.Tier, Effort: t.Effort, ReviewTier: t.ReviewTier, ReviewEffort: t.ReviewEffort, Caps: t.Caps, ExtraRepos: t.ExtraRepos, Skills: t.Skills, WaitLanded: t.WaitLanded, ToolGrants: t.ToolGrants}
 	}
 	var out planCreateResponse
 	if err := c.callKeyed(ctx, http.MethodPost, "/v1/plans", idemKey, body, &out); err != nil {
@@ -416,6 +449,14 @@ type PlanAmend struct {
 	Retarget []PlanRetarget
 	Retier   []PlanRetier
 	Respec   []PlanRespec
+	Note     []PlanNote
+}
+
+// PlanNote sets the pending note of a task (§6.2): the words its next
+// worker job carries in its prompt. An empty Note clears the pending one.
+type PlanNote struct {
+	Task string
+	Note string
 }
 
 // PlanCancel names one task to cancel, by name or by id as a decimal,
@@ -427,11 +468,13 @@ type PlanCancel struct {
 
 // PlanRespec edits the spec of a pending task: Mode replace (the default)
 // or append. Skills, when not nil, replaces the task's recorded skills.
+// ToolGrants, when not nil, replaces the task's tool grants (§6.1).
 type PlanRespec struct {
-	Task   string
-	Spec   string
-	Mode   string
-	Skills []string
+	Task       string
+	Spec       string
+	Mode       string
+	Skills     []string
+	ToolGrants []string
 }
 
 // PlanRetier changes a waiting or parked task's tier, effort, review tier or
@@ -469,6 +512,7 @@ type PlanAmendResult struct {
 	Retargeted []int64
 	Retiered   []int64
 	Respecced  []int64
+	Noted      []int64
 	Started    []PlanCreatedTask
 	Held       []PlanHeldTask
 	Reasons    []string
@@ -489,7 +533,7 @@ func (c *Client) AmendPlan(ctx context.Context, plan int64, a PlanAmend, idemKey
 		body.Cancel = append(body.Cancel, planCancelBody{Task: c.Task, Reason: c.Reason})
 	}
 	for _, t := range a.Add {
-		body.Add = append(body.Add, planTaskBody{Title: t.Title, Name: t.Name, Deps: t.Deps, Base: t.Base, Continue: t.Continue, Spec: t.Spec, Check: t.Check, Class: t.Class, Tier: t.Tier, Effort: t.Effort, ReviewTier: t.ReviewTier, ReviewEffort: t.ReviewEffort, Caps: t.Caps, ExtraRepos: t.ExtraRepos, Skills: t.Skills})
+		body.Add = append(body.Add, planTaskBody{Title: t.Title, Name: t.Name, Deps: t.Deps, Base: t.Base, Continue: t.Continue, Spec: t.Spec, Check: t.Check, Class: t.Class, Tier: t.Tier, Effort: t.Effort, ReviewTier: t.ReviewTier, ReviewEffort: t.ReviewEffort, Caps: t.Caps, ExtraRepos: t.ExtraRepos, Skills: t.Skills, WaitLanded: t.WaitLanded, ToolGrants: t.ToolGrants})
 	}
 	for _, rt := range a.Retarget {
 		body.Retarget = append(body.Retarget, planRetargetBody{Task: rt.Task, Deps: rt.Deps, Base: rt.Base, Continue: rt.Continue})
@@ -498,14 +542,17 @@ func (c *Client) AmendPlan(ctx context.Context, plan int64, a PlanAmend, idemKey
 		body.Retier = append(body.Retier, planRetierBody{Task: rt.Task, Tier: rt.Tier, Effort: rt.Effort, ReviewTier: rt.ReviewTier, ReviewEffort: rt.ReviewEffort, Caps: rt.Caps, Skills: rt.Skills})
 	}
 	for _, rs := range a.Respec {
-		body.Respec = append(body.Respec, planRespecBody{Task: rs.Task, Spec: rs.Spec, Mode: rs.Mode, Skills: rs.Skills})
+		body.Respec = append(body.Respec, planRespecBody{Task: rs.Task, Spec: rs.Spec, Mode: rs.Mode, Skills: rs.Skills, ToolGrants: rs.ToolGrants})
+	}
+	for _, n := range a.Note {
+		body.Note = append(body.Note, planNoteBody{Task: n.Task, Note: n.Note})
 	}
 	var out planAmendResponse
 	path := "/v1/plans/" + strconv.FormatInt(plan, 10) + "/amend"
 	if err := c.callKeyed(ctx, http.MethodPost, path, idemKey, body, &out); err != nil {
 		return PlanAmendResult{}, err
 	}
-	res := PlanAmendResult{PlanID: out.PlanID, State: out.State, Cancelled: out.Cancelled, Retargeted: out.Retargeted, Retiered: out.Retiered, Respecced: out.Respecced, Reasons: out.Reasons}
+	res := PlanAmendResult{PlanID: out.PlanID, State: out.State, Cancelled: out.Cancelled, Retargeted: out.Retargeted, Retiered: out.Retiered, Respecced: out.Respecced, Noted: out.Noted, Reasons: out.Reasons}
 	for _, t := range out.Added {
 		res.Added = append(res.Added, PlanCreatedTask{TaskID: t.TaskID, Name: t.Name, JobID: t.JobID})
 	}
@@ -623,7 +670,9 @@ func (c *Client) Answer(ctx context.Context, task int64, text, idemKey string) (
 	}, nil
 }
 
-// TaskRestartResult names what a task_restart did: the fresh work job.
+// TaskRestartResult names what a task_restart did: the fresh work job,
+// or — Answer pending, under stop_running — the live job that is
+// stopping, whose end queues the fresh attempt.
 type TaskRestartResult struct {
 	Answer engine.Answer
 	JobID  int64
@@ -632,11 +681,13 @@ type TaskRestartResult struct {
 
 // RestartTask restarts a parked task (§3, §5.6, §12.1, §12.2): a fresh
 // work attempt from the task's base, the note handed to the worker
-// verbatim when there is one. idemKey as in Answer.
-func (c *Client) RestartTask(ctx context.Context, task int64, note, idemKey string) (TaskRestartResult, error) {
+// verbatim when there is one. stopRunning also restarts a task whose job
+// is live: a running job stops keeping its branch, and its end queues
+// the fresh attempt seeded from it. idemKey as in Answer.
+func (c *Client) RestartTask(ctx context.Context, task int64, note string, stopRunning bool, idemKey string) (TaskRestartResult, error) {
 	var out taskRestartResponse
 	path := "/v1/tasks/" + strconv.FormatInt(task, 10) + "/restart"
-	if err := c.callKeyed(ctx, http.MethodPost, path, idemKey, taskRestartRequest{Note: note}, &out); err != nil {
+	if err := c.callKeyed(ctx, http.MethodPost, path, idemKey, taskRestartRequest{Note: note, StopRunning: stopRunning}, &out); err != nil {
 		return TaskRestartResult{}, err
 	}
 	return TaskRestartResult{

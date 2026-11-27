@@ -53,7 +53,11 @@ func TestServeCallCapacity(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if _, err := agent("ready", coolUntil); err != nil { // cooling until the deadline
+		cooling, err := agent("ready", coolUntil) // cooling until the deadline
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec("UPDATE agents SET quota_scope = 'claude/pool' WHERE id = ?", cooling); err != nil {
 			return err
 		}
 		broken, err := agent("broken", "")
@@ -87,7 +91,7 @@ func TestServeCallCapacity(t *testing.T) {
 	}
 	for _, want := range []string{
 		"agent 1 claude/sonnet tier=standard effort=default account=work cap=none running=1 quota=ready cost=2 permission=bypassPermissions\n",
-		"agent 2 claude/sonnet tier=standard effort=default account=work cap=none running=0 quota=cooling until " + coolUntil + " cost=2",
+		"agent 2 claude/sonnet tier=standard effort=default account=work scope=claude/pool cap=none running=0 quota=cooling until " + coolUntil + " cost=2",
 		"agent 3 claude/sonnet tier=standard effort=high account=work cap=none running=0 quota=broken cost=2 tools=Bash(npm test:*)+Bash(npx jest:*)\n",
 		"runner 1 cap=none use=1 queue=0",
 		"account work cap=none use=1 queue=0",

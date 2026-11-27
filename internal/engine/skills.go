@@ -585,7 +585,13 @@ func taskWorkerGuidanceTx(tx *sql.Tx, taskID int64) ([]prompt.Option, string, er
 	if err != nil {
 		return nil, "", err
 	}
-	return append(workerGuidance(ti), prompt.WithSkillsDir(dir)), marshalPromptMeta(workerPromptMeta(ti)), nil
+	// The task's pending note (§6.2) rides every worker prompt composed
+	// for it, the next job's included.
+	note, err := taskNoteTx(tx, taskID)
+	if err != nil {
+		return nil, "", err
+	}
+	return append(workerGuidance(ti), prompt.WithSkillsDir(dir), prompt.WithTaskNote(note)), marshalPromptMeta(workerPromptMeta(ti)), nil
 }
 
 // taskReviewerGuidanceTx reads the snapshot a task recorded as a review

@@ -128,14 +128,16 @@ var yamlKeyRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 // the classes and protected paths), the gates and land rules (§6.3),
 // the default check, the worker tool policy, the environment step (§5.7),
 // the extra repositories (§5.8), the foreman session's rotation
-// threshold (§4.2) and the branch-retention window (§13.2), and nothing
-// else. It is its own
+// threshold (§4.2), the branch-retention window (§13.2) and the issue
+// tracker (§12.2: the forge's kind and base URL, never its token), and
+// nothing else. It is its own
 // list, never SettingKeys: a setting added for the local store (the wake
 // budget, for one) does not become shared-file policy by being editable.
 var configSettingKeys = []string{SettingApprovalMaxTasks, SettingApprovalBudget, SettingApprovalClasses, SettingApprovalProtectedPaths,
-	SettingGatePlan, SettingGateLand, SettingGatePush, SettingApprovalTiers, SettingApprovalRestarted, SettingLandTarget, SettingAfterLand, SettingLandReady,
+	SettingGatePlan, SettingGateLand, SettingGatePush, SettingApprovalTiers, SettingApprovalRestarted, SettingLandTarget, SettingAfterLand, SettingLandReady, SettingLandBatchMax,
 	SettingDefaultCheck, SettingWorkerTools, SettingSetup, SettingSetupCacheKeyFiles, SettingSetupTimeout,
-	SettingExtraRepos, SettingForemanRotateTokens, SettingPlanFiles, SettingPlanFileBranch, SettingBranchRetentionDays}
+	SettingExtraRepos, SettingForemanRotateTokens, SettingPlanFiles, SettingPlanFileBranch, SettingBranchRetentionDays,
+	SettingTracker, SettingTrackerURL}
 
 // ParseProjectConfig parses and validates a project.yaml. Anything but
 // schema 1's keys is refused with the key named: an unknown key, an
@@ -320,14 +322,14 @@ func settingText(key string, v yamlValue) (string, error) {
 		return "", configErr("%s (line %d) has no value; omit the key to leave it at its default", key, v.line)
 	}
 	switch key {
-	case SettingApprovalMaxTasks, SettingSetupTimeout, SettingForemanRotateTokens, SettingBranchRetentionDays:
+	case SettingApprovalMaxTasks, SettingSetupTimeout, SettingForemanRotateTokens, SettingBranchRetentionDays, SettingLandBatchMax:
 		if v.isList || v.quoted {
 			return "", configErr("%s (line %d) must be an integer", key, v.line)
 		}
 		return nonEmpty(key, v, v.scalar)
 	case SettingDefaultCheck, SettingWorkerTools, SettingSetup,
 		SettingGatePlan, SettingGateLand, SettingGatePush, SettingApprovalRestarted, SettingLandTarget, SettingAfterLand, SettingLandReady,
-		SettingApprovalBudget, SettingPlanFiles, SettingPlanFileBranch:
+		SettingApprovalBudget, SettingPlanFiles, SettingPlanFileBranch, SettingTracker, SettingTrackerURL:
 		if v.isList {
 			return "", configErr("%s (line %d) must be a string, not a list", key, v.line)
 		}
@@ -963,6 +965,11 @@ func (e *Engine) importProjectConfigTx(tx *sql.Tx, repoURL string, imp projectIm
 		res.NeedsConfirm = true
 		res.Applied = nil
 		return res, nil
+	}
+	// The merged row is what the store would hold: the file's keys over
+	// the local ones it does not own, so the tracker rule is checked here.
+	if err := checkTrackerRow(row); err != nil {
+		return ImportResult{}, err
 	}
 	prov.Hash, prov.Imported = imp.hash, newImported
 	b, err := json.Marshal(row)

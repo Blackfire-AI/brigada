@@ -91,13 +91,29 @@ var respecSkillsSchema = map[string]any{
 	"description": "the task's skills, in order, replacing the recorded ones: omit the field to keep them, [] to clear them. The re-resolution copies the current texts; an unknown or repeated name refuses the whole call",
 }
 
+// taskToolGrantsSchema is the tool_grants property of a plan task
+// (§6.1): patterns drawn from the binary's allowlist, nothing else.
+var taskToolGrantsSchema = map[string]any{
+	"type":        "array",
+	"items":       map[string]any{"type": "string", "enum": engine.ToolGrantAllowlist},
+	"description": "Claude Code permission patterns the task's worker is granted, drawn from the allowlist; a pattern outside it refuses the whole call, named. These are prefix rules — Bash(git checkout:*) also matches a branch switch — and not the security boundary: the pipeline's structure is (the worktree carries no push URL, the runner alone commits, pushes and lands). On the default claude agent (bypassPermissions) a grant widens nothing; its value is widening narrow pattern-scoped agents. Omit for none",
+}
+
+// respecToolGrantsSchema is the tool_grants property of a respec entry
+// (§6.1): the entry replaces a pending task's grants.
+var respecToolGrantsSchema = map[string]any{
+	"type":        "array",
+	"items":       map[string]any{"type": "string", "enum": engine.ToolGrantAllowlist},
+	"description": "the task's tool grants, replacing the recorded ones: omit the field to keep them, [] to clear them. A pattern outside the allowlist refuses the whole call, named",
+}
+
 // tools is the bridge's whole offer (§12.2), the same for a headless turn
 // and an attached chat: a new tool adds an entry here, and ToolNames
 // carries the addition to the foreman's tool scope.
 var tools = []Tool{
 	{
 		Name:        "plan_create",
-		Description: "Create a plan of one or more tasks and queue the first work job of every task with no dependencies. A task may wait on others of the same plan by name (deps); it starts when all of them are done, and stays waiting if one fails or needs you. A dep may also be the id of a landed task of another plan of the project — one whose work is on the land target, done and pushed there — and then counts as done from the start; nothing waits on it. A task with exactly one dep builds on that dep's branch (a task with several picks one with base, else its continued dep when continue is set, else starts from the land target, the default branch when none is set). A dependency cycle, a base that is not a dep, or a base naming another dep than continue refuses the plan. A task's optional caps object sets its own fix_rounds, review_rounds and restart budgets (integers 0 to 10; absent keys keep the engine default); an unknown key or out-of-range value refuses the plan. A task's optional skills list names, in order, the project's imported skills its prompts carry; an unknown or repeated name refuses the plan. The plan is active at once, unless it trips the project's approval rules (an unusual class, a protected path, an extra repository, a check other than the project's default_check; a task count only when the project sets one): then it waits for the user's approval, nothing is queued, and the answer says why — tell the user; only they can approve it.",
+		Description: "Create a plan of one or more tasks and queue the first work job of every task with no dependencies. A task may wait on others of the same plan by name (deps); it starts when all of them are done, and stays waiting if one fails or needs you. A dep may also be the id of a landed task of another plan of the project — one whose work is on the land target, done and pushed there — and then counts as done from the start; nothing waits on it. A task with exactly one dep builds on that dep's branch (a task with several picks one with base, else its continued dep when continue is set, else starts from the land target, the default branch when none is set). A dependency cycle, a base that is not a dep, or a base naming another dep than continue refuses the plan. A task's optional caps object sets its own fix_rounds, review_rounds and restart budgets (integers 0 to 10; absent keys keep the engine default); an unknown key or out-of-range value refuses the plan. A task's optional skills list names, in order, the project's imported skills its prompts carry; an unknown or repeated name refuses the plan. A task's optional tool_grants list names Claude Code permission patterns from the allowlist — Bash(git merge:*), Bash(git checkout:*), Bash(git restore:*), Bash(git cherry-pick:*), Bash(git add:*) — granted to its worker; a pattern outside the set refuses the plan, named. The plan is active at once, unless it trips the project's approval rules (an unusual class, a protected path, an extra repository, a check other than the project's default_check; a task count only when the project sets one): then it waits for the user's approval, nothing is queued, and the answer says why — tell the user; only they can approve it.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -151,6 +167,8 @@ var tools = []Tool{
 							"caps":          taskCapsSchema,
 							"extra_repos":   extraReposSchema,
 							"skills":        taskSkillsSchema,
+							"wait_landed":   map[string]any{"type": "boolean", "description": "wait for landing, not mere completion: the task stays pending until every implement dependency has actually landed on the target, rather than releasing as soon as its dependencies are done; default false"},
+							"tool_grants":   taskToolGrantsSchema,
 						},
 						"required": []string{"spec"},
 					},
@@ -162,7 +180,7 @@ var tools = []Tool{
 	},
 	{
 		Name:        "plan_amend",
-		Description: "Amend a live plan (active, awaiting approval, reviewing, or parked at needs_foreman by its review — the answer its changes verdict waited for): add tasks, cancel tasks, and re-point the dependencies of a waiting task. Use it to re-plan when a task fails for good or the user's ask changes: a dependency that will never be done (a task failed or cancelled) leaves its pending dependents waiting forever unless you re-point them (retarget) to another task or drop the dependency (empty deps). Cancelling a task that still has dependents is refused unless the same amendment covers each: a pending dependent cancelled or re-pointed off it in this call, while a dependent that is running, reviewing, parked, done or landed — anything with a job or a result built on the cancelled task's branch — blocks the cancellation, and the refusal names every such dependent with its state. Tasks are named by their name or id (as status shows). A reason is expected on every cancel: give each cancel item as {task, reason}, the reason recorded verbatim on that task's task_cancelled_by_amend event; a cancel without one is recorded as \"no reason given\". Validation is plan_create's: names unique, deps in the plan — or the id of a landed task of another plan of the project, its work on the land target, already satisfied — and never on a cancelled task, no cycle — one refusal rejects the whole amendment. Use retier to change the tier, effort or round caps (merged key by key) of a pending, ready or needs_foreman task; a parked task still needs task_restart. Use respec to replace or append to the spec of a pending task (one with no job yet) when a requirement is missing: it costs no cold start; a task that has started is refused, and then a follow-up task is the way. A respec or retier of a task that has not started re-resolves the role texts and skills its prompts carry: skills replaces the recorded names (omit to keep them, [] to clear them), and the current texts are copied. The edit is judged like an added task: one that trips a rule is held alone. Cancelling stops a task's live jobs, and a plan with done work that can never land — a cancelled or failed dependency under it — stays active as blocked: the needs-you queue names each stranded task, and retarget is the one move that frees it, dropping or replacing the dead dependency so the task lands without running again. A stranded task whose base was the dead dependency's branch cannot be freed this way (its diff carries the dead work; restart it on a new base by a follow-up task); the refusal says so. Waiting tasks whose dependencies are all done start in the same call. An added task is judged on its own against the plan rules (a class outside approval_classes, a protected path, an extra repository, a check other than the project's default_check): one that trips a rule is held at the plan gate with a needs-you line naming the rule, while the plan stays active and the rest runs on. The plan budget holds the same way once the plan's spend has passed the project's approval_budget: any task about to start, an added one included, parks at the plan gate instead of queueing. A plan left with only permanently waiting tasks is closed, and its done report names what never ran.",
+		Description: "Amend a live plan (active, awaiting approval, reviewing, or parked at needs_foreman by its review — the answer its changes verdict waited for): add tasks, cancel tasks, and re-point the dependencies of a waiting task. Use it to re-plan when a task fails for good or the user's ask changes: a dependency that will never be done (a task failed or cancelled) leaves its pending dependents waiting forever unless you re-point them (retarget) to another task or drop the dependency (empty deps). Cancelling a task that still has dependents is refused unless the same amendment covers each: a pending dependent cancelled or re-pointed off it in this call, while a dependent that is running, reviewing, parked, done or landed — anything with a job or a result built on the cancelled task's branch — blocks the cancellation, and the refusal names every such dependent with its state. Tasks are named by their name or id (as status shows). A reason is expected on every cancel: give each cancel item as {task, reason}, the reason recorded verbatim on that task's task_cancelled_by_amend event; a cancel without one is recorded as \"no reason given\". Validation is plan_create's: names unique, deps in the plan — or the id of a landed task of another plan of the project, its work on the land target, already satisfied — and never on a cancelled task, no cycle — one refusal rejects the whole amendment. Use retier to change the tier, effort or round caps (merged key by key) of a pending, ready or needs_foreman task; a parked task still needs task_restart. Use respec to replace or append to the spec of a pending task (one with no job yet) when a requirement is missing: it costs no cold start; a task that has started is refused, and then a follow-up task is the way. A respec or retier of a task that has not started re-resolves the role texts and skills its prompts carry: skills replaces the recorded names (omit to keep them, [] to clear them), and the current texts are copied. A respec's tool_grants replaces the task's tool grants the same way (omit to keep them, [] to clear them); an added task takes tool_grants as plan_create's, a pattern outside the allowlist refusing the amendment, named. Use note to leave a task a note for its next job (a fix round, a restart, a continuation or an answer job): it rides that job's prompt in its own labeled block, ahead of any restart note, and is gone from the task once a job leases with it; a headless worker cannot take input mid-run, so the next job is where it arrives. The edit is judged like an added task: one that trips a rule is held alone. Cancelling stops a task's live jobs, and a plan with done work that can never land — a cancelled or failed dependency under it — stays active as blocked: the needs-you queue names each stranded task, and retarget is the one move that frees it, dropping or replacing the dead dependency so the task lands without running again. A stranded task whose base was the dead dependency's branch cannot be freed this way (its diff carries the dead work; restart it on a new base by a follow-up task); the refusal says so. Waiting tasks whose dependencies are all done start in the same call. An added task is judged on its own against the plan rules (a class outside approval_classes, a protected path, an extra repository, a check other than the project's default_check): one that trips a rule is held at the plan gate with a needs-you line naming the rule, while the plan stays active and the rest runs on. The plan budget holds the same way once the plan's spend has passed the project's approval_budget: any task about to start, an added one included, parks at the plan gate instead of queueing. A plan left with only permanently waiting tasks is closed, and its done report names what never ran.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -195,6 +213,8 @@ var tools = []Tool{
 							"caps":          taskCapsSchema,
 							"extra_repos":   extraReposSchema,
 							"skills":        taskSkillsSchema,
+							"wait_landed":   map[string]any{"type": "boolean", "description": "wait for landing, not mere completion: the task stays pending until every implement dependency has actually landed on the target, rather than releasing as soon as its dependencies are done; default false"},
+							"tool_grants":   taskToolGrantsSchema,
 						},
 						"required": []string{"spec"},
 					},
@@ -234,12 +254,25 @@ var tools = []Tool{
 					"items": map[string]any{
 						"type": "object",
 						"properties": map[string]any{
-							"task":   map[string]any{"type": []string{"string", "integer"}, "description": "the pending task, by name or id"},
-							"spec":   map[string]any{"type": "string", "description": "the new spec (replace) or the text to add after the current one (append), verbatim as for a worker"},
-							"mode":   map[string]any{"type": "string", "enum": []string{"replace", "append"}, "description": "replace (default) swaps the whole spec; append adds spec after the current one"},
-							"skills": respecSkillsSchema,
+							"task":        map[string]any{"type": []string{"string", "integer"}, "description": "the pending task, by name or id"},
+							"spec":        map[string]any{"type": "string", "description": "the new spec (replace) or the text to add after the current one (append), verbatim as for a worker"},
+							"mode":        map[string]any{"type": "string", "enum": []string{"replace", "append"}, "description": "replace (default) swaps the whole spec; append adds spec after the current one"},
+							"skills":      respecSkillsSchema,
+							"tool_grants": respecToolGrantsSchema,
 						},
 						"required": []string{"task", "spec"},
+					},
+				},
+				"note": map[string]any{
+					"type":        "array",
+					"description": "notes for tasks' next jobs: the note rides the task's next worker prompt (a fix round, a restart, a continuation, an answer job) in its own labeled block before any feedback, and leaves the task when a job first leases with it; setting replaces the task's pending note, an empty note clears it; refused for a done, cancelled or retired task",
+					"items": map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"task": map[string]any{"type": []string{"string", "integer"}, "description": "the task, by name or id"},
+							"note": map[string]any{"type": "string", "description": "the note, verbatim as for a worker; empty clears the pending note"},
+						},
+						"required": []string{"task", "note"},
 					},
 				},
 				"retarget": map[string]any{
@@ -305,17 +338,21 @@ var tools = []Tool{
 	},
 	{
 		Name:        "task_restart",
-		Description: "Restart a task parked at needs_foreman — failed, out of rounds, or one whose review keeps asking for changes — as a fresh attempt from the task's base on a new branch, with your note handed to the worker verbatim as feedback (what went wrong, what to avoid). Spends one of the task's restarts; the fresh attempt gets its rounds back. A task a plan rule holds at the plan gate is refused: the user releases it with brigada plan approve.",
+		Description: "Restart a task parked at needs_foreman — failed, out of rounds, or one whose review keeps asking for changes — as a fresh attempt from the task's base on a new branch, with your note handed to the worker verbatim as feedback (what went wrong, what to avoid). Spends one of the task's restarts; the fresh attempt gets its rounds back. A task a plan rule holds at the plan gate is refused: the user releases it with brigada plan approve. With stop_running a task whose work, fix or review job is still live restarts too: a job still queued is replaced at once; a running job is not cancelled but told to stop, push its branch and complete stalled, and the fresh attempt queues when it does, its worktree started from that branch (a review pushes nothing, so it starts from the base). The task keeps running until then; the restart is spent at the call, and a second restart before it completes is refused. Use stop_running when the run is on a wrong path and its work so far is worth keeping; a plain restart once it parks when it is not; plan_amend's note when a hint for its next job is enough.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"task": map[string]any{
 					"type":        "integer",
-					"description": "the parked task's id",
+					"description": "the task's id: a parked task, or under stop_running one whose job is live",
 				},
 				"note": map[string]any{
 					"type":        "string",
 					"description": "the note for the fresh attempt, verbatim; empty = none",
+				},
+				"stop_running": map[string]any{
+					"type":        "boolean",
+					"description": "restart a task whose job is still live: stop the running job keeping its branch, then the fresh attempt starts from it; default false, which takes a parked task only",
 				},
 			},
 			"required": []string{"task"},
@@ -406,6 +443,14 @@ var tools = []Tool{
 					"type":        "boolean",
 					"description": "list every finished plan, not only the three most recent; the default counts the older ones in one summary line",
 				},
+				"plan": map[string]any{
+					"type":        "integer",
+					"description": "show one plan only: its task counts by state, blockers, land head, spend and recent transitions, without the global sections",
+				},
+				"json": map[string]any{
+					"type":        "boolean",
+					"description": "return the status as JSON (plan-scoped with plan) instead of text",
+				},
 			},
 		},
 		Call: callStatus,
@@ -416,6 +461,10 @@ var tools = []Tool{
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
+				"plan": map[string]any{
+					"type":        "integer",
+					"description": "show one plan's timeline only: its own events and its tasks' and jobs'",
+				},
 				"task": map[string]any{
 					"type":        "integer",
 					"description": "show one task's timeline only",
@@ -532,8 +581,10 @@ func toolByName(offer []Tool, name string) (Tool, bool) {
 // where the default counts the older ones (§10).
 func callStatus(ctx context.Context, c *api.Client, args json.RawMessage) (string, error) {
 	var in struct {
-		Instructions bool `json:"instructions"`
-		All          bool `json:"all"`
+		Instructions bool  `json:"instructions"`
+		All          bool  `json:"all"`
+		Plan         int64 `json:"plan"`
+		JSON         bool  `json:"json"`
 	}
 	if len(args) > 0 {
 		if err := json.Unmarshal(args, &in); err != nil {
@@ -543,6 +594,10 @@ func callStatus(ctx context.Context, c *api.Client, args json.RawMessage) (strin
 	var st api.Status
 	var err error
 	switch {
+	case in.Plan < 0:
+		return "", fmt.Errorf("status: plan must be a non-negative id")
+	case in.Plan != 0:
+		st, err = c.StatusPlan(ctx, in.Plan)
 	case in.All:
 		st, err = c.StatusAll(ctx, in.Instructions)
 	case in.Instructions:
@@ -552,6 +607,24 @@ func callStatus(ctx context.Context, c *api.Client, args json.RawMessage) (strin
 	}
 	if err != nil {
 		return "", err
+	}
+	return statusAnswer(st, in.Plan, in.JSON)
+}
+
+// statusAnswer renders a status as the status tools answer it: the JSON
+// the API sent when asked for (the same `brigada status --json` prints),
+// the compact plan summary for a plan-scoped one, the global text
+// otherwise.
+func statusAnswer(st api.Status, plan int64, asJSON bool) (string, error) {
+	switch {
+	case asJSON:
+		out, err := json.MarshalIndent(st, "", "  ")
+		if err != nil {
+			return "", fmt.Errorf("status: %w", err)
+		}
+		return string(out), nil
+	case plan != 0:
+		return api.PlanStatusSections(st, time.Now()), nil
 	}
 	return statusText(st), nil
 }
@@ -604,6 +677,7 @@ func parseStartedAt(s string) time.Time {
 // sees its own project whatever it asks.
 func callHistory(ctx context.Context, c *api.Client, args json.RawMessage) (string, error) {
 	var a struct {
+		Plan  *int64 `json:"plan"`
 		Task  *int64 `json:"task"`
 		Limit int    `json:"limit"`
 	}
@@ -613,6 +687,9 @@ func callHistory(ctx context.Context, c *api.Client, args json.RawMessage) (stri
 		}
 	}
 	q := api.HistoryQuery{Limit: a.Limit, Last: true}
+	if a.Plan != nil {
+		q.PlanID = *a.Plan
+	}
 	if a.Task != nil {
 		q.TaskID = *a.Task
 	}

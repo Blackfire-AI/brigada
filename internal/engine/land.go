@@ -14,9 +14,9 @@ import (
 
 // The land rule (§7.1, decided 2026-10-20): when a task is done — class
 // implement, an approve verdict on its last review — and every dependency
-// is landed, the engine creates one job of kind land for it, which a
-// runner with git for the project's repo leases and completes with the
-// landing record. A land-gate rule (§6.3) holds the task in the needs-you
+// is landed, the engine creates one job of kind land for the batch its
+// landing opens (landbatch.go), which a runner with git for the
+// project's repo leases and completes with the landing record. A land-gate rule (§6.3) holds the task in the needs-you
 // queue instead, naming the rule; only its dependents' landings wait on
 // it. The foreman has no tool for any of this: the hold is the user's to
 // release (LandApprove and LandReject below), and the
@@ -135,10 +135,12 @@ func (e *Engine) landRuleTx(tx *sql.Tx, taskID int64, now time.Time) (landRuleRe
 	if held > 0 {
 		return landRuleResult{}, nil
 	}
-	if live, err := liveJobTx(tx, fmt.Sprintf("task:%d", taskID)); err != nil {
+	if live, err := liveTaskOwnerTx(tx, taskID); err != nil {
 		return landRuleResult{}, err
 	} else if live != nil {
-		return landRuleResult{}, nil // the land job (or another of the task's jobs) already holds the key
+		// The land job, another of the task's jobs, or the live batch that
+		// reserves the task (§12.3) already holds the key.
+		return landRuleResult{}, nil
 	}
 	reason, err := landHoldReasonTx(tx, project, taskID)
 	if err != nil {
@@ -157,6 +159,12 @@ func (e *Engine) landRuleTx(tx *sql.Tx, taskID int64, now time.Time) (landRuleRe
 	switch sr.Answer {
 	case AnsCreated:
 		return landRuleResult{Outcome: LandRetryQueued, JobID: sr.JobID}, nil
+	case AnsPending:
+		// A live batch holds the target's key, or this landing fell past
+		// land_batch_max (§7.1): it waits for the next batch, which the
+		// running batch's outcome forms.
+		return landRuleResult{Outcome: LandRetryQueued,
+			Reason: fmt.Sprintf("waits for the next land batch, behind job %d", sr.JobID)}, nil
 	case "":
 		// The landing record and the live key were read above, so the zero
 		// answer is the stale-base refusal: queueLandJobTx parked the task.
@@ -369,7 +377,11 @@ func crossPlanDepTx(tx *sql.Tx, project int64, ref string) (ok bool, why string,
 
 // depPushReleasedTx reports whether a dependency's push was released
 // (§6.3): a live land job on its key, which a task with a landing
-// record holds only as the push phase brigada push approve queued. The
+// record holds only as the push phase brigada push approve queued, or a
+// live batch that reserves the dependency beside its landing record — a
+// batch's push phase (§12.3). A squash-phase reservation alone is no
+// release: it holds a task with no record, and the record's write ends
+// it in the same transaction. The
 // engine's re-check of a push-phase land_ready hold (issue #142) is the
 // one exception: a live land job that answers to a held hold re-checks
 // a push still waiting, it does not release it, so a dependent under
@@ -377,9 +389,12 @@ func crossPlanDepTx(tx *sql.Tx, project int64, ref string) (ok bool, why string,
 // did.
 func depPushReleasedTx(tx *sql.Tx, dep int64) (bool, error) {
 	var n int
-	if err := tx.QueryRow(`SELECT COUNT(*) FROM jobs WHERE task_id = ? AND kind = 'land'
-		AND status IN ('queued', 'leased', 'running')
-		AND NOT EXISTS (SELECT 1 FROM land_holds WHERE task_id = ? AND state = 'held')`, dep, dep).Scan(&n); err != nil {
+	if err := tx.QueryRow(`SELECT CASE WHEN EXISTS (SELECT 1 FROM land_holds WHERE task_id = ? AND state = 'held') THEN 0
+		ELSE (SELECT COUNT(*) FROM jobs WHERE task_id = ? AND kind = 'land'
+			AND status IN ('queued', 'leased', 'running'))
+		+ (SELECT COUNT(*) FROM tasks t WHERE t.id = ?
+			AND EXISTS (SELECT 1 FROM landings l WHERE l.task_id = t.id) AND `+reservedLiveBatch("t.id")+`) END`,
+		dep, dep, dep).Scan(&n); err != nil {
 		return false, fmt.Errorf("read the land jobs of dependency %d: %w", dep, err)
 	}
 	return n > 0, nil
@@ -566,17 +581,21 @@ func landReadyHold(reason string) bool {
 	return strings.HasPrefix(reason, "held by rule land_ready")
 }
 
-// queueLandJobTx creates the task's land job (§7.1): kind land on the
-// task's own key, so the one-live-job-per-key rule makes a repeat
-// coalesce. No worker and no agent; the git label is what a runner
-// offers to take it. A task that already has a landing record — its own
-// land job landed it, or a detected trailer did — has nothing left to
-// squash, so no land job is queued for it. skipLandReady marks the job
-// an approval of the land_ready gate's hold queues (issue #87): its
-// grant carries the gate as skipped, so the runner lands without
-// re-running the command. The submit's answer says what happened:
-// created with the new job, pending behind the live job that holds the
-// key, or the zero answer for a task already landed. A task whose
+// queueLandJobTx queues the task's landing (§7.1): the batch formation
+// (formLandBatchTx) on the project's land-batch key, so the
+// one-live-job-per-key rule makes a repeat coalesce and the batch takes
+// every other landing ready for the target. No worker and no agent; the
+// git label is what a runner offers to take it. A task that already has
+// a landing record — its own land job landed it, or a detected trailer
+// did — has nothing left to squash, so no land job is queued for it; a
+// task a live batch reserves (§12.3) coalesces behind that batch.
+// skipLandReady marks the job an approval of the land_ready gate's hold
+// queues (issue #87): its grant carries the gate as skipped, so the
+// runner lands without re-running the command — the batch grant carries
+// no per-member skip yet, so that landing runs alone on the task's own
+// key. The submit's answer says what happened: created with the new
+// job, pending behind the live job or batch that holds the key, or the
+// zero answer for a task already landed. A task whose
 // recorded base is a superseded round of its stacked dependency is
 // refused here (issue #124): never landed on the old round — the task
 // parks at needs_foreman with an event naming both refs, whichever path
@@ -590,10 +609,23 @@ func (e *Engine) queueLandJobTx(tx *sql.Tx, project, taskID int64, skipLandReady
 	if have > 0 {
 		return SubmitResult{}, nil
 	}
+	if b, err := reservedBatchTx(tx, taskID); err != nil {
+		return SubmitResult{}, err
+	} else if b != nil {
+		return SubmitResult{Answer: AnsPending, JobID: b.ID}, nil
+	}
 	if dep, baseRef, depBranch, stale, err := staleBaseTx(tx, taskID); err != nil {
 		return SubmitResult{}, err
 	} else if stale {
 		return SubmitResult{}, e.parkStaleBaseTx(tx, project, taskID, dep, baseRef, depBranch, "the landing is refused", true, now)
+	}
+	if !skipLandReady {
+		return e.formLandBatchTx(tx, project, taskID, now)
+	}
+	// The landing's squash consumes the target (§7.1): queue the sync
+	// ahead of it, so the land job leases only once the target is current.
+	if err := e.maybeQueueSyncTx(tx, project, now); err != nil {
+		return SubmitResult{}, err
 	}
 	return e.submitTx(tx, SubmitParams{
 		Key:           fmt.Sprintf("task:%d", taskID),
@@ -715,6 +747,35 @@ func (r landRecord) validate() error {
 // nothing pushed, and the foreman restarts it with a note. Success keeps
 // the task done and marks it landed.
 func (e *Engine) landCompletedTx(tx *sql.Tx, job *jobRow, c Completion, now time.Time) error {
+	// A batch job settles every member it owns (§7.1 "Running a batch"),
+	// its reservations standing until each member's outcome is written so
+	// no formation in this transaction reserves a member twice; then
+	// every member is released once, and the batch's outcome re-runs the
+	// rule, forming the next batch from whatever is still ready.
+	if isLandBatchKey(job.Key) {
+		members, _, err := landBatchMembersTx(tx, job.ID)
+		if err != nil {
+			return err
+		}
+		if len(members) > 0 {
+			if err := e.landBatchCompletedTx(tx, job, members, c, now); err != nil {
+				return err
+			}
+			return e.endLandBatchTx(tx, job, now)
+		}
+	}
+	if err := releaseLandBatchTx(tx, job.ID); err != nil {
+		return err
+	}
+	if err := e.landOutcomeTx(tx, job, c, now); err != nil {
+		return err
+	}
+	return e.endLandBatchTx(tx, job, now)
+}
+
+// landOutcomeTx applies one land job's outcome to its task (§7.1), the
+// body of landCompletedTx.
+func (e *Engine) landOutcomeTx(tx *sql.Tx, job *jobRow, c Completion, now time.Time) error {
 	switch c.Outcome {
 	case OutcomeLandHeld:
 		return e.landHeldTx(tx, job, c, now)
@@ -722,30 +783,43 @@ func (e *Engine) landCompletedTx(tx *sql.Tx, job *jobRow, c Completion, now time
 		return e.landNotReadyTx(tx, job, c, now)
 	}
 	if c.Error != "" {
-		// A push rejected because the target moved, for a task whose
-		// landing is already recorded as pushed — by its trailer on the
-		// default branch — leaves nothing for the foreman.
-		if existing, err := landingTx(tx, job.TaskID); err != nil {
-			return err
-		} else if existing != nil && existing.Pushed == "pushed" && pushRejected(c.Error) {
-			// The trailer scan may have settled the task while this job
-			// was live, leaving the plan open; the job's end closes it.
-			return e.finishLandPlanTx(tx, job, now)
-		}
-		// The runner could not attempt the landing at all (git failed):
-		// an environment failure — a fetch that cannot reach the remote,
-		// refused credentials, a lost runner — parks under its cause key
-		// and wakes once per cause (issue #116); anything else waits for
-		// the foreman like any failure, one wake per task.
-		key, words, env, err := landEnvCauseTx(tx, job.ProjectID, c)
-		if err != nil {
-			return err
-		}
-		if env {
-			return e.landEnvFailedTx(tx, job, key, words, c.Error, now)
-		}
-		return e.needsForemanTx(tx, job, evTaskLandFailed, eventPayload{Reason: boundNote(c.Error)}, now)
+		return e.landErrorTx(tx, job, c, now)
 	}
+	return e.landRecordTx(tx, job, c, now)
+}
+
+// landErrorTx applies a land job's error to its task (§7.1): the runner
+// could not attempt the landing, or lost it partway. A batch applies it
+// to every member it leaves unsettled.
+func (e *Engine) landErrorTx(tx *sql.Tx, job *jobRow, c Completion, now time.Time) error {
+	// A push rejected because the target moved, for a task whose
+	// landing is already recorded as pushed — by its trailer on the
+	// default branch — leaves nothing for the foreman.
+	if existing, err := landingTx(tx, job.TaskID); err != nil {
+		return err
+	} else if existing != nil && existing.Pushed == "pushed" && pushRejected(c.Error) {
+		// The trailer scan may have settled the task while this job
+		// was live, leaving the plan open; the job's end closes it.
+		return e.finishLandPlanTx(tx, job, now)
+	}
+	// The runner could not attempt the landing at all (git failed):
+	// an environment failure — a fetch that cannot reach the remote,
+	// refused credentials, a lost runner — parks under its cause key
+	// and wakes once per cause (issue #116); anything else waits for
+	// the foreman like any failure, one wake per task.
+	key, words, env, err := landEnvCauseTx(tx, job.ProjectID, c)
+	if err != nil {
+		return err
+	}
+	if env {
+		return e.landEnvFailedTx(tx, job, key, words, c.Error, now)
+	}
+	return e.needsForemanTx(tx, job, evTaskLandFailed, eventPayload{Reason: boundNote(c.Error)}, now)
+}
+
+// landRecordTx applies a one-task land job's record (§7.1): the push
+// phase's, or the landing's own.
+func (e *Engine) landRecordTx(tx *sql.Tx, job *jobRow, c Completion, now time.Time) error {
 	// The push phase reuses the land job (§7.1): the landing record
 	// already exists — pushed = waiting — and this completion is the
 	// push's, decoded and applied to that record, never re-squashed.
@@ -833,6 +907,7 @@ func (e *Engine) forgetWaitingLandingsTx(tx *sql.Tx, project int64, target strin
 		AND l.pushed IN ('waiting', 'local') AND l.task_id <> ?
 		AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.task_id = l.task_id AND j.kind = 'land'
 			AND j.status IN ('queued', 'leased', 'running'))
+		AND NOT `+reservedLiveBatch("l.task_id")+`
 		ORDER BY l.task_id`, project, target, except)
 	if err != nil {
 		return fmt.Errorf("list the landings on the stale waiting ref: %w", err)
@@ -859,7 +934,9 @@ func (e *Engine) forgetWaitingLandingsTx(tx *sql.Tx, project int64, target strin
 			return err
 		}
 	}
-	return nil
+	// Forgetting the stack may leave a behind-stack sync with nothing to
+	// wait for (§7.1): wake it to merge at once.
+	return e.wakeBehindStackSyncTx(tx, project, now)
 }
 
 // forgetRestartedLandingTx drops the landing a restart leaves behind
@@ -1007,7 +1084,7 @@ func landEnvClass(kind, msg string) string {
 	if pushRejected(m) {
 		return ""
 	}
-	for _, s := range []string{"clone ", "fetch ", "ls-remote", "look for "} {
+	for _, s := range []string{"clone ", "fetch ", "ls-remote", "look for ", "could not read from remote repository"} {
 		if strings.Contains(m, s) {
 			return "remote"
 		}
@@ -1270,20 +1347,35 @@ func (e *Engine) landSucceededTx(tx *sql.Tx, job *jobRow, rec landRecord, now ti
 	if err := e.releaseDependentLandsTx(tx, job.TaskID, now); err != nil {
 		return err
 	}
+	// A landing pushed to the target releases a wait_landed dependent's
+	// barrier (§6.1); one still waiting or local does not, so the release
+	// runs only on the pushed case.
+	if pushed == "pushed" {
+		if err := e.releaseDependentsTx(tx, job.ProjectID, job.TaskID, now); err != nil {
+			return err
+		}
+	}
 	// The landing proved the environment the failed landings blamed
 	// (issue #116): their causes end, so a recurrence wakes anew.
 	if err := e.recoverLandEnvCausesTx(tx, job.ProjectID, now); err != nil {
+		return err
+	}
+	// A landing pushed to the target may settle the last waiting landing
+	// of a behind-stack sync (§7.1): wake it to merge at once.
+	if err := e.wakeBehindStackSyncTx(tx, job.ProjectID, now); err != nil {
 		return err
 	}
 	return e.finishLandPlanTx(tx, job, now)
 }
 
 // liveLandJobTx reports whether the task has a land job queued, leased
-// or running (§7.1): a landing, or its push, still under way.
+// or running (§7.1), or a live batch reserves it (§12.3): a landing, or
+// its push, still under way.
 func liveLandJobTx(tx *sql.Tx, taskID int64) (bool, error) {
 	var n int
-	if err := tx.QueryRow(`SELECT COUNT(*) FROM jobs WHERE task_id = ? AND kind = 'land'
-		AND status IN ('queued', 'leased', 'running')`, taskID).Scan(&n); err != nil {
+	if err := tx.QueryRow(`SELECT (SELECT COUNT(*) FROM jobs WHERE task_id = ? AND kind = 'land'
+		AND status IN ('queued', 'leased', 'running'))
+		+ (SELECT COUNT(*) FROM tasks t WHERE t.id = ? AND `+reservedLiveBatch("t.id")+`)`, taskID, taskID).Scan(&n); err != nil {
 		return false, fmt.Errorf("read the land jobs of task %d: %w", taskID, err)
 	}
 	return n > 0, nil
@@ -1343,9 +1435,19 @@ func (e *Engine) pushCompletedTx(tx *sql.Tx, job *jobRow, existing *landingRow, 
 			AfterLandError: pr.AfterLandErr}, now); err != nil {
 		return err
 	}
+	// The push moved a waiting landing to the target, which releases a
+	// wait_landed dependent's barrier with no foreman action (§6.1).
+	if err := e.releaseDependentsTx(tx, job.ProjectID, job.TaskID, now); err != nil {
+		return err
+	}
 	// The push proved the remote reachable (issue #116): the causes of
 	// failed landings end with it.
 	if err := e.recoverLandEnvCausesTx(tx, job.ProjectID, now); err != nil {
+		return err
+	}
+	// The push settled a waiting landing (§7.1): it may be the last of a
+	// behind-stack sync's stack, which wakes to merge at once.
+	if err := e.wakeBehindStackSyncTx(tx, job.ProjectID, now); err != nil {
 		return err
 	}
 	return e.finishLandPlanTx(tx, job, now)
@@ -1477,14 +1579,16 @@ func (e *Engine) landHeldTx(tx *sql.Tx, job *jobRow, c Completion, now time.Time
 		}
 	}
 	if recheck {
-		// The re-check is a land job like the landing's own — same key,
-		// same command, nothing skipped — so its exit 0 lands through
-		// every gate and its other answers feed back into this path. The
-		// completing job freed the key earlier in this transaction, so
-		// the submit cannot sit behind a live job; an answer but a
-		// created job is an error, not a silent loss of the re-check.
+		// The re-check is a land job like the landing's own — same
+		// command, nothing skipped — on the member's own task:<id> key:
+		// its exit 0 lands through every gate and its other answers feed
+		// back into this path. The completing job freed that key, or held
+		// the batch key instead and formation skipped the task's, so the
+		// submit cannot sit behind a live job; an answer but a created job
+		// is an error, not a silent loss of the re-check.
+		key := fmt.Sprintf("task:%d", job.TaskID)
 		sr, err := e.submitTx(tx, SubmitParams{
-			Key:       job.Key,
+			Key:       key,
 			ProjectID: job.ProjectID,
 			TaskID:    job.TaskID,
 			Kind:      KindLand,
@@ -1497,7 +1601,7 @@ func (e *Engine) landHeldTx(tx *sql.Tx, job *jobRow, c Completion, now time.Time
 			return err
 		}
 		if sr.Answer != AnsCreated {
-			return fmt.Errorf("queue the land_ready re-check of task %d: submit %s answered %s", job.TaskID, job.Key, sr.Answer)
+			return fmt.Errorf("queue the land_ready re-check of task %d: submit %s answered %s", job.TaskID, key, sr.Answer)
 		}
 	}
 	return e.finishLandPlanTx(tx, job, now)
@@ -1516,16 +1620,21 @@ func (e *Engine) landNotReadyTx(tx *sql.Tx, job *jobRow, c Completion, now time.
 		return e.needsForemanTx(tx, job, evTaskLandFailed,
 			eventPayload{Reason: "unreadable not-ready record"}, now)
 	}
-	streak, err := landNotReadyStreakTx(tx, job.Key)
+	streak, err := landNotReadyStreakTx(tx, job.TaskID)
 	if err != nil {
 		return err
 	}
 	notBefore := now.Add(retryDelayFor(streak))
-	// The completing job freed the key earlier in this transaction, so
-	// the submit cannot sit behind a live job; an answer but a created
-	// job is an error, not a silent loss of the retry.
+	// The retry waits on the member's own task:<id> key under the
+	// backoff, so the backoff neither holds the project's land-batch key
+	// nor merges the member into another's batch: formation skips a task
+	// whose key is held. The completing job freed that key, or held the
+	// batch key instead, so the submit cannot sit behind a live job; an
+	// answer but a created job is an error, not a silent loss of the
+	// retry.
+	key := fmt.Sprintf("task:%d", job.TaskID)
 	sr, err := e.submitTx(tx, SubmitParams{
-		Key:       job.Key,
+		Key:       key,
 		ProjectID: job.ProjectID,
 		TaskID:    job.TaskID,
 		Kind:      KindLand,
@@ -1538,7 +1647,7 @@ func (e *Engine) landNotReadyTx(tx *sql.Tx, job *jobRow, c Completion, now time.
 		return err
 	}
 	if sr.Answer != AnsCreated {
-		return fmt.Errorf("queue the land retry of task %d: submit %s answered %s", job.TaskID, job.Key, sr.Answer)
+		return fmt.Errorf("queue the land retry of task %d: submit %s answered %s", job.TaskID, key, sr.Answer)
 	}
 	if _, err := tx.Exec(`UPDATE tasks SET land_retry_at = ?, land_ready_exit = ?, updated_at = ? WHERE id = ?`,
 		fmtTime(notBefore), rec.Exit, fmtTime(now), job.TaskID); err != nil {
@@ -1549,23 +1658,28 @@ func (e *Engine) landNotReadyTx(tx *sql.Tx, job *jobRow, c Completion, now time.
 	return err
 }
 
-// landNotReadyStreakTx measures a key's current run of consecutive
-// not-ready land jobs (issue #87), newest first — the completing job
-// included, for its result is already written — so the backoff grows
-// with each retry the gate refuses again. Zero when the key's latest
-// land job ended any other way.
-func landNotReadyStreakTx(tx *sql.Tx, key string) (int, error) {
+// landNotReadyStreakTx measures a member's current run of consecutive
+// not-ready land outcomes (issue #87, §12.3), newest first — the
+// completing job included, for its result is already written — so the
+// backoff grows with each retry the gate refuses again. It reads the
+// member's own ordered outcomes across every land job that carried its
+// landing, its task:<id> retries and the batches it led alike, never the
+// shared land-batch key: another member's outcomes neither reset nor
+// lengthen it. Zero when the member's latest land outcome was anything
+// else.
+func landNotReadyStreakTx(tx *sql.Tx, taskID int64) (int, error) {
+	key := fmt.Sprintf("task %d", taskID)
 	rows, err := tx.Query(`SELECT COALESCE(result, '') FROM jobs
-		WHERE key = ? AND kind = 'land' ORDER BY id DESC`, key)
+		WHERE task_id = ? AND kind = 'land' ORDER BY id DESC`, taskID)
 	if err != nil {
-		return 0, fmt.Errorf("read the land jobs of key %s: %w", key, err)
+		return 0, fmt.Errorf("read the land jobs of %s: %w", key, err)
 	}
 	defer rows.Close()
 	n := 0
 	for rows.Next() {
 		var stored string
 		if err := rows.Scan(&stored); err != nil {
-			return 0, fmt.Errorf("read the land jobs of key %s: %w", key, err)
+			return 0, fmt.Errorf("read the land jobs of %s: %w", key, err)
 		}
 		var rec landNotReadyRecord
 		if json.Unmarshal([]byte(jobResultText(stored)), &rec) != nil || rec.Outcome != OutcomeLandNotReady {
@@ -1650,13 +1764,22 @@ func (e *Engine) landLeaseGrantTx(tx *sql.Tx, j *jobRow, owner int64, leaseID st
 	if target == "" {
 		target = defaultBranch
 	}
+	// A batch job is always a squash phase (§12.3): its grant names every
+	// member it still owns, in batch order; the push phase of a recorded
+	// landing runs on the member's own key.
+	var members []LandMember
+	if isLandBatchKey(j.Key) {
+		if members, err = e.landBatchGrantMembersTx(tx, j, e.cfg.Now()); err != nil {
+			return nil, err
+		}
+	}
 	// The push phase reuses the land job: the landing record exists, so
 	// the grant is the push's alone — the repo to push to, the target
 	// and the recorded commit. No runner affinity: the commit waits on
 	// the remote's waiting ref, where any runner fetches it.
 	if existing, err := landingTx(tx, j.TaskID); err != nil {
 		return nil, err
-	} else if existing != nil {
+	} else if existing != nil && !isLandBatchKey(j.Key) {
 		repo, _, _, _, err := taskInfoTx(tx, j)
 		if err != nil {
 			return nil, err
@@ -1680,6 +1803,7 @@ func (e *Engine) landLeaseGrantTx(tx *sql.Tx, j *jobRow, owner int64, leaseID st
 			LandReady:      s.LandReady,
 			SkipLandReady:  j.SkipLandReady,
 			Attempt:        j.Attempts + 1,
+			TimeCap:        e.cfg.ClassCaps[j.Kind],
 		}, nil
 	}
 	repo, baseRef, _, branch, err := taskInfoTx(tx, j)
@@ -1711,6 +1835,16 @@ func (e *Engine) landLeaseGrantTx(tx *sql.Tx, j *jobRow, owner int64, leaseID st
 		held, err := heldPushTx(tx, j.TaskID)
 		if err != nil {
 			return nil, err
+		}
+		// One push publishes a batch: a member re-made under the held
+		// gate keeps the whole batch waiting for the user's yes.
+		for _, m := range members {
+			if held {
+				break
+			}
+			if held, err = heldPushTx(tx, m.TaskID); err != nil {
+				return nil, err
+			}
 		}
 		if held {
 			gatePush = GateAsk
@@ -1759,7 +1893,10 @@ func (e *Engine) landLeaseGrantTx(tx *sql.Tx, j *jobRow, owner int64, leaseID st
 		AfterLand:      s.AfterLand,
 		LandReady:      s.LandReady,
 		SkipLandReady:  j.SkipLandReady,
+		LandBatch:      isLandBatchKey(j.Key),
+		LandMembers:    members,
 		Attempt:        j.Attempts + 1,
+		TimeCap:        e.cfg.ClassCaps[j.Kind],
 	}, nil
 }
 
@@ -1920,7 +2057,7 @@ func (e *Engine) landDecisionTx(tx *sql.Tx, project, taskID int64, approve, stop
 		// landed. A live job on the task's key queues nothing: the
 		// decision names that job instead of a land job it did not queue.
 		res := LandDecision{TaskID: taskID, Released: true, Settings: changed}
-		live, err := liveJobTx(tx, fmt.Sprintf("task:%d", taskID))
+		live, err := liveTaskOwnerTx(tx, taskID)
 		if err != nil {
 			return LandDecision{}, err
 		}
@@ -2058,7 +2195,8 @@ func (e *Engine) pushApproveTx(tx *sql.Tx, project int64, now time.Time) (PushAp
 	query := `SELECT l.task_id, l.project_id
 		FROM landings l JOIN tasks t ON t.id = l.task_id JOIN plans p ON p.id = t.plan_id
 		WHERE l.pushed = 'waiting' AND p.project_id IN (SELECT id FROM projects WHERE archived_at IS NULL)
-		  AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.task_id = l.task_id AND j.kind = 'land' AND j.status IN ('queued', 'leased', 'running'))`
+		  AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.task_id = l.task_id AND j.kind = 'land' AND j.status IN ('queued', 'leased', 'running'))
+		  AND NOT ` + reservedLiveBatch("l.task_id")
 	args := []any{}
 	if project != 0 {
 		query += " AND p.project_id = ?"
@@ -2106,7 +2244,13 @@ func (e *Engine) pushApproveTx(tx *sql.Tx, project int64, now time.Time) (PushAp
 			return PushApproveResult{}, err
 		}
 	}
-	if len(waits) > 0 {
+	// The sync's waiting merge is released by the same approval (§7.1):
+	// a push-phase sync job pushes the recorded merge, no new merge.
+	syncReleased, err := e.releaseSyncPushTx(tx, project, now)
+	if err != nil {
+		return PushApproveResult{}, err
+	}
+	if len(waits) > 0 || syncReleased {
 		if _, err := appendEventTx(tx, evPushApproved, project, 0, 0,
 			eventPayload{Count: int64(len(waits))}, now); err != nil {
 			return PushApproveResult{}, err
@@ -2124,6 +2268,7 @@ func statusPushWaitsTx(tx *sql.Tx, project int64) ([]NeedsYouItem, error) {
 		FROM landings l JOIN tasks t ON t.id = l.task_id JOIN plans p ON p.id = t.plan_id
 		WHERE l.pushed = 'waiting' AND p.project_id IN (SELECT id FROM projects WHERE archived_at IS NULL)
 		  AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.task_id = l.task_id AND j.kind = 'land' AND j.status IN ('queued', 'leased', 'running'))
+		  AND NOT ` + reservedLiveBatch("l.task_id") + `
 		  AND NOT EXISTS (SELECT 1 FROM land_holds h WHERE h.task_id = l.task_id AND h.state = 'held')`
 	args := []any{}
 	if project != 0 {

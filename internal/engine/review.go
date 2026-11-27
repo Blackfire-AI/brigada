@@ -151,7 +151,7 @@ func (e *Engine) ReviewBranch(ctx context.Context, repoURL, branch string) (Revi
 			}
 		}
 		review.ExcludeFamily, review.Harness = family, harness
-		cands, err := eligibleAgentsTx(tx, &e.cfg, nil, 0, review,
+		cands, _, err := eligibleAgentsTx(tx, &e.cfg, nil, 0, review,
 			string(KindReview), fmtTime(now))
 		if err != nil {
 			return err
@@ -161,7 +161,7 @@ func (e *Engine) ReviewBranch(ctx context.Context, repoURL, branch string) (Revi
 			// alone (issue #126): with none of its harness ready, any
 			// ready review-class agent takes the review.
 			review.Harness = ""
-			if cands, err = eligibleAgentsTx(tx, &e.cfg, nil, 0, review,
+			if cands, _, err = eligibleAgentsTx(tx, &e.cfg, nil, 0, review,
 				string(KindReview), fmtTime(now)); err != nil {
 				return err
 			}

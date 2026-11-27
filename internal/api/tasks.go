@@ -47,7 +47,9 @@ func (s *Server) handleTaskAnswer(w http.ResponseWriter, r *http.Request, id ide
 // handleTaskRestart is the foreman's task_restart behind the API (§3,
 // §5.6, §12.1, §12.2): a fresh work attempt for a task parked at
 // needs_foreman, any parker, the foreman's note as the worker's
-// feedback. Scoped and idempotent like the answer.
+// feedback. With stop_running a task whose job is live is restarted too:
+// a queued job is replaced now, a running one is asked to stop and push,
+// answering pending. Scoped and idempotent like the answer.
 func (s *Server) handleTaskRestart(w http.ResponseWriter, r *http.Request, id identity) {
 	if !requireMethod(w, r, http.MethodPost) {
 		return
@@ -64,7 +66,11 @@ func (s *Server) handleTaskRestart(w http.ResponseWriter, r *http.Request, id id
 	if !ok {
 		return
 	}
-	res, err := s.eng.RestartTask(r.Context(), project, taskID, req.Note)
+	restart := s.eng.RestartTask
+	if req.StopRunning {
+		restart = s.eng.RestartTaskStopRunning
+	}
+	res, err := restart(r.Context(), project, taskID, req.Note)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, codeBadRequest, err.Error())
 		return
@@ -267,12 +273,17 @@ type taskAnswerResponse struct {
 }
 
 // taskRestartRequest is the task_restart body: the foreman's note for
-// the worker's fresh attempt, verbatim, optional.
+// the worker's fresh attempt, verbatim, optional, and stop_running (§5.6),
+// default false: true stops a task's live job keeping its branch and
+// seeds the fresh attempt from it.
 type taskRestartRequest struct {
-	Note string `json:"note"`
+	Note        string `json:"note"`
+	StopRunning bool   `json:"stop_running,omitempty"`
 }
 
-// taskRestartResponse names what the restart did: the fresh work job.
+// taskRestartResponse names what the restart did: the fresh work job,
+// or — answer pending, under stop_running — the live job that is
+// stopping, whose end queues the fresh attempt.
 type taskRestartResponse struct {
 	Answer string `json:"answer"`
 	JobID  int64  `json:"job_id"`

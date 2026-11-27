@@ -163,6 +163,8 @@ var schemaEdits = map[int]func(ctx context.Context, tx *sql.Tx) error{
 	64: seedRoleInstructions,
 	71: widenTaskStates,
 	79: widenTaskBranchSweepChecks,
+	84: widenLandSyncChecks,
+	89: widenLandBatchCheck,
 }
 
 // jobsPairingCheck is the CHECK 0001 put on jobs: foreman jobs have no
@@ -279,6 +281,34 @@ func widenTaskBranchSweepChecks(ctx context.Context, tx *sql.Tx) error {
 		return err
 	}
 	return editTableCheckEither(ctx, tx, "jobs", []string{jobsPairingCheckPlanReview, jobsPairingCheckRelaxed, jobsPairingCheck}, jobsPairingCheckSweep)
+}
+
+// The checks 0084 widens for the land-target sync (§7.1): a sync job
+// belongs to a project but no task and no result branch, like a sweep,
+// and runs with the runner's git credentials rather than an agent.
+const (
+	jobsKindCheckSync    = "CHECK (kind IN ('work', 'fix', 'review', 'foreman', 'land', 'plan_review', 'sweep', 'sync'))"
+	jobsPairingCheckSync = "CHECK ((kind = 'foreman') = (task_id IS NULL) OR kind IN ('review', 'plan_review', 'sweep', 'sync'))"
+)
+
+func widenLandSyncChecks(ctx context.Context, tx *sql.Tx) error {
+	// As in 0079, accept every live predecessor of this edit: a store
+	// whose earlier migrations ran as SQL alone still carries 0001's
+	// wording, while a jumped or partially edited store may carry an
+	// earlier widening's.
+	if err := editTableCheckEither(ctx, tx, "jobs", []string{jobsKindCheckSweep, jobsKindCheckPlanReview, jobsKindCheckLand, jobsKindCheck}, jobsKindCheckSync); err != nil {
+		return err
+	}
+	return editTableCheckEither(ctx, tx, "jobs", []string{jobsPairingCheckSweep, jobsPairingCheckPlanReview, jobsPairingCheckRelaxed, jobsPairingCheck}, jobsPairingCheckSync)
+}
+
+// The pairing CHECK 0089 widens for the batch landing job (§7.1): a batch
+// job belongs to a project but to no one task, so a land job may go
+// without a task too.
+const jobsPairingCheckBatch = "CHECK ((kind = 'foreman') = (task_id IS NULL) OR kind IN ('review', 'plan_review', 'sweep', 'sync', 'land'))"
+
+func widenLandBatchCheck(ctx context.Context, tx *sql.Tx) error {
+	return editTableCheckEither(ctx, tx, "jobs", []string{jobsPairingCheckSync, jobsPairingCheckSweep, jobsPairingCheckPlanReview, jobsPairingCheckRelaxed, jobsPairingCheck}, jobsPairingCheckBatch)
 }
 
 // editTableCheckEither is editTableCheck over the wordings an earlier

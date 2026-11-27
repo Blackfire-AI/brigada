@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"strings"
@@ -195,6 +196,50 @@ reviewer instructions (project #1): not configured
 	if len(allLines) != 2 {
 		t.Fatal("status --all printed no plans section")
 	}
+	// --plan: one plan's compact summary, none of the global sections.
+	planOut := runStatus("--plan", "1")
+	for _, want := range []string{"plan #1 active fix the frobnicator", "needs_foreman 1", "ready 1", "reviewing 2",
+		"blockers:", "task #2 needs_foreman: should the sprocket be blue?", "land head: none", "spend: 0 tokens, $0.00"} {
+		if !strings.Contains(planOut, want) {
+			t.Errorf("status --plan 1 lacks %q:\n%s", want, planOut)
+		}
+	}
+	for _, unwanted := range []string{"engine pid", "jobs:", "stale work", "roll out v2", "foreman report:", "skill "} {
+		if strings.Contains(planOut, unwanted) {
+			t.Errorf("status --plan 1 prints the global %q:\n%s", unwanted, planOut)
+		}
+	}
+	// --json: the API's JSON, plan-scoped with --plan.
+	var scoped struct {
+		Plans     []struct{ ID int64 } `json:"plans"`
+		PlanScope *struct {
+			PlanID int64 `json:"plan_id"`
+		} `json:"plan_scope"`
+	}
+	if err := json.Unmarshal([]byte(runStatus("--plan", "1", "--json")), &scoped); err != nil {
+		t.Fatalf("status --plan 1 --json is not JSON: %v", err)
+	}
+	if len(scoped.Plans) != 1 || scoped.Plans[0].ID != 1 || scoped.PlanScope == nil || scoped.PlanScope.PlanID != 1 {
+		t.Errorf("status --plan 1 --json = %+v", scoped)
+	}
+	var global struct {
+		Plans []struct{ ID int64 } `json:"plans"`
+	}
+	if err := json.Unmarshal([]byte(runStatus("--json")), &global); err != nil || len(global.Plans) < 2 {
+		t.Errorf("status --json = %+v, %v; want the global plans", global, err)
+	}
+	// history --plan: the plan's timeline alone.
+	var histOut, histErr bytes.Buffer
+	if code := run(ctx, []string{"history", "--plan", "1", "--raw", "--state-dir", state, "--no-start"}, &histOut, &histErr); code != 0 {
+		t.Fatalf("history --plan 1 exit = %d, stderr = %q", code, histErr.String())
+	}
+	if !strings.Contains(histOut.String(), "task_needs_help") || strings.Contains(histOut.String(), "foreman_report") {
+		t.Errorf("history --plan 1 --raw = %q, want the plan's task events and not the report", histOut.String())
+	}
+	// An unknown plan fails.
+	if code := run(ctx, []string{"status", "--plan", "99", "--state-dir", state, "--no-start"}, &histOut, &histErr); code == 0 {
+		t.Error("status --plan 99 succeeded")
+	}
 	wantAll := fmt.Sprintf(`plans:
 #1 active fix the frobnicator
   task #1 ready the frobnicator
@@ -221,5 +266,25 @@ reviewer instructions (project #1): not configured
 `, at(-30*time.Minute))
 	if got := "plans:\n" + allLines[1]; got != wantAll {
 		t.Errorf("status --all sections =\n%s\nwant the golden:\n%s", got, wantAll)
+	}
+}
+
+// TestStatusPlanFlagUsageErrors: --plan and --json refuse what cannot
+// combine or parse, before any engine is reached.
+func TestStatusPlanFlagUsageErrors(t *testing.T) {
+	for _, args := range [][]string{
+		{"status", "--plan", "x"},
+		{"status", "--plan", "-1"},
+		{"status", "--plan", "1", "--all"},
+		{"status", "--plan", "1", "--line"},
+		{"status", "--json", "--line"},
+		{"history", "--plan", "x"},
+		{"history", "--plan", "-1"},
+		{"status", "--plam", "1"},
+	} {
+		var stdout, stderr bytes.Buffer
+		if code := run(context.Background(), append(args, "--no-start"), &stdout, &stderr); code != 2 {
+			t.Errorf("%v exit = %d, want 2 (stderr %q)", args, code, stderr.String())
+		}
 	}
 }

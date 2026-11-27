@@ -56,7 +56,7 @@ func runRunner(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	fs.IntVar(&maxParallel, "max-parallel", 0, "how many concurrent jobs this runner runs, advertised at register (0 = unset, one at a time)")
 	fs.BoolVar(&noStart, "no-start", false, "do not start the engine on demand; fail when none is running")
 	agents := &agentSpecs{}
-	fs.Var(agents, "agent", "one offered agent, --agent once per harness and model: harness=<h>[,model=<m>][,classes=<c1>+<c2>|none][,account=<label>][,agent-file=<path>][,effort=<level>][,tools=<p1>+<p2>|none][,permission=<mode>][,read-scope=true|false]; permission= is the mode the harness runs in (claude default: bypassPermissions) and tools= its deprecated alias; read-scope= turns the read-scope hook off (default on); account defaults to the harness name; effort is validated per harness (claude, codex, opencode, dsh; kimi and qwen-code have none); tools= (claude only) takes Claude Code tool patterns under acceptEdits, none = file tools only; replaces --harness/--model/--classes/--agent-file")
+	fs.Var(agents, "agent", "one offered agent, --agent once per harness and model: harness=<h>[,model=<m>][,classes=<c1>+<c2>|none][,account=<label>][,quota_scope=<scope>][,agent-file=<path>][,effort=<level>][,tools=<p1>+<p2>|none][,permission=<mode>][,read-scope=true|false]; permission= is the mode the harness runs in (claude default: bypassPermissions) and tools= its deprecated alias; read-scope= turns the read-scope hook off (default on); account defaults to the harness name; quota_scope defaults to opencode/<provider> for opencode and the account label elsewhere; effort is validated per harness (claude, codex, opencode, dsh; kimi and qwen-code have none); tools= (claude only) takes Claude Code tool patterns under acceptEdits, none = file tools only; replaces --harness/--model/--classes/--agent-file")
 	if code, stop := common.parse(stdout, stderr, args); stop {
 		return code
 	}
@@ -158,6 +158,7 @@ func runRunner(ctx context.Context, args []string, stdout, stderr io.Writer) int
 		Labels:      splitList(labels),
 		MaxParallel: maxParallel,
 		HarnessEnv:  harnessEnv,
+		ClassCaps:   rt.file.TimeCaps.RunnerCaps(),
 		Ready: func() {
 			fmt.Fprintf(stdout, "runner %s up on %s offering %s\n", name, rt.paths.Socket, strings.Join(parts, "; "))
 			for _, a := range adverts {
@@ -186,12 +187,15 @@ func resolveRunnerHarnessEnv(refs map[string]map[string]string, adverts []api.Ag
 
 // agentSpec is one offered agent as the --agent flag describes it.
 type agentSpec struct {
-	harness   string
-	model     string
-	classes   []string
-	account   string
-	agentFile string
-	effort    string
+	harness string
+	model   string
+	classes []string
+	account string
+	// quotaScope is the explicit quota_scope= value (§8): "" when unset,
+	// which derives the default (see quotaScopeLabel).
+	quotaScope string
+	agentFile  string
+	effort     string
 	// tools is the explicit tools= scope: nil when unset, an empty
 	// non-nil list for none. toolsText is the claude agent's effective
 	// scope as registered, filled once the runner resolves it.
@@ -240,6 +244,31 @@ func (s agentSpec) accountLabel() string {
 	return s.harness
 }
 
+// quotaScopeLabel is the quota scope the agent cools under (§8): the
+// explicit quota_scope= value, else the derived default — opencode
+// agents share one scope per provider, "opencode/" plus the model's
+// first path segment (opencode/zai-coding-plan, opencode/deepseek,
+// opencode/default), and every other harness uses its account label, so
+// single-provider behaviour is unchanged. The derivation must match the
+// quota_scope migration's backfill: a re-register that derives a
+// different scope flips the agent's cooling group.
+func (s agentSpec) quotaScopeLabel() string {
+	if s.quotaScope != "" {
+		return s.quotaScope
+	}
+	if s.harness == "opencode" {
+		model := s.model
+		if model == "" {
+			model = runnerDefaultModel(s.harness)
+		}
+		if before, _, ok := strings.Cut(model, "/"); ok {
+			model = before
+		}
+		return "opencode/" + model
+	}
+	return s.accountLabel()
+}
+
 // defaultClasses is what an agent takes when nothing narrows it, in every
 // harness — the shorthand --classes default and the --agent form's own,
 // kept one constant so the two forms cannot drift. A review runs under the
@@ -269,7 +298,7 @@ func (s *agentSpecs) String() string {
 }
 
 // Set parses one --agent value: harness=<h>[,model=<m>][,classes=<c1>+<c2>|none]
-// [,account=<label>][,agent-file=<path>][,effort=<level>][,tools=<p1>+<p2>|none]. The harness
+// [,account=<label>][,quota_scope=<scope>][,agent-file=<path>][,effort=<level>][,tools=<p1>+<p2>|none]. The harness
 // is required; the
 // rest keeps its harness's default. Everything but existence is validated here, so a
 // bad agent is a startup failure, never a job's.
@@ -284,7 +313,7 @@ func (s *agentSpecs) Set(v string) error {
 		}
 		key, value, ok := strings.Cut(field, "=")
 		if !ok {
-			return fmt.Errorf("--agent %q: want harness=<h>[,model=<m>][,classes=<c1>+<c2>|none][,account=<label>][,agent-file=<path>][,effort=<level>][,tools=<p1>+<p2>|none]", v)
+			return fmt.Errorf("--agent %q: want harness=<h>[,model=<m>][,classes=<c1>+<c2>|none][,account=<label>][,quota_scope=<scope>][,agent-file=<path>][,effort=<level>][,tools=<p1>+<p2>|none]", v)
 		}
 		switch key {
 		case "harness":
@@ -301,6 +330,8 @@ func (s *agentSpecs) Set(v string) error {
 			}
 		case "account":
 			spec.account = value
+		case "quota_scope":
+			spec.quotaScope = value
 		case "agent-file":
 			spec.agentFile = value
 		case "effort":
@@ -323,7 +354,7 @@ func (s *agentSpecs) Set(v string) error {
 			}
 			spec.readScope = &on
 		default:
-			return fmt.Errorf("--agent %q: unknown field %q; want harness, model, classes, account, agent-file, effort, tools, permission or read-scope", v, key)
+			return fmt.Errorf("--agent %q: unknown field %q; want harness, model, classes, account, quota_scope, agent-file, effort, tools, permission or read-scope", v, key)
 		}
 	}
 	if spec.permission != "" && spec.tools != nil && adapter.ToolsAliasPermission(spec.tools) != spec.permission {
@@ -354,6 +385,9 @@ func (s agentSpec) String() string {
 	}
 	if s.account != "" {
 		fields = append(fields, "account="+s.account)
+	}
+	if s.quotaScope != "" {
+		fields = append(fields, "quota_scope="+s.quotaScope)
 	}
 	if s.agentFile != "" {
 		fields = append(fields, "agent-file="+s.agentFile)
@@ -528,6 +562,7 @@ func resolveRunnerAgents(rt *runtime, specs []agentSpec, workerScript string) ([
 			Tools:   spec.toolsText,
 
 			Permission: permission,
+			QuotaScope: spec.quotaScopeLabel(),
 		})
 	}
 

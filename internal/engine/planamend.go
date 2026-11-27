@@ -72,6 +72,18 @@ type PlanRespec struct {
 	Spec   string
 	Mode   string
 	Skills []string
+	// ToolGrants replaces the task's tool grants (§6.1) — nil keeps
+	// them, a list (even empty) replaces them.
+	ToolGrants []string
+}
+
+// PlanNote sets the pending note of a task (§6.2): the words its next
+// worker job carries in its prompt. Task accepts a plan task's name or
+// decimal id. Setting replaces the task's pending note; an empty Note
+// clears it.
+type PlanNote struct {
+	Task string
+	Note string
 }
 
 // PlanCancel names one task an amendment cancels (§6.2): Task accepts a
@@ -99,6 +111,7 @@ type PlanAmendment struct {
 	Retarget []PlanRetarget
 	Retier   []PlanRetier
 	Respec   []PlanRespec
+	Note     []PlanNote
 	// SkipApproved says the user themself approved the cancellations of
 	// this amendment: only a user's token can say so, never the foreman's
 	// own. Without it a cancelled task is an abandoned one, and the
@@ -132,6 +145,7 @@ type AmendPlanResult struct {
 	Retargeted []int64
 	Retiered   []int64
 	Respecced  []int64
+	Noted      []int64
 	Started    []CreatedTask
 	Held       []HeldTask
 	Reasons    []string
@@ -185,6 +199,7 @@ type amendNode struct {
 	cont                    int   // the named continued dep, an index into the node list; -1 = none named
 	cancelNow, retargetedBy bool
 	skipApproved            bool // a cancelled task whose skip the user approved
+	waitLanded              bool // the dependent's release waits for landing (§6.1)
 	// extra is the list the task itself named (§5.8), nil when it inherits
 	// the project default; extraRec is the record an added task carries.
 	extra    []ExtraRepo
@@ -204,8 +219,8 @@ func (n amendNode) label() string {
 }
 
 func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, now time.Time) (AmendPlanResult, error) {
-	if len(am.Add) == 0 && len(am.Cancel) == 0 && len(am.Retarget) == 0 && len(am.Retier) == 0 && len(am.Respec) == 0 {
-		return AmendPlanResult{}, fmt.Errorf("nothing to amend: give tasks to add, cancel, retarget, retier or respec")
+	if len(am.Add) == 0 && len(am.Cancel) == 0 && len(am.Retarget) == 0 && len(am.Retier) == 0 && len(am.Respec) == 0 && len(am.Note) == 0 {
+		return AmendPlanResult{}, fmt.Errorf("nothing to amend: give tasks to add, cancel, retarget, retier, respec or note")
 	}
 	var proj int64
 	var state, baseRef string
@@ -279,6 +294,9 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 			return AmendPlanResult{}, fmt.Errorf("added task %d %q: %w", i+1, t.Name, err)
 		}
 		if err := validateTaskCaps(t.Caps); err != nil {
+			return AmendPlanResult{}, fmt.Errorf("added task %d %q: %w", i+1, t.Name, err)
+		}
+		if err := validateToolGrants(t.ToolGrants); err != nil {
 			return AmendPlanResult{}, fmt.Errorf("added task %d %q: %w", i+1, t.Name, err)
 		}
 		if t.Spec == "" {
@@ -461,6 +479,7 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 	var respecced []int
 	respecText := map[int]string{}
 	respecSkills := map[int][]string{}
+	respecGrants := map[int][]string{}
 	for _, rs := range am.Respec {
 		i, err := resolve(rs.Task)
 		if err != nil {
@@ -486,9 +505,38 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 		default:
 			return AmendPlanResult{}, fmt.Errorf("respec %s: mode %q is not replace or append", nodes[i].label(), rs.Mode)
 		}
+		if err := validateToolGrants(rs.ToolGrants); err != nil {
+			return AmendPlanResult{}, fmt.Errorf("respec %s: %w", nodes[i].label(), err)
+		}
 		respecText[i] = rs.Spec
 		respecSkills[i] = rs.Skills
+		respecGrants[i] = rs.ToolGrants
 		respecced = append(respecced, i)
+	}
+	// A note (§6.2) rides a task that has not settled: pending, ready,
+	// running or parked alike. The next job it creates carries it.
+	var noted []int
+	notedSeen := map[int]bool{}
+	for _, nt := range am.Note {
+		i, err := resolve(nt.Task)
+		if err != nil {
+			return AmendPlanResult{}, fmt.Errorf("note: %w", err)
+		}
+		if i >= existing {
+			return AmendPlanResult{}, fmt.Errorf("note: %s is added by this same amendment; its spec carries what it needs", nodes[i].label())
+		}
+		switch nodes[i].state {
+		case taskDone, taskCancelled, taskRetired:
+			return AmendPlanResult{}, fmt.Errorf("note: %s is %s; a settled task runs no next job to carry a note", nodes[i].label(), nodes[i].state)
+		}
+		if nodes[i].cancelNow {
+			return AmendPlanResult{}, fmt.Errorf("note: %s is cancelled by this same amendment", nodes[i].label())
+		}
+		if notedSeen[i] {
+			return AmendPlanResult{}, fmt.Errorf("note: %s is noted twice in this amendment", nodes[i].label())
+		}
+		notedSeen[i] = true
+		noted = append(noted, i)
 	}
 	// Dependencies resolve after the cancels, against the whole amended
 	// node set, so a task cannot wait on one this amendment cancels.
@@ -627,9 +675,11 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 	// only), a check other than the project's default_check — and one
 	// that trips is held alone, its
 	// own needs-you line naming the rule, while the plan stays active.
-	// The whole-plan triggers (the task count, gate_plan) do not apply to
-	// a plan already running. An awaiting plan is re-evaluated whole, as
-	// at creation, and stays awaiting. An active plan the project reviews
+	// gate_plan never applies to a plan already running; the task count
+	// does — an amendment that grows the plan past approval_max_tasks
+	// holds the added tasks (below). An awaiting plan is re-evaluated
+	// whole, as at creation, and stays awaiting. An active plan the
+	// project reviews
 	// (§6.2) holds its added and respecified tasks pending instead:
 	// the plan turns reviewing, the per-task rules wait for the verdict,
 	// and a reviewing plan amended is the foreman's answer to a changes
@@ -666,6 +716,22 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 			n := nodes[existing+k]
 			if reasons := settings.taskHoldReasons(PlanTask{Spec: n.spec, Check: n.check, Class: n.class, ExtraRepos: n.extra}); len(reasons) > 0 {
 				addedHold[k] = strings.Join(reasons, "; ")
+			}
+		}
+		// The task-count envelope reaches an amendment (§6.3): growing an
+		// active plan past approval_max_tasks holds the tasks the
+		// amendment adds at the plan gate, with the max_tasks reason
+		// naming the post-amendment total, while the plan stays active
+		// and its other work runs on. gate_plan still never holds an
+		// amendment.
+		if *settings.MaxTasks > 0 && len(kept) > *settings.MaxTasks {
+			why := maxTasksHoldReason(len(kept), *settings.MaxTasks)
+			for k := range am.Add {
+				if addedHold[k] != "" {
+					addedHold[k] += "; " + why
+				} else {
+					addedHold[k] = why
+				}
 			}
 		}
 	default:
@@ -756,7 +822,19 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 		if err := reresolveTaskInstructionsTx(tx, proj, nodes[i].id, nodes[i].label(), respecSkills[i], now); err != nil {
 			return AmendPlanResult{}, fmt.Errorf("respec %s: %w", nodes[i].label(), err)
 		}
+		if respecGrants[i] != nil {
+			if _, err := tx.Exec(`UPDATE tasks SET tool_grants = ?, updated_at = ? WHERE id = ?`,
+				taskToolGrantsJSON(respecGrants[i]), nowStr, nodes[i].id); err != nil {
+				return AmendPlanResult{}, fmt.Errorf("respec %s: %w", nodes[i].label(), err)
+			}
+		}
 		res.Respecced = append(res.Respecced, nodes[i].id)
+	}
+	for k, i := range noted {
+		if err := setTaskNoteTx(tx, proj, nodes[i].id, am.Note[k].Note, am.Caller, now); err != nil {
+			return AmendPlanResult{}, fmt.Errorf("note %s: %w", nodes[i].label(), err)
+		}
+		res.Noted = append(res.Noted, nodes[i].id)
 	}
 	setupRec, err := taskProjectSetupTx(tx, proj)
 	if err != nil {
@@ -768,9 +846,9 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 		if addedHold[k] != "" {
 			taskState = taskNeedsForeman
 		}
-		r, err := tx.Exec(`INSERT INTO tasks (plan_id, name, title, spec, check_cmd, class, state, base_ref, caps, setup, extra_repos, tier, effective_tier, effort, effective_effort, review_tier, review_effort, created_at, updated_at)
-			VALUES (?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?)`,
-			plan, nodes[i].name, nodes[i].title, nodes[i].spec, nodes[i].check, nodes[i].class, taskState, baseRef, taskCapsJSON(am.Add[k].Caps), setupRec, nodes[i].extraRec, taskTier(am.Add[k].Tier), taskTier(am.Add[k].Tier), am.Add[k].Effort, am.Add[k].Effort, am.Add[k].ReviewTier, am.Add[k].ReviewEffort, nowStr, nowStr)
+		r, err := tx.Exec(`INSERT INTO tasks (plan_id, name, title, spec, check_cmd, class, state, base_ref, caps, setup, extra_repos, tier, effective_tier, effort, effective_effort, review_tier, review_effort, wait_landed, tool_grants, created_at, updated_at)
+			VALUES (?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			plan, nodes[i].name, nodes[i].title, nodes[i].spec, nodes[i].check, nodes[i].class, taskState, baseRef, taskCapsJSON(am.Add[k].Caps), setupRec, nodes[i].extraRec, taskTier(am.Add[k].Tier), taskTier(am.Add[k].Tier), am.Add[k].Effort, am.Add[k].Effort, am.Add[k].ReviewTier, am.Add[k].ReviewEffort, am.Add[k].WaitLanded, taskToolGrantsJSON(am.Add[k].ToolGrants), nowStr, nowStr)
 		if err != nil {
 			return AmendPlanResult{}, fmt.Errorf("create the task: %w", err)
 		}
@@ -951,6 +1029,9 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 	if len(res.Respecced) > 0 {
 		change = append(change, "respecified "+joinIDs(res.Respecced))
 	}
+	if len(res.Noted) > 0 {
+		change = append(change, "noted "+joinIDs(res.Noted))
+	}
 	for _, h := range res.Held {
 		label := fmt.Sprintf("task %d", h.TaskID)
 		if h.Name != "" {
@@ -961,7 +1042,7 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 	if _, err := appendEventTx(tx, evPlanAmended, proj, 0, 0, eventPayload{
 		Retiered: res.Retiered,
 		Plan:     plan,
-		Count:    int64(len(res.Added) + len(res.Cancelled) + len(res.Retargeted) + len(res.Retiered) + len(res.Respecced)),
+		Count:    int64(len(res.Added) + len(res.Cancelled) + len(res.Retargeted) + len(res.Retiered) + len(res.Respecced) + len(res.Noted)),
 		Status:   newState,
 		Reason:   strings.Join(change, "; "),
 	}, now); err != nil {
@@ -991,7 +1072,7 @@ func joinIDs(ids []int64) string {
 // loadAmendNodesTx reads a plan's tasks, by id, with their dependencies
 // as indexes into the same list.
 func loadAmendNodesTx(tx *sql.Tx, plan int64) ([]amendNode, error) {
-	rows, err := tx.Query(`SELECT id, name, state, title, spec, COALESCE(check_cmd, ''), class, skip_approved, COALESCE(extra_repos, '')
+	rows, err := tx.Query(`SELECT id, name, state, title, spec, COALESCE(check_cmd, ''), class, skip_approved, COALESCE(extra_repos, ''), wait_landed
 		FROM tasks WHERE plan_id = ? ORDER BY id`, plan)
 	if err != nil {
 		return nil, fmt.Errorf("read the tasks of plan %d: %w", plan, err)
@@ -1000,7 +1081,7 @@ func loadAmendNodesTx(tx *sql.Tx, plan int64) ([]amendNode, error) {
 	for rows.Next() {
 		n := amendNode{base: -1, cont: -1}
 		var extraRec string
-		if err := rows.Scan(&n.id, &n.name, &n.state, &n.title, &n.spec, &n.check, &n.class, &n.skipApproved, &extraRec); err != nil {
+		if err := rows.Scan(&n.id, &n.name, &n.state, &n.title, &n.spec, &n.check, &n.class, &n.skipApproved, &extraRec, &n.waitLanded); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("read the tasks of plan %d: %w", plan, err)
 		}
@@ -1050,6 +1131,11 @@ func loadAmendNodesTx(tx *sql.Tx, plan int64) ([]amendNode, error) {
 // retired task leaves no worker running or queued. reason names who
 // asked, recorded on each job_cancelled event.
 func (e *Engine) cancelTaskJobsTx(tx *sql.Tx, task int64, reason string, now time.Time) error {
+	// A cancelled or retired task restarts nothing: its pending
+	// stop-running restart (§5.6) goes with its jobs.
+	if err := clearStopPendingTx(tx, task, now); err != nil {
+		return err
+	}
 	rows, err := tx.Query(`SELECT id FROM jobs WHERE task_id = ? ORDER BY id`, task)
 	if err != nil {
 		return fmt.Errorf("read the jobs of task %d: %w", task, err)
@@ -1080,6 +1166,16 @@ func (e *Engine) cancelTaskJobsTx(tx *sql.Tx, task int64, reason string, now tim
 			return err
 		}
 	}
+	// Cancelling a member's task stops the batch that reserves it (§7.1),
+	// as it stops the task's own live jobs; the sweep releases the other
+	// members, and they land in the next batch.
+	if b, err := reservedBatchTx(tx, task); err != nil {
+		return err
+	} else if b != nil {
+		if _, err := e.cancelTx(tx, b, reason, now); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -1106,11 +1202,12 @@ func startedWorkTx(tx *sql.Tx, plan int64, now time.Time) ([]CreatedTask, error)
 
 // readyPlanTasksTx starts every pending task of an active plan whose
 // dependencies are all done — none counts — turning it ready with its
-// first work job queued, as creation and approval do. A task of a plan
-// whose spend passed its budget parks instead, at the plan gate (§6.3,
-// planbudget.go), and is returned among the held.
+// first work job queued, as creation and approval do. A wait_landed task
+// also waits for every implement dependency's landing (§6.1). A task of
+// a plan whose spend passed its budget parks instead, at the plan gate
+// (§6.3, planbudget.go), and is returned among the held.
 func (e *Engine) readyPlanTasksTx(tx *sql.Tx, project, plan int64, now time.Time) ([]CreatedTask, []HeldTask, error) {
-	rows, err := tx.Query(`SELECT t.id, t.name, t.spec FROM tasks t
+	rows, err := tx.Query(`SELECT t.id, t.name, t.spec, t.wait_landed FROM tasks t
 		WHERE t.plan_id = ? AND t.state = ?
 		AND NOT EXISTS (SELECT 1 FROM task_deps o JOIN tasks x ON x.id = o.depends_on_task_id
 			WHERE o.task_id = t.id AND x.state <> ?)
@@ -1121,11 +1218,12 @@ func (e *Engine) readyPlanTasksTx(tx *sql.Tx, project, plan int64, now time.Time
 	type wave struct {
 		id         int64
 		name, spec string
+		waitLanded bool
 	}
 	var first []wave
 	for rows.Next() {
 		var w wave
-		if err := rows.Scan(&w.id, &w.name, &w.spec); err != nil {
+		if err := rows.Scan(&w.id, &w.name, &w.spec, &w.waitLanded); err != nil {
 			rows.Close()
 			return nil, nil, fmt.Errorf("read the ready tasks of plan %d: %w", plan, err)
 		}
@@ -1149,6 +1247,15 @@ func (e *Engine) readyPlanTasksTx(tx *sql.Tx, project, plan int64, now time.Time
 			held = append(held, HeldTask{TaskID: w.id, Name: w.name, Reason: gate.heldReason})
 			continue
 		}
+		if w.waitLanded {
+			satisfied, err := waitLandedSatisfiedTx(tx, w.id)
+			if err != nil {
+				return nil, nil, err
+			}
+			if !satisfied {
+				continue
+			}
+		}
 		if _, err := tx.Exec(`UPDATE tasks SET state = ?, updated_at = ? WHERE id = ?`,
 			taskReady, fmtTime(now), w.id); err != nil {
 			return nil, nil, fmt.Errorf("ready task %d: %w", w.id, err)
@@ -1165,16 +1272,18 @@ func (e *Engine) readyPlanTasksTx(tx *sql.Tx, project, plan int64, now time.Time
 // planLiveWorkTx reads, from a plan's nodes alone, whether live work
 // remains (§6.2, #133) and which task ids hold it — no writes, no events,
 // no wake. Live work is: a task not done, cancelled, failed, retired or
-// pending; a done task whose land job is queued or running (§7.1: the
-// plan closes when the landing has an outcome, so a failed landing
-// counts against it); a done task with no landing record held at the
-// land gate (its landing waits on the user's release); and a done task
-// with no landing record the land rule would land — done, implement,
-// approved (§7.1) — with no rejected hold declining it: most often a
-// dependency of its own has not landed, so no land job exists. A hold
-// the user rejected is that decline (§6.3), not live work, and a hold
-// on a landing already recorded is the push phase's (§7.1), beside a
-// waiting push — neither holds a plan open. A retired task is settled
+// permanently-waiting pending (a pending task behind a dead dependency
+// is named, never live); a wait_landed pending task still waiting on the
+// landing barrier (§6.1); a done task whose land job is queued or
+// running (§7.1: the plan closes when the landing has an outcome, so a
+// failed landing counts against it); a done task with no landing record
+// held at the land gate (its landing waits on the user's release); and a
+// done task with no landing record the land rule would land — done,
+// implement, approved (§7.1) — with no rejected hold declining it: most
+// often a dependency of its own has not landed, so no land job exists. A
+// hold the user rejected is that decline (§6.3), not live work, and a
+// hold on a landing already recorded is the push phase's (§7.1), beside
+// a waiting push — neither holds a plan open. A retired task is settled
 // (§6.2): it never lands and never waits, so it is not live work
 // either. The plan-close rule (finishPlanIfClosedTx) and the start-up
 // reopen pass (ReopenStrandedPlans, #137) both read it here, so a plan
@@ -1245,17 +1354,56 @@ func planLiveWorkTx(tx *sql.Tx, nodes []amendNode) ([]int64, error) {
 					continue
 				}
 			}
-		case taskCancelled, taskFailed, taskPending, taskRetired:
+		case taskPending:
+			// A pending task usually waits on a dependency that will
+			// never be done, and the close names it. The exception is a
+			// wait_landed task whose dependencies are all done and none
+			// of whose implement dependencies' landings was declined
+			// (§6.1): it is held only by the landing barrier, so it is
+			// live work that keeps the plan open until the landing
+			// settles and the task runs.
+			if n.waitLanded {
+				still, err := waitLandedLiveTx(tx, nodes, n.deps)
+				if err != nil {
+					return nil, err
+				}
+				if still {
+					live = append(live, n.id)
+				}
+			}
+		case taskCancelled, taskFailed, taskRetired:
 			// The close names these — the failed, the abandoned or
-			// approved skip, the never-run, the retired — and so does
-			// the pass not reopen over them: a pending task behind a
-			// failed one never kept a plan open (#137), and a retired
-			// one is settled for good (§6.2).
+			// approved skip, the retired — and so does the pass not
+			// reopen over them: a retired one is settled for good (§6.2).
 		default:
 			live = append(live, n.id) // live work remains
 		}
 	}
 	return live, nil
+}
+
+// waitLandedLiveTx reports whether a pending wait_landed task is still
+// live work (§6.1): every dependency done, and no implement dependency's
+// landing declined, so the landing barrier alone holds it and will
+// settle. A dependency still open, or a declined landing, leaves it to
+// the close's "never run" report.
+func waitLandedLiveTx(tx *sql.Tx, nodes []amendNode, deps []int) (bool, error) {
+	for _, j := range deps {
+		if nodes[j].state != taskDone {
+			return false, nil // a dep still open: not this task's turn
+		}
+		if nodes[j].class != classImplement {
+			continue // a non-implement dep never lands, so never declines
+		}
+		rejected, err := rejectedLandHoldTx(tx, nodes[j].id)
+		if err != nil {
+			return false, err
+		}
+		if rejected {
+			return false, nil // the landing will never happen
+		}
+	}
+	return true, nil
 }
 
 // finishPlanIfClosedTx finishes an active plan with no live work left

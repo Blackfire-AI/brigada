@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -26,18 +28,29 @@ var connectClient = connect
 // every finished plan, the MCP tool's all=true.
 func runStatus(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := newFlagSet("status",
-		"brigada status [--line] [--all] [--no-start]",
+		"brigada status [--line] [--all] [--plan ID] [--json] [--no-start]",
 		"Show the engine, jobs, plans and what needs your attention.")
 	stderr = commandStderr(stderr, fs.Name())
 	common := addCommon(fs)
 	noStart := fs.Bool("no-start", false, "do not start the engine on demand; fail when none is running")
 	line := fs.Bool("line", false, "print one short line for a terminal status bar; never starts the engine")
 	all := fs.Bool("all", false, "list every finished plan, not only the three most recent")
+	plan := fs.Int64("plan", 0, "show one plan's compact summary only: task counts, blockers, land head, spend and recent transitions")
+	asJSON := fs.Bool("json", false, "print the status as JSON, plan-scoped with --plan, instead of text")
 	if code, stop := common.parse(stdout, stderr, args); stop {
 		return code
 	}
 	if extra := fs.Args(); len(extra) > 0 {
 		return usagef(stderr, "status takes no arguments, got %q", extra)
+	}
+	if *plan < 0 {
+		return usagef(stderr, "--plan must be a non-negative id")
+	}
+	if *line && (*plan != 0 || *asJSON) {
+		return usagef(stderr, "--line cannot be combined with --plan or --json")
+	}
+	if *plan != 0 && *all {
+		return usagef(stderr, "--plan cannot be combined with --all")
 	}
 	if *line {
 		return statusLine(ctx, common, stdout)
@@ -52,13 +65,28 @@ func runStatus(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	}
 	var st api.Status
 	var err error
-	if *all {
+	switch {
+	case *plan != 0:
+		st, err = client.StatusPlan(ctx, *plan)
+	case *all:
 		st, err = client.StatusAll(ctx, false)
-	} else {
+	default:
 		st, err = client.Status(ctx)
 	}
 	if err != nil {
 		return fail(stderr, err)
+	}
+	if *asJSON {
+		out, err := json.MarshalIndent(st, "", "  ")
+		if err != nil {
+			return fail(stderr, err)
+		}
+		fmt.Fprintln(stdout, string(out))
+		return 0
+	}
+	if *plan != 0 {
+		fmt.Fprintln(stdout, api.PlanStatusSections(st, time.Now()))
+		return 0
 	}
 	uptime := "0s"
 	if started := parseStartedAt(st.StartedAt); !started.IsZero() {
@@ -212,7 +240,7 @@ func printTaskRetire(ctx context.Context, client taskRetirer, ids []int64, reaso
 // the spec verbatim (§1.4, §5.3).
 func runTaskSubmit(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := newFlagSet("task submit",
-		"brigada task submit --repo URL --spec FILE|- [--base REF] [--check CMD] [--title TITLE] [--harness HARNESS] [--no-start]",
+		"brigada task submit --repo URL --spec FILE|- [--base REF] [--check CMD] [--title TITLE] [--harness HARNESS] [--tool-grant PATTERN]... [--no-start]",
 		"Submit one task directly, without the foreman.")
 	stderr = commandStderr(stderr, fs.Name())
 	common := addCommon(fs)
@@ -223,6 +251,7 @@ func runTaskSubmit(ctx context.Context, args []string, stdout, stderr io.Writer)
 		check   string
 		title   string
 		harness string
+		grants  []string
 		noStart bool
 	)
 	fs.StringVar(&repo, "repo", "", "the repository URL the task works in")
@@ -231,6 +260,13 @@ func runTaskSubmit(ctx context.Context, args []string, stdout, stderr io.Writer)
 	fs.StringVar(&check, "check", "", "the check command the runner runs after the worker reports done; empty = none")
 	fs.StringVar(&title, "title", "", "the task's title; default is the spec's first line")
 	fs.StringVar(&harness, "harness", "", "the harness that must run the job (default: any)")
+	fs.Func("tool-grant", "a Claude Code permission pattern the worker is granted, from the allowlist (PATTERN, e.g. 'Bash(git merge:*)'); repeatable", func(v string) error {
+		if v == "" {
+			return errors.New("needs a pattern")
+		}
+		grants = append(grants, v)
+		return nil
+	})
 	fs.BoolVar(&noStart, "no-start", false, "do not start the engine on demand; fail when none is running")
 	if code, stop := common.parse(stdout, stderr, args); stop {
 		return code
@@ -257,12 +293,13 @@ func runTaskSubmit(ctx context.Context, args []string, stdout, stderr io.Writer)
 		return code
 	}
 	res, err := client.SubmitTask(ctx, api.TaskSubmit{
-		RepoURL:  repo,
-		BaseRef:  base,
-		Title:    title,
-		Spec:     specBody,
-		CheckCmd: check,
-		Harness:  harness,
+		RepoURL:    repo,
+		BaseRef:    base,
+		Title:      title,
+		Spec:       specBody,
+		CheckCmd:   check,
+		Harness:    harness,
+		ToolGrants: grants,
 	})
 	if err != nil {
 		return fail(stderr, err)
@@ -294,11 +331,12 @@ func readSpec(path string) (string, error) {
 // every item of that timeline in words, and --raw the raw items.
 func runHistory(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := newFlagSet("history",
-		"brigada history [--task ID] [--job ID] [--limit N] [--all] [--raw] [--no-start]",
-		"Show the timeline in plain words, optionally filtered by task or job.")
+		"brigada history [--plan ID] [--task ID] [--job ID] [--limit N] [--all] [--raw] [--no-start]",
+		"Show the timeline in plain words, optionally filtered by plan, task or job.")
 	stderr = commandStderr(stderr, fs.Name())
 	common := addCommon(fs)
 	var (
+		plan    int64
 		task    int64
 		job     int64
 		limit   int
@@ -306,6 +344,7 @@ func runHistory(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		raw     bool
 		noStart bool
 	)
+	fs.Int64Var(&plan, "plan", 0, "show one plan's timeline: its own events and its tasks' and jobs'")
 	fs.Int64Var(&task, "task", 0, "show one task's timeline, every item")
 	fs.Int64Var(&job, "job", 0, "show one job's timeline, every item")
 	fs.IntVar(&limit, "limit", 100, "page size, 1..500; every page is fetched, so it does not count printed items")
@@ -318,8 +357,8 @@ func runHistory(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	if extra := fs.Args(); len(extra) > 0 {
 		return usagef(stderr, "history takes no positional arguments, got %q", extra)
 	}
-	if task < 0 || job < 0 {
-		return usagef(stderr, "--task and --job must be non-negative ids")
+	if plan < 0 || task < 0 || job < 0 {
+		return usagef(stderr, "--plan, --task and --job must be non-negative ids")
 	}
 	if limit < 1 || limit > 500 {
 		return usagef(stderr, "--limit must be between 1 and 500")
@@ -357,7 +396,7 @@ func runHistory(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	}
 	since := ""
 	for {
-		page, err := client.History(ctx, api.HistoryQuery{TaskID: task, JobID: job, Since: since, Limit: limit})
+		page, err := client.History(ctx, api.HistoryQuery{PlanID: plan, TaskID: task, JobID: job, Since: since, Limit: limit})
 		if err != nil {
 			return fail(stderr, err)
 		}

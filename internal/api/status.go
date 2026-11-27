@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -15,7 +16,9 @@ import (
 // by, and a client or admin reads every project. One of the two places
 // a client learns the engine is alive besides /v1/health, and the one
 // with content. The plans list keeps every live plan and the newest
-// finished ones; `all` lists every finished plan (§10).
+// finished ones; `all` lists every finished plan (§10). `plan` narrows
+// the answer to one plan: its tasks and what belongs to them, with its
+// spend, land head and recent timeline, and none of the global sections.
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request, id identity) {
 	if !requireMethod(w, r, http.MethodGet) {
 		return
@@ -30,6 +33,26 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request, id identit
 			return
 		}
 		project = id.project
+	}
+	plan, err := queryInt64(w, r, "plan")
+	if err != nil {
+		return
+	}
+	if plan != 0 {
+		st, err := s.eng.StatusForPlan(r.Context(), project, plan)
+		if errors.Is(err, engine.ErrNoPlan) {
+			writeError(w, http.StatusNotFound, codeNotFound, err.Error())
+			return
+		}
+		if err != nil {
+			s.writeInternal(w, r, "read plan status", err)
+			return
+		}
+		if id.role != roleForeman {
+			st.SplitForemanHolds()
+		}
+		writeJSON(w, http.StatusOK, st)
+		return
 	}
 	withText := r.URL.Query().Get("instructions") != ""
 	all := r.URL.Query().Get("all") != ""
@@ -97,15 +120,16 @@ func (s *Server) handleTaskSubmit(w http.ResponseWriter, r *http.Request, _ iden
 		return
 	}
 	res, err := s.eng.SubmitTask(r.Context(), engine.TaskParams{
-		RepoURL:  req.RepoURL,
-		BaseRef:  req.BaseRef,
-		Title:    req.Title,
-		Spec:     req.Spec,
-		CheckCmd: req.CheckCmd,
-		Class:    req.Class,
-		Harness:  req.Harness,
-		Labels:   nonNil(req.Labels),
-		Skills:   req.Skills,
+		RepoURL:    req.RepoURL,
+		BaseRef:    req.BaseRef,
+		Title:      req.Title,
+		Spec:       req.Spec,
+		CheckCmd:   req.CheckCmd,
+		Class:      req.Class,
+		Harness:    req.Harness,
+		Labels:     nonNil(req.Labels),
+		Skills:     req.Skills,
+		ToolGrants: req.ToolGrants,
 	})
 	if err != nil {
 		// Like the job submit: a task the engine will not take is the
@@ -138,6 +162,10 @@ type taskSubmitRequest struct {
 	// Skills (§5.10) names, in order, the project's imported skills the
 	// task's prompts carry; absent or empty = none.
 	Skills []string `json:"skills,omitempty"`
+	// ToolGrants (§6.1) are the Claude Code permission patterns the task
+	// grants its worker, each one of the allowlist; absent or empty =
+	// none.
+	ToolGrants []string `json:"tool_grants,omitempty"`
 }
 
 // taskSubmitResponse names what the submit created: the project it

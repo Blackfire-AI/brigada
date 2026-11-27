@@ -180,7 +180,7 @@ func (v approvalVerdict) reasons(allowed []string, defaultCheck string) []string
 		out = append(out, "gate_plan is "+GateAsk)
 	}
 	if v.Limit > 0 && v.Tasks > v.Limit {
-		out = append(out, fmt.Sprintf("%d tasks, over the limit of %d", v.Tasks, v.Limit))
+		out = append(out, maxTasksHoldReason(v.Tasks, v.Limit))
 	}
 	if len(v.Classes) > 0 {
 		out = append(out, fmt.Sprintf("class %s outside %s", strings.Join(v.Classes, ", "), strings.Join(allowed, ",")))
@@ -316,6 +316,13 @@ func (s approvalSettings) evaluate(tasks []PlanTask) approvalVerdict {
 		}
 	}
 	return v
+}
+
+// maxTasksHoldReason words the task-count rule's hold (§6.3): the plan's
+// task count and the approval_max_tasks it is over, as the awaiting
+// plan's reason and an amendment's added tasks carry it.
+func maxTasksHoldReason(count, limit int) string {
+	return fmt.Sprintf("%d tasks, over the limit of %d", count, limit)
 }
 
 // checkDiffers reports whether a task's check is a command other than
@@ -621,11 +628,13 @@ func approvablePlanTx(tx *sql.Tx, project, plan, version int64) (int64, []int64,
 // (§6.3): they return to the ready rule, which queues the ones whose
 // dependencies are done and holds again what the plan budget still
 // holds. stopAsking changes the settings the held tasks' own rules map
-// to — a task held alone never tripped the task count or gate_plan.
+// to — a task held for the task count maps to approval_max_tasks, one
+// held for a per-task rule to that rule's setting; gate_plan never
+// holds a task alone.
 func (e *Engine) releasePlanHoldsTx(tx *sql.Tx, proj, plan int64, held []int64, stopAsking bool, now time.Time) (PlanDecision, error) {
 	var changed []string
 	if stopAsking {
-		s, asks, err := heldTaskAsksTx(tx, proj, held)
+		s, asks, err := heldTaskAsksTx(tx, proj, plan, held)
 		if err != nil {
 			return PlanDecision{}, err
 		}

@@ -154,6 +154,11 @@ func (e *Engine) recordLandedTx(tx *sql.Tx, repoURL, branch string, landed []Lan
 		} else if n == 0 {
 			continue
 		}
+		// The record settles the landing, so a batch reservation ends
+		// with it (§7.1).
+		if err := releaseLandMemberTx(tx, lc.TaskID); err != nil {
+			return err
+		}
 		if _, err := e.settleLandedTx(tx, lc.TaskID, lc.Commit, false, now); err != nil {
 			return err
 		}
@@ -163,6 +168,11 @@ func (e *Engine) recordLandedTx(tx *sql.Tx, repoURL, branch string, landed []Lan
 		// A dependent that waited on this task's landing now has it
 		// landed, so its own landing may proceed (§7.1).
 		if err := e.releaseDependentLandsTx(tx, id, now); err != nil {
+			return err
+		}
+		// A wait_landed dependent held past this task's landing now has
+		// its work on the target, so its barrier releases (§6.1).
+		if err := e.releaseDependentsTx(tx, project, id, now); err != nil {
 			return err
 		}
 	}

@@ -21,14 +21,14 @@ What brigada 1.0 promises until 2.0.
 - `pause`, `resume`: `--repo`, `--no-start`. An empty `--repo` (and its absence) is the engine's scope.
 - `stop`: `--engine`, `--drain` (which needs `--engine`: pause the engine and wait out its running jobs before stopping).
 - `mcp`: `--coordinator`, `--client`, `--socket`.
-- `status`: `--line`, `--all`, `--no-start`.
-- `task submit`: `--repo`, `--base`, `--spec`, `--check`, `--title`, `--harness`, `--no-start`.
+- `status`: `--line`, `--all`, `--plan`, `--json`, `--no-start`.
+- `task submit`: `--repo`, `--base`, `--spec`, `--check`, `--title`, `--harness`, `--tool-grant` (repeatable), `--no-start`.
 - `task retire`: `--reason` (required), `--no-start`.
 - `project foreman`: `--repo`, `--harness`, `--model`, `--effort`, `--no-start`.
 - `project list`: `--no-start`.
 - `project set` and `project show`: `--repo`, `--no-start`.
 - `project import`: `--repo`, `--file`, `--yes`, `--no-start`.
-- `history`: `--task`, `--job`, `--limit`, `--all`, `--raw`, `--no-start`.
+- `history`: `--plan`, `--task`, `--job`, `--limit`, `--all`, `--raw`, `--no-start`.
 - `stats`: `--no-start`.
 - `capacity`: `--project`, `--no-start`.
 - `top`: `--interval`, `--project`, `--no-start`.
@@ -56,22 +56,22 @@ The role map, `skills_dir`, and optional `skills` tool arguments are additive 1.
 
 Within schema 1, new keys are added as optional keys. A file that worked before keeps working, and a key that is absent means the same as before. An unknown key is refused with the key named. The plan review is experimental: `plan_review` is a local-only setting, so the file refuses it by name, and the dotted `plan_review.tier` and `plan_review.effort` cannot be written in the flat schema at all — a key with a dot is refused as a malformed line; both are set with `brigada project set`. `foreman_wakes_per_day` is local-only and set with `brigada budget --wakes`. The local setting `instructions` remains the worker-text override; the committed `instructions` key takes a role map, not inline text.
 
-**The config file** — `$XDG_CONFIG_HOME/brigada/config`, else `~/.config/brigada/config`, or the path `--config` names. One `key = value` per line; an unknown key is refused, so a typo cannot silently tune nothing. Its keys are `state_dir`, `idle_minutes`, `notify`, `notify.webhook`, `snapshot_dir`, `retention_days` (experimental), `headroom`, `default_reviewer`, `task_auto_retry`, `foreman_wakes_per_day`, `rounds.fix`, `rounds.review` and `rounds.restart` (all three experimental), `review.tier`, `review.effort`, `review.family` (`prefer`, the default, or `require`; a default behavior change in 1.x, as are the permission defaults listed under Breaking changes: under `prefer` a review no longer waits for another model family but falls back to the same family or the author's own agent within the review tier's floor — never below it — labelled in history, and `init` warns instead of stopping on fewer than two families, while `require` restores the earlier wall), the concurrency layers `caps.global`, `caps.plan`, `caps.runner`, `caps.account.<label>` and `caps.model.<model>`, `cost.<harness>/<model>`, `tier.<harness>/<model>`, `permission.<harness>/<model>`, `read_scope.<harness>/<model>`, `tools.claude/<model>` (deprecated, the alias of `permission.<harness>/<model>`) and `env.<harness>.<VAR>`.
+**The config file** — `$XDG_CONFIG_HOME/brigada/config`, else `~/.config/brigada/config`, or the path `--config` names. One `key = value` per line; an unknown key is refused, so a typo cannot silently tune nothing. Its keys are `state_dir`, `idle_minutes`, `notify`, `notify.webhook`, `snapshot_dir`, `retention_days` (experimental), `headroom`, `default_reviewer`, `task_auto_retry`, `foreman_wakes_per_day`, `rounds.fix`, `rounds.review` and `rounds.restart` (all three experimental), `time_cap_minutes.<kind>` (experimental; the kind is `work`, `fix`, `review`, `plan_review`, `foreman` or `land`), `review.tier`, `review.effort`, `review.family` (`prefer`, the default, or `require`; a default behavior change in 1.x, as are the permission defaults listed under Breaking changes: under `prefer` a review no longer waits for another model family but falls back to the same family or the author's own agent within the review tier's floor — never below it — labelled in history, and `init` warns instead of stopping on fewer than two families, while `require` restores the earlier wall), the concurrency layers `caps.global`, `caps.plan`, `caps.runner`, `caps.account.<label>` and `caps.model.<model>`, `cost.<harness>/<model>`, `tier.<harness>/<model>`, `permission.<harness>/<model>`, `read_scope.<harness>/<model>`, `tools.claude/<model>` (deprecated, the alias of `permission.<harness>/<model>`) and `env.<harness>.<VAR>`. A `time_cap_minutes.<kind>` value is a positive whole number of minutes; the runner's internal negative-means-off convention for a class cap cannot be expressed from the config file.
 
 **The foreman's MCP tools.** The `brigada mcp` bridge offers these tools to the foreman — the same set for a headless turn and an attached chat — with these arguments:
 
-- `plan_create`: `title` and `tasks` (both required). Each task takes `spec` (required), and may take `title`, `name`, `deps`, `base`, `continue`, `check`, `class`, `tier`, `effort`, `review_tier`, `review_effort`, `caps`, `extra_repos` and `skills`.
-- `plan_amend`: `plan` (required). It may take `add`, `cancel`, `retier`, `respec` and `retarget`. `add` takes the same task fields as `plan_create`; `cancel` is a list of items, each a task reference (by name or id) or an object `{task, reason}` with `task` required and `reason` optional, recorded verbatim on the cancel event, a cancel without one recorded as "no reason given"; `retier` (experimental) is a list of entries naming a `task`, each of which may set `tier`, `effort`, `review_tier`, `review_effort`, `caps` (merged key by key) and `skills`; `respec` (experimental) is a list of entries naming a `task` with a `spec`, a `mode` (`replace` or `append`) and `skills`; `retarget` is a list of entries naming a `task` with its new `deps`, and may set `base` and `continue`.
+- `plan_create`: `title` and `tasks` (both required). Each task takes `spec` (required), and may take `title`, `name`, `deps`, `base`, `continue`, `check`, `class`, `tier`, `effort`, `review_tier`, `review_effort`, `caps`, `extra_repos`, `skills`, `wait_landed` and `tool_grants`.
+- `plan_amend`: `plan` (required). It may take `add`, `cancel`, `retier`, `respec`, `note` and `retarget`. `add` takes the same task fields as `plan_create`; `cancel` is a list of items, each a task reference (by name or id) or an object `{task, reason}` with `task` required and `reason` optional, recorded verbatim on the cancel event, a cancel without one recorded as "no reason given"; `retier` (experimental) is a list of entries naming a `task`, each of which may set `tier`, `effort`, `review_tier`, `review_effort`, `caps` (merged key by key) and `skills`; `respec` (experimental) is a list of entries naming a `task` with a `spec`, a `mode` (`replace` or `append`), `skills` and `tool_grants`; `note` (experimental, additive 1.x extension) is a list of entries naming a `task` with a `note`: it replaces the task's pending note, an empty `note` clears it, and it is refused for a done, cancelled or retired task; `retarget` is a list of entries naming a `task` with its new `deps`, and may set `base` and `continue`.
 - `plan_accept` (experimental): `plan` and `reason` (both required). It accepts a plan the plan review parked at `needs_foreman` as reviewed, and the plan proceeds as a spent round's verdict does.
 - `answer`: `task` and `text` (both required).
-- `task_restart`: `task` (required) and `note`.
+- `task_restart`: `task` (required), `note` and `stop_running` (additive 1.x extension, default false): true also restarts a task whose job is live, stopping a running job keeping its branch and seeding the fresh attempt from it; the stop rides the heartbeat as the `stop_running` answer, which a runner that predates it logs and ignores, its run going on to its own end, which then queues the fresh attempt.
 - `task_cancel`: `task` (required) and `reason`; a cancel without a reason is recorded as "no reason given".
 - `task_retire` (experimental): `tasks` and `reason` (both required); `tasks` is a list of task references (by name or id).
 - `land_retry` (experimental): `task` (required).
 - `check_log` (experimental): `job` (required), `offset` and `limit`.
 - `ask_user`: `text` (required).
-- `status`: `instructions` and `all`, both booleans.
-- `history`: `task` and `limit`.
+- `status`: `instructions`, `all` and `json`, all booleans, and `plan`, a plan id.
+- `history`: `plan`, `task` and `limit`.
 - `issue_read` (experimental): `number` (required) and `comments`, a boolean; it reads the project's own repository alone, never one the call names.
 - `events` (experimental): `wait_seconds`.
 - `capacity`: no arguments.
@@ -80,19 +80,21 @@ Within schema 1, new keys are added as optional keys. A file that worked before 
 **The client's MCP tools.** `brigada mcp --client` offers these tools to any harness acting for the user — a coding session, a coordinator — with these arguments:
 
 - `ask_foreman`: `text` (required) and `repo_url`.
-- `status`: `all`, a boolean.
-- `history`: `task` and `limit`.
+- `status`: `all` and `json`, both booleans, and `plan`, a plan id.
+- `history`: `plan`, `task` and `limit`.
 
 **The coordinator's MCP tools** (experimental). `brigada mcp --coordinator` offers these tools over several projects, with these arguments:
 
 - `list_projects`: no arguments.
 - `ask_foreman`: `repo_url` and `text` (both required).
-- `status`: `repo_url` and `all`.
-- `history`: `repo_url`, `task` and `limit`.
+- `status`: `repo_url`, `all`, `json` and `plan`.
+- `history`: `repo_url`, `plan`, `task` and `limit`.
 - `plan_approve`: `repo_url`, `plan` and `version` (all required), and `and_stop_asking`.
 - `plan_reject`: `repo_url`, `plan` and `version` (all required).
 
 **The engine's on-disk store.** The store is SQLite and is migrated forward only. A newer binary opens an older store and applies the missing migrations on start. An older binary refuses a store that a newer binary has migrated, with an error that says to upgrade.
+
+**Quota scope.** Migration 0085 adds `agents.quota_scope` and backfills it — `opencode/<provider>` for opencode agents (the model's first path segment; `opencode/default` for the CLI default) and the account label for every other harness — and clears inherited cooling on an opencode account whose providers split the old account-wide pool. An older runner's advertisement that carries no `quota_scope` keeps the agent's stored scope, so a mixed-version fleet does not flip an agent's cooling group; an agent with an empty scope cools with its account, as before.
 
 ## What is not covered
 
@@ -117,4 +119,6 @@ Before 2.0, a breaking change is a bug, unless a security fix requires it. Depre
 
 **Breaks, as security fixes** (issue #228):
 
-- A worker can no longer push its own branch. A task worktree carries no push URL, so the runner is the only path to the remote and the affordance the runner's worker-push test pinned is gone.
+- A worker can no longer push its own branch. A task worktree carries no push URL, so the runner is the only path to the remote and the affordance the runner's worker-push test pinned is gone. (`brigada init` pushes a scratch probe ref to the remote and deletes it, disclosed in its plan; it is not a path for work.)
+
+**Cooling follows the quota scope** (issue #264). A limit cools the agents sharing the cooled agent's quota scope instead of every agent on its account, so a limit on one opencode provider no longer cools the others. An agent with an empty scope still cools by account, as before. Concurrency caps and foreman headroom stay per account. The `agent_cooling` event gains `quota_scope`, the status `cooling:` line and the capacity `agent` line name the scope, and events recorded earlier keep rendering by account.
