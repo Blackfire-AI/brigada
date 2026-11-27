@@ -118,7 +118,7 @@ var SettingKeys = []string{SettingApprovalMaxTasks, SettingApprovalBudget, Setti
 	SettingApprovalTiers, SettingApprovalRestarted, SettingLandTarget, SettingAfterLand, SettingLandReady, SettingLandBatchMax,
 	SettingDefaultCheck, SettingWorkerTools, SettingSetup, SettingSetupCacheKeyFiles, SettingSetupTimeout,
 	SettingExtraRepos, SettingForemanRotateTokens, SettingForemanWakesPerDay, SettingPlanFiles, SettingPlanFileBranch,
-	SettingBranchRetentionDays, SettingInstructions}
+	SettingBranchRetentionDays, SettingTracker, SettingTrackerURL, SettingInstructions}
 
 // MaxInstructionsBytes bounds the project instruction text (§5.9): a
 // starting value, open in §16 item 11. Above it a set or an import is
@@ -231,7 +231,7 @@ func parseSettingValue(key, value string) (json.RawMessage, error) {
 		SettingApprovalTiers, SettingApprovalRestarted, SettingLandTarget, SettingAfterLand, SettingLandReady, SettingLandBatchMax,
 		SettingDefaultCheck, SettingWorkerTools,
 		SettingSetup, SettingSetupCacheKeyFiles, SettingSetupTimeout, SettingExtraRepos, SettingForemanRotateTokens, SettingForemanWakesPerDay, SettingPlanFiles, SettingPlanFileBranch,
-		SettingBranchRetentionDays, SettingInstructions:
+		SettingBranchRetentionDays, SettingTracker, SettingTrackerURL, SettingInstructions:
 	default:
 		return nil, fmt.Errorf("%w: unknown key %q; valid keys: %s", ErrInvalidSetting, key, strings.Join(SettingKeys, ", "))
 	}
@@ -313,6 +313,20 @@ func parseKnownValue(key, value string) (json.RawMessage, error) {
 		v := strings.TrimSpace(value)
 		if !validBranchName(v) {
 			return nil, fmt.Errorf("%w: %s takes a branch name, got %q", ErrInvalidSetting, key, value)
+		}
+		return json.Marshal(v)
+	}
+	if key == SettingTracker || key == SettingTrackerURL {
+		if strings.TrimSpace(value) == "" {
+			return nil, nil
+		}
+		parse := parseTracker
+		if key == SettingTrackerURL {
+			parse = parseTrackerURL
+		}
+		v, err := parse(value)
+		if err != nil {
+			return nil, err
 		}
 		return json.Marshal(v)
 	}
@@ -615,6 +629,16 @@ func settingsViewTx(tx *sql.Tx, project int64, repo string, wakeBudgetDefault in
 			if n, ok := rawInt(cur); has && ok {
 				sv.Value = strconv.Itoa(n)
 			}
+		case SettingTracker:
+			sv.Value = trackerUnsetShown
+			if s, ok := rawString(cur); ok && s != "" {
+				sv.Value = s
+			}
+		case SettingTrackerURL:
+			sv.Value = "none"
+			if s, ok := rawString(cur); ok && s != "" {
+				sv.Value = s
+			}
 		case SettingForemanWakesPerDay:
 			budget := wakeBudgetDefault
 			if n, ok := rawInt(cur); ok && n > 0 {
@@ -767,6 +791,9 @@ func applySettingsRowTx(tx *sql.Tx, project int64, rawSettings, rawProv string, 
 		} else {
 			row[k] = raw
 		}
+	}
+	if err := checkTrackerRow(row); err != nil {
+		return err
 	}
 	b, err := json.Marshal(row)
 	if err != nil {

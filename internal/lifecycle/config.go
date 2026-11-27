@@ -125,6 +125,10 @@ type FileConfig struct {
 	// Env holds the references of env.<harness>.<VAR> (§5.1), harness then
 	// variable: keychain:<item> or file:<path>. Never a value.
 	Env map[string]map[string]string
+	// TrackerTokens holds the references of tracker.<host>.token (§12.2)
+	// by host[:port], lowercased: keychain:<item> or file:<path>. Never a
+	// value; ResolveTrackerToken reads one when the engine fetches.
+	TrackerTokens map[string]string
 	// Permission is the resolved permission= default per "harness/model"
 	// (§5.2): permission.<harness>/<model>, or the deprecated
 	// tools.claude/<model> spelling mapped onto it. A pair the file never
@@ -414,8 +418,10 @@ func loadConfigFile(path string, required bool) (FileConfig, error) {
 			err = setReadScope(&cfg, key, value)
 		case strings.HasPrefix(key, "env."):
 			err = setEnvRef(&cfg, key, value)
+		case strings.HasPrefix(key, "tracker."):
+			err = setTrackerToken(&cfg, key, value)
 		default:
-			return FileConfig{}, fmt.Errorf("config %s: line %d: unknown key %q; want state_dir, idle_minutes, notify, notify.webhook, snapshot_dir, retention_days, headroom, task_auto_retry, foreman_wakes_per_day, default_reviewer, rounds.fix, rounds.review, rounds.restart, a time_cap_minutes.<kind>, review.tier, review.effort, review.family, a caps.<layer>, a cost.<harness>/<model>, a tier.<harness>/<model>, a tools.claude/<model>, a permission.<harness>/<model>, a read_scope.<harness>/<model> or an env.<harness>.<VAR>", path, n+1, key)
+			return FileConfig{}, fmt.Errorf("config %s: line %d: unknown key %q; want state_dir, idle_minutes, notify, notify.webhook, snapshot_dir, retention_days, headroom, task_auto_retry, foreman_wakes_per_day, default_reviewer, rounds.fix, rounds.review, rounds.restart, a time_cap_minutes.<kind>, review.tier, review.effort, review.family, a caps.<layer>, a cost.<harness>/<model>, a tier.<harness>/<model>, a tools.claude/<model>, a permission.<harness>/<model>, a read_scope.<harness>/<model>, an env.<harness>.<VAR> or a tracker.<host>.token", path, n+1, key)
 		}
 		if err != nil {
 			return FileConfig{}, fmt.Errorf("config %s: line %d: %s: %v", path, n+1, key, err)

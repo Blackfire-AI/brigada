@@ -53,7 +53,7 @@ func TestConfigSavedAgentsAndRunningRunnerOutsideRepo(t *testing.T) {
 	write(filepath.Join(home, ".kimi-code", "config.toml"), "default_model = 'kimi-code/k3'\n[models.\"kimi-code/k3\"]\ndefault_effort = 'high'\napi_key = 'never-print-this'\n")
 	state := testsupport.ShortStateDir(t)
 	config := filepath.Join(state, "machine-config")
-	write(config, "notify = none\nstate_dir = file-state\ncaps.global = 0\ncaps.account.work = 3\ncaps.model.opus = 2\ncost.claude/opus = 2\ntools.claude/sonnet = none\n")
+	write(config, "notify = none\nstate_dir = file-state\ncaps.global = 0\ncaps.account.work = 3\ncaps.model.opus = 2\ncost.claude/opus = 2\ntools.claude/sonnet = none\ntracker.git.example.invalid:3000.token = keychain:brigada-forge\n")
 	dir := filepath.Join(state, "runner")
 	if err := runnerstate.SaveAgents(dir, []string{
 		"harness=claude,model=sonnet,tools=none,account=work",
@@ -99,6 +99,8 @@ func TestConfigSavedAgentsAndRunningRunnerOutsideRepo(t *testing.T) {
 		"snapshot_dir = none (default)", "retention_days = 0, keep everything (default)", "caps.plan = no cap (default)",
 		"caps.runner = no cap (default)", "caps.account.<label> = no cap (default)",
 		"caps.model.<model> = no cap (default)", "cost.<harness>/<model> = light 1, standard 2, heavy 3 (default)",
+		// A tracker token key shows its reference, never a resolved secret.
+		"tracker.<host>.token = none (default)", "tracker.git.example.invalid:3000.token = keychain:brigada-forge",
 	} {
 		if !strings.Contains(flat, want) {
 			t.Errorf("missing %q in:\n%s", want, out)

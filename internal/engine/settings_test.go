@@ -114,6 +114,8 @@ func TestProjectSettingsView(t *testing.T) {
 		{Key: SettingPlanFiles, Value: "on", Default: true, Source: SourceDefault},
 		{Key: SettingPlanFileBranch, Value: defaultPlanFileBranch, Default: true, Source: SourceDefault},
 		{Key: SettingBranchRetentionDays, Value: "7", Default: true, Source: SourceDefault},
+		{Key: SettingTracker, Value: "auto", Default: true, Source: SourceDefault},
+		{Key: SettingTrackerURL, Value: "none", Default: true, Source: SourceDefault},
 		{Key: SettingInstructions, Value: "none", Default: true, Source: SourceDefault},
 		{Key: configKeySkillsDir, Value: DefaultSkillsDir, Default: true, Source: SourceDefault},
 	}
@@ -171,6 +173,11 @@ func TestSetProjectSettingsRefusals(t *testing.T) {
 		{SettingLandBatchMax: "-1"},
 		{SettingLandBatchMax: "2.5"},
 		{SettingLandBatchMax: "many"},
+		{SettingTracker: "gitlab"},
+		{SettingTracker: "auto"},
+		{SettingTrackerURL: "ssh://git.example.invalid"},
+		{SettingTrackerURL: "git.example.invalid"},
+		{SettingTrackerURL: "https://user:pw@git.example.invalid"},
 	} {
 		_, err := e.eng.SetProjectSettings(e.ctx, envRepo, values)
 		if !errors.Is(err, ErrInvalidSetting) {
