@@ -79,6 +79,6 @@ tasks:
     tier: heavy
     effort: medium
     skills: ["surface-parity"]
-    state: running
-    branch: "brigada/task-55-r1"
+    state: reviewing
+    branch: "brigada/task-55-r3"
     rounds: 0
