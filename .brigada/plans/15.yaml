@@ -41,7 +41,7 @@ tasks:
     base: "packages-94"
     continue: "packages-94"
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-39"
     rounds: 0
   - id: 40
@@ -53,7 +53,7 @@ tasks:
     tier: light
     effort: low
     skills: ["docs-change"]
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 54
