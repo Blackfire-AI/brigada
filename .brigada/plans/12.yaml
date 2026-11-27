@@ -79,6 +79,6 @@ tasks:
     tier: heavy
     effort: medium
     skills: ["surface-parity"]
-    state: done
+    state: needs_foreman
     branch: "brigada/task-55-r3"
     rounds: 0
