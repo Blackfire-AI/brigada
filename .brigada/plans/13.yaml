@@ -83,8 +83,8 @@ tasks:
     effort: medium
     caps: {restart: 10}
     skills: ["config-setting", "surface-parity"]
-    state: running
-    branch: "brigada/task-46-r9"
+    state: reviewing
+    branch: "brigada/task-46-r10"
     rounds: 0
   - id: 47
     name: "grants-changelog"
