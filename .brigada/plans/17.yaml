@@ -5,9 +5,9 @@
 plan: 17
 title: "Bug: a hand-landed task parked by its reviews never settles"
 repo: "github.com/Blackfire-AI/brigada"
-state: needs_foreman
+state: reviewing
 created: 2026-11-27T19:40:56.756096144Z
-updated: 2026-11-27T20:01:44.297000179Z
+updated: 2026-11-27T20:02:49.190213816Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -40,7 +40,7 @@ tasks:
     base: "settle-hand-landed"
     effort: medium
     skills: ["bugfix"]
-    state: pending
+    state: cancelled
     branch: ""
     rounds: 0
   - id: 81
@@ -50,6 +50,29 @@ tasks:
     deps: ["publish-rewrite"]
     base: "publish-rewrite"
     continue: "publish-rewrite"
+    effort: medium
+    skills: ["bugfix"]
+    state: cancelled
+    branch: ""
+    rounds: 0
+  - id: 82
+    name: "publish-lease"
+    title: "Publish a rewritten task branch with a lease, as the publish error kind (Refs #275)"
+    class: "implement"
+    deps: ["settle-hand-landed"]
+    base: "settle-hand-landed"
+    effort: medium
+    skills: ["bugfix"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 83
+    name: "publish-kind"
+    title: "The publish error kind never counts against the agent and retries once (Closes #275)"
+    class: "implement"
+    deps: ["publish-lease"]
+    base: "publish-lease"
+    continue: "publish-lease"
     effort: medium
     skills: ["bugfix"]
     state: pending
