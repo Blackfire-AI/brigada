@@ -7,7 +7,7 @@ title: "Fix #94: Linux .deb and .rpm packages on each release"
 repo: "github.com/Blackfire-AI/brigada"
 state: active
 created: 2026-11-26T20:46:37.159498266Z
-updated: 2026-11-27T13:18:21.323997496Z
+updated: 2026-11-27T13:40:15.552425043Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -63,7 +63,8 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    caps: {restart: 6}
+    review_tier: standard
+    caps: {restart: 7}
     state: needs_foreman
     branch: "brigada/task-54-r5"
     rounds: 0
