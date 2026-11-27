@@ -5,9 +5,9 @@
 plan: 14
 title: "Fix #110: issue_read for Gitea-API forges"
 repo: "github.com/Blackfire-AI/brigada"
-state: needs_foreman
+state: reviewing
 created: 2026-11-26T20:46:37.136764596Z
-updated: 2026-11-26T21:41:10.108538439Z
+updated: 2026-11-27T18:14:56.04032829Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -31,6 +31,42 @@ tasks:
     review_tier: standard
     review_effort: medium
     skills: ["config-setting", "surface-parity"]
+    state: cancelled
+    branch: ""
+    rounds: 0
+  - id: 71
+    name: "tracker-settings"
+    title: "Tracker settings: tracker, tracker_url and the tracker.<host>.token machine key (Refs #110)"
+    class: "implement"
+    deps: []
+    base: ""
+    tier: heavy
+    effort: medium
+    skills: ["config-setting"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 72
+    name: "gitea-fetcher"
+    title: "Gitea issue fetcher, State/Labels on both paths, token non-leak test (Refs #110)"
+    class: "implement"
+    deps: ["tracker-settings"]
+    base: "tracker-settings"
+    continue: "tracker-settings"
+    tier: heavy
+    effort: medium
+    skills: ["config-setting", "surface-parity"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 73
+    name: "tracker-docs"
+    title: "Tracker docs, instruction surfaces and defaults 1.4.0 (Closes #110)"
+    class: "implement"
+    deps: ["gitea-fetcher"]
+    base: "gitea-fetcher"
+    continue: "gitea-fetcher"
+    effort: medium
     state: pending
     branch: ""
     rounds: 0
