@@ -375,6 +375,11 @@ func TestPlanAmendCancelSchema(t *testing.T) {
 		if (tool.Name == "plan_amend" || tool.Name == "task_cancel") && !strings.Contains(tool.Description, `recorded as "no reason given"`) {
 			t.Errorf("%s description does not say a cancel without a reason is recorded as no reason given", tool.Name)
 		}
+		// The approval rules the plan tools enumerate name the tool-grant
+		// trigger (§6.3) beside the others.
+		if (tool.Name == "plan_create" || tool.Name == "plan_amend") && !strings.Contains(tool.Description, "a check other than the project's default_check, a tool grant outside approval_tool_grants") {
+			t.Errorf("%s description's approval rules omit the tool-grant trigger", tool.Name)
+		}
 	}
 }
 
