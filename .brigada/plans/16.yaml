@@ -7,7 +7,7 @@ title: "Fix #53: redirect a running task without cancelling its dependents"
 repo: "github.com/Blackfire-AI/brigada"
 state: active
 created: 2026-11-26T20:46:37.185268399Z
-updated: 2026-11-27T13:30:09.777556503Z
+updated: 2026-11-27T13:43:03.344325374Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -81,7 +81,7 @@ tasks:
     deps: []
     base: ""
     effort: medium
-    caps: {restart: 5}
+    caps: {restart: 6}
     skills: ["schema-migration", "surface-parity"]
     state: needs_foreman
     branch: "brigada/task-49-r5"
