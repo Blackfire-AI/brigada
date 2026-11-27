@@ -115,8 +115,8 @@ tasks:
     base: "wl-field"
     effort: medium
     skills: ["config-setting"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-53"
     rounds: 0
   - id: 69
     name: "wl-release-v2"
