@@ -43,7 +43,7 @@ tasks:
     tier: heavy
     effort: medium
     skills: ["config-setting"]
-    state: reviewing
+    state: done
     branch: "brigada/task-71-r1"
     rounds: 0
   - id: 72
@@ -56,7 +56,7 @@ tasks:
     tier: heavy
     effort: medium
     skills: ["config-setting", "surface-parity"]
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 73
