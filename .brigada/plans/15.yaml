@@ -41,8 +41,8 @@ tasks:
     base: "packages-94"
     continue: "packages-94"
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-39"
     rounds: 0
   - id: 40
     name: "changelog-94"
