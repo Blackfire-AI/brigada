@@ -84,6 +84,6 @@ tasks:
     review_tier: standard
     caps: {restart: 7}
     skills: ["schema-migration", "surface-parity"]
-    state: ready
+    state: running
     branch: "brigada/task-49-r6"
     rounds: 0
