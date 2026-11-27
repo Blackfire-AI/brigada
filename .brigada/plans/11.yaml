@@ -198,8 +198,8 @@ tasks:
     continue: "batch-resume"
     effort: medium
     skills: ["docs-change"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-68"
     rounds: 0
   - id: 70
     name: "sync-docs-v2"
