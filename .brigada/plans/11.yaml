@@ -224,7 +224,7 @@ tasks:
     tier: heavy
     effort: medium
     skills: ["schema-migration"]
-    state: reviewing
+    state: done
     branch: "brigada/task-77"
     rounds: 0
   - id: 78
@@ -236,6 +236,6 @@ tasks:
     continue: "batch-progress"
     tier: heavy
     effort: medium
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
