@@ -104,8 +104,8 @@ tasks:
     base: "wl-field"
     effort: medium
     skills: ["cli-flag", "surface-parity"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-52"
     rounds: 0
   - id: 53
     name: "amend-envelope"
