@@ -72,7 +72,7 @@ tasks:
     tier: heavy
     effort: medium
     review_tier: standard
-    state: running
+    state: needs_foreman
     branch: "brigada/task-58-r2"
     rounds: 0
   - id: 59
