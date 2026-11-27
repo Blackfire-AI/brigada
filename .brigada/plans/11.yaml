@@ -122,7 +122,7 @@ tasks:
     continue: "sync-docs-v2"
     effort: medium
     skills: ["config-setting", "schema-migration"]
-    state: ready
+    state: running
     branch: ""
     rounds: 0
   - id: 63
