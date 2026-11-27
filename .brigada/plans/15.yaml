@@ -64,6 +64,6 @@ tasks:
     base: ""
     effort: medium
     caps: {restart: 6}
-    state: reviewing
+    state: needs_foreman
     branch: "brigada/task-54-r5"
     rounds: 0
