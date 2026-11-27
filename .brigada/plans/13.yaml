@@ -133,8 +133,8 @@ tasks:
     base: "grants-approval-v4"
     continue: "grants-approval-v4"
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-85"
     rounds: 0
   - id: 86
     name: "grants-changelog-v2"
