@@ -74,6 +74,11 @@ func TestServeCallIssueRead(t *testing.T) {
 	if len(props) == 0 || strings.Contains(strings.Join(propNames(props), " "), "repo") {
 		t.Errorf("issue_read properties = %v, want the number (and comments) alone", propNames(props))
 	}
+	for _, want := range []string{"Gitea", "tracker_url", "tracker.<host>.token", "tracker is none"} {
+		if !strings.Contains(tool.Description, want) {
+			t.Errorf("issue_read description lacks %q: %s", want, tool.Description)
+		}
+	}
 }
 
 // propNames lists a schema's property names, for the failure message.

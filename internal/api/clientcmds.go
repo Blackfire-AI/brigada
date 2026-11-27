@@ -778,8 +778,10 @@ func (c *Client) ForemanEvents(ctx context.Context, wait time.Duration) (engine.
 // (§12.1 issues, §12.2 issue_read): number names it on the project's
 // own repository, which the token's project alone picks — never an
 // argument — and comments asks for the comments too. A refusal carries
-// the reason in its message: the repository is not on GitHub, gh is
-// missing or not logged in, the number does not exist.
+// the reason in its message: the repository is on neither GitHub nor Gitea
+// (the tracker and tracker_url settings name a Gitea), the tracker is none,
+// gh is missing or not logged in, the tracker token cannot be resolved, the
+// number does not exist.
 func (c *Client) Issue(ctx context.Context, number int, comments bool) (engine.Issue, error) {
 	path := "/v1/issues/" + strconv.Itoa(number)
 	if comments {
