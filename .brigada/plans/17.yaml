@@ -7,7 +7,7 @@ title: "Bug: a hand-landed task parked by its reviews never settles"
 repo: "github.com/Blackfire-AI/brigada"
 state: reviewing
 created: 2026-11-27T19:40:56.756096144Z
-updated: 2026-11-27T20:11:38.04105069Z
+updated: 2026-11-27T20:24:05.021966543Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -19,7 +19,10 @@ updated: 2026-11-27T20:11:38.04105069Z
 # describe the model needed and how hard it should think (§6.1);
 # review_tier and review_effort do the same for its reviews (§7, §8); caps
 # override the task's fix_rounds, review_rounds and restart budgets (§6.1);
-# skills name the project's skills the task carries, in order (§5.10).
+# skills name the project's skills the task carries, in order (§5.10);
+# tool_grants name the permission patterns its worker is granted (§6.1);
+# wait_landed holds a dependent pending until its implement deps have
+# actually landed on the target, not merely been done (§6.1).
 tasks:
   - id: 79
     name: "settle-hand-landed"
