@@ -133,7 +133,7 @@ tasks:
     base: "grants-approval-v4"
     continue: "grants-approval-v4"
     effort: medium
-    state: ready
+    state: running
     branch: ""
     rounds: 0
   - id: 86
