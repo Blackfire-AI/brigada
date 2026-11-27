@@ -108,6 +108,10 @@ func (r *jobRun) runLandJob(ctx context.Context) {
 		r.runLandPushPhase(runCtx)
 		return
 	}
+	if isLandBatch(r.grant) {
+		r.runLandBatch(runCtx)
+		return
+	}
 	r.runLandSquashPhase(runCtx)
 }
 
@@ -329,167 +333,36 @@ func (r *jobRun) landAttempt(ctx context.Context, dir string) (*landOutcome, err
 	if out, err := r.landGit(ctx, dir, "checkout", "--quiet", "--force", "--detach", onto); err != nil {
 		return nil, fmt.Errorf("check out %s: %v", onto, trimCmdError(out, err))
 	}
-	head, err := r.landText(ctx, dir, "rev-parse", "refs/heads/"+grant.Branch)
-	if err != nil {
-		return nil, fmt.Errorf("read the fetched head of %s: %v", grant.Branch, err)
-	}
-	// The head that lands is the head that was approved (§7.1): a branch
-	// that moved after the approving review is refused, nothing squashed
-	// or pushed, and the task waits for the foreman.
-	if grant.ApprovedHead != "" && strings.TrimSpace(head) != grant.ApprovedHead {
-		return nil, fmt.Errorf("%s is at %s, not the approved head %s: the branch moved after its review; nothing landed",
-			grant.Branch, strings.TrimSpace(head), grant.ApprovedHead)
-	}
-	commit, err := r.landText(ctx, dir, "rev-parse", "HEAD")
+	commit, conflict, refusal, err := r.landSquashOnto(ctx, dir, onto, landSquashSpec{
+		taskID:       grant.TaskID,
+		branch:       grant.Branch,
+		baseRef:      grant.BaseRef,
+		approvedHead: grant.ApprovedHead,
+		msg:          grant.LandMessage,
+		basePruned:   basePruned,
+	})
 	if err != nil {
 		return nil, err
 	}
-	o.commit = strings.TrimSpace(commit)
-	// The task's own diff, base...branch (§7.1). The recorded base can
-	// be a dependency's branch, and once that dependency landed as a
-	// squash — its branch never joining the target's history — or the
-	// task's own branch was rebuilt on the target, the base is no longer
-	// an ancestor of the branch: diffed against it, the three-dot diff
-	// would start at the stale merge-base and carry every change the
-	// target made since, conflicting in files the task never touched. A
-	// base the branch no longer sits on gives way to the base the squash
-	// lands on, whose merge-base with the branch is the task's own point
-	// of departure; a branch still stacked on its dependency's keeps it
-	// while the base below (the target, or the waiting stack) lacks the
-	// dependency's work. A dependency that has landed — its Brigada-Task
-	// trailer on the history the squash lands on — makes the branch's
-	// own base stale all the same: the branch may descend from the
-	// dependency's old lineage while its tree was rebuilt on that
-	// history's content, and the three-dot diff from the stale lineage
-	// conflicts in the very files the task touched. The patch is then
-	// the tree diff against the base the squash lands on — but only
-	// while the branch's tree still contains that base's whole content,
-	// for a branch that lacks the base's later changes (another task's
-	// landing between the dependency's and this one's) would otherwise
-	// carry their reverse; such a branch keeps its three-dot diff, which
-	// holds its own change alone.
-	diffBase := onto
-	treePatched := false
-	if grant.BaseRef == grant.LandTarget || grant.BaseRef == grant.Branch {
-		diffBase = "refs/heads/" + grant.BaseRef
-	} else if basePruned {
-		// The pruned base's task landed — its work is on the history the
-		// squash lands on — and the landing's Brigada-Branch trailer names
-		// the tip the branch had when it landed (§7.1, §13.2). While the
-		// task's branch still stacks on that tip, the pruned base's rule
-		// holds with the tip in the branch's place: the tree diff when
-		// the branch's tree holds the squash base's whole content, else
-		// the three-dot diff from the tip, which resolves as an ancestor
-		// of the branch. A branch rebuilt off the tip diffs against the
-		// squash base, as any base the branch no longer descends from
-		// does.
-		id, _, _ := engine.ParseTaskBranchRef(grant.BaseRef)
-		head, err := landing.LandedBranchHead(ctx, dir, id)
-		if err != nil {
-			return nil, fmt.Errorf("read the landed tip of %s: %v", grant.BaseRef, err)
-		}
-		if head != "" && r.landHasCommit(ctx, dir, head) {
-			if stacked, err := r.landIsAncestor(ctx, dir, head, "refs/heads/"+grant.Branch); err != nil {
-				return nil, fmt.Errorf("compare %s with %s: %v", grant.BaseRef, grant.Branch, err)
-			} else if stacked {
-				diffBase = head
-				treePatched = r.landBranchEncodes(ctx, dir, onto, grant.Branch)
-			}
-		}
-	} else if stacked, err := r.landIsAncestor(ctx, dir, "refs/heads/"+grant.BaseRef, "refs/heads/"+grant.Branch); err != nil {
-		return nil, fmt.Errorf("compare %s with %s: %v", grant.BaseRef, grant.Branch, err)
-	} else if stacked {
-		diffBase = "refs/heads/" + grant.BaseRef
-		if id, _, ok := engine.ParseTaskBranchRef(grant.BaseRef); ok {
-			landed, err := landing.Landed(ctx, dir, id)
-			if err != nil {
-				return nil, fmt.Errorf("read the landed mark of task %d: %v", id, err)
-			}
-			treePatched = landed && r.landBranchEncodes(ctx, dir, onto, grant.Branch)
-		}
+	if refusal != "" {
+		return nil, errors.New(refusal)
 	}
-	var patch []byte
-	if treePatched {
-		patch, err = landing.TreeDiff(ctx, dir, onto, grant.Branch, io.Discard)
-		if err != nil {
-			return nil, fmt.Errorf("diff %s %s: %v", onto, grant.Branch, err)
-		}
-	} else {
-		patch, err = landing.Diff(ctx, dir, diffBase, grant.Branch, io.Discard)
-		if err != nil {
-			return nil, fmt.Errorf("diff %s...%s: %v", diffBase, grant.Branch, err)
-		}
+	o.commit = commit
+	if conflict != nil {
+		o.conflict = conflict
+		return o, nil
 	}
-	if len(patch) > 0 {
-		// The message the hand-driven land builds (§7.1), from the data
-		// the grant carries — the worker's own commit_message (§5.4)
-		// included, which Message puts in place of the built subject and
-		// body when the worker wrote one; the head is the fetched one,
-		// the runner's to say.
-		msg, _ := landing.Message(landing.Task{
-			ID:            grant.TaskID,
-			Title:         grant.LandMessage.Title,
-			Branch:        grant.Branch,
-			Head:          strings.TrimSpace(head),
-			Spec:          grant.LandMessage.Spec,
-			Summary:       grant.LandMessage.Summary,
-			CommitMessage: grant.LandMessage.CommitMessage,
-			Family:        grant.LandMessage.Family,
-			Model:         grant.LandMessage.Model,
-		})
-		res, err := landing.Squash(ctx, dir, grant.TaskID, msg, patch, io.Discard)
-		if err != nil {
-			var conflict *landing.Conflict
-			if errors.As(err, &conflict) {
-				// §7.1: the attempt is discarded — nothing resolved,
-				// nothing pushed — and the conflicting files are the
-				// job's record. Git itself named none: its own words
-				// carry the failure instead.
-				r.discardLandAttempt(ctx, dir)
-				if len(conflict.Files) > 0 {
-					o.conflict = conflict.Files
-					return o, nil
-				}
-				return nil, fmt.Errorf("the task's diff no longer applies onto %s: %v", grant.LandTarget, conflict.Err)
-			}
-			return nil, fmt.Errorf("squash the task's diff onto %s: %v", grant.LandTarget, err)
-		}
-		if !res.Empty {
-			commit, err := r.landText(ctx, dir, "rev-parse", "HEAD")
-			if err != nil {
-				return nil, err
-			}
-			o.commit = strings.TrimSpace(commit)
-		}
-		// An empty patch made no commit (§7.1): the record names the
-		// head it was squashed onto, for the landing is already entirely
-		// there.
+	failed, output, err := r.landCheck(ctx, dir, fmt.Sprintf("job-%d-check.log", grant.JobID), "")
+	if err != nil {
+		return nil, err
 	}
-	if grant.CheckCmd != "" {
-		if why := r.runSetup(ctx, dir, false); why != "" {
-			if r.gone(ctx, "running the setup before the landing check") {
-				return nil, errors.New("the run was no longer ours while the landing setup ran")
-			}
-			return nil, &landSetupError{why}
-		}
-		if r.gone(ctx, "running the setup before the landing check") {
-			return nil, errors.New("the run was no longer ours while the landing setup ran")
-		}
-		check := runCheckIn(ctx, dir, grant.CheckCmd, r.cfg.CheckTimeout, r.cfg.commandEnv(r.extraEnvVars()...))
-		if r.gone(ctx, "running the landing check") {
-			return nil, errors.New("the run was no longer ours while the landing check ran")
-		}
-		if check.Failed() {
-			// §7.1: the check's failure is the landing's outcome; the
-			// log is the job's artifact, nothing is pushed, and the
-			// attempt is discarded.
-			if err := r.saveRecord(ctx, "check_log", fmt.Sprintf("job-%d-check.log", grant.JobID), []byte(check.Log)); err != nil {
-				r.cfg.Log.WarnContext(ctx, "save the landing check log", "job_id", grant.JobID, "err", err)
-			}
-			r.discardLandAttempt(ctx, dir)
-			o.checkLog = check.Output
-			return o, nil
-		}
+	if failed {
+		// §7.1: the check's failure is the landing's outcome; the log is
+		// the job's artifact, nothing is pushed, and the attempt is
+		// discarded.
+		r.discardLandAttempt(ctx, dir)
+		o.checkLog = output
+		return o, nil
 	}
 	o.checkOK = true
 	switch grant.GatePush {
@@ -532,10 +405,204 @@ func (r *jobRun) landAttempt(ctx context.Context, dir string) (*landOutcome, err
 			return o, nil
 		}
 		o.pushed = "pushed"
-		r.landPruneFamily(ctx, dir)
+		r.landPruneFamily(ctx, dir, grant.TaskID)
 		o.afterErr = r.runAfterLand(ctx, dir)
 	}
 	return o, nil
+}
+
+// landSquashSpec is one landing's own diff (§7.1): the task, its result
+// branch and recorded base, the head its approving review judged, the
+// data of its squash message, and whether its base branch was pruned
+// after its task landed.
+type landSquashSpec struct {
+	taskID       int64
+	branch       string
+	baseRef      string
+	approvedHead string
+	msg          *engine.LandMessage
+	basePruned   bool
+}
+
+// landSquashOnto squashes one landing's own diff onto the clone's HEAD,
+// which sits at onto — the target, the waiting stack, or a batch's last
+// passing member (§7.1). It returns the commit HEAD then names (the
+// squash, or onto itself for an empty patch); the conflicting files,
+// with the attempt discarded and HEAD left at onto; or a refusal of the
+// landing's own — a head moved after its review, a diff git could not
+// apply and named no file for — with nothing squashed. err is a failure
+// of the runner's git itself.
+func (r *jobRun) landSquashOnto(ctx context.Context, dir, onto string, s landSquashSpec) (commit string, conflict []string, refusal string, err error) {
+	basePruned := s.basePruned
+	head, err := r.landText(ctx, dir, "rev-parse", "refs/heads/"+s.branch)
+	if err != nil {
+		return "", nil, "", fmt.Errorf("read the fetched head of %s: %v", s.branch, err)
+	}
+	// The head that lands is the head that was approved (§7.1): a branch
+	// that moved after the approving review is refused, nothing squashed
+	// or pushed, and the task waits for the foreman.
+	if s.approvedHead != "" && strings.TrimSpace(head) != s.approvedHead {
+		return "", nil, fmt.Sprintf("%s is at %s, not the approved head %s: the branch moved after its review; nothing landed",
+			s.branch, strings.TrimSpace(head), s.approvedHead), nil
+	}
+	commit, err = r.landText(ctx, dir, "rev-parse", "HEAD")
+	if err != nil {
+		return "", nil, "", err
+	}
+	commit = strings.TrimSpace(commit)
+	// The task's own diff, base...branch (§7.1). The recorded base can
+	// be a dependency's branch, and once that dependency landed as a
+	// squash — its branch never joining the target's history — or the
+	// task's own branch was rebuilt on the target, the base is no longer
+	// an ancestor of the branch: diffed against it, the three-dot diff
+	// would start at the stale merge-base and carry every change the
+	// target made since, conflicting in files the task never touched. A
+	// base the branch no longer sits on gives way to the base the squash
+	// lands on, whose merge-base with the branch is the task's own point
+	// of departure; a branch still stacked on its dependency's keeps it
+	// while the base below (the target, or the waiting stack) lacks the
+	// dependency's work. A dependency that has landed — its Brigada-Task
+	// trailer on the history the squash lands on — makes the branch's
+	// own base stale all the same: the branch may descend from the
+	// dependency's old lineage while its tree was rebuilt on that
+	// history's content, and the three-dot diff from the stale lineage
+	// conflicts in the very files the task touched. The patch is then
+	// the tree diff against the base the squash lands on — but only
+	// while the branch's tree still contains that base's whole content,
+	// for a branch that lacks the base's later changes (another task's
+	// landing between the dependency's and this one's) would otherwise
+	// carry their reverse; such a branch keeps its three-dot diff, which
+	// holds its own change alone.
+	diffBase := onto
+	treePatched := false
+	if s.baseRef == r.grant.LandTarget || s.baseRef == s.branch {
+		diffBase = "refs/heads/" + s.baseRef
+	} else if basePruned {
+		// The pruned base's task landed — its work is on the history the
+		// squash lands on — and the landing's Brigada-Branch trailer names
+		// the tip the branch had when it landed (§7.1, §13.2). While the
+		// task's branch still stacks on that tip, the pruned base's rule
+		// holds with the tip in the branch's place: the tree diff when
+		// the branch's tree holds the squash base's whole content, else
+		// the three-dot diff from the tip, which resolves as an ancestor
+		// of the branch. A branch rebuilt off the tip diffs against the
+		// squash base, as any base the branch no longer descends from
+		// does.
+		id, _, _ := engine.ParseTaskBranchRef(s.baseRef)
+		tip, err := landing.LandedBranchHead(ctx, dir, id)
+		if err != nil {
+			return "", nil, "", fmt.Errorf("read the landed tip of %s: %v", s.baseRef, err)
+		}
+		if tip != "" && r.landHasCommit(ctx, dir, tip) {
+			if stacked, err := r.landIsAncestor(ctx, dir, tip, "refs/heads/"+s.branch); err != nil {
+				return "", nil, "", fmt.Errorf("compare %s with %s: %v", s.baseRef, s.branch, err)
+			} else if stacked {
+				diffBase = tip
+				treePatched = r.landBranchEncodes(ctx, dir, onto, s.branch)
+			}
+		}
+	} else if stacked, err := r.landIsAncestor(ctx, dir, "refs/heads/"+s.baseRef, "refs/heads/"+s.branch); err != nil {
+		return "", nil, "", fmt.Errorf("compare %s with %s: %v", s.baseRef, s.branch, err)
+	} else if stacked {
+		diffBase = "refs/heads/" + s.baseRef
+		if id, _, ok := engine.ParseTaskBranchRef(s.baseRef); ok {
+			landed, err := landing.Landed(ctx, dir, id)
+			if err != nil {
+				return "", nil, "", fmt.Errorf("read the landed mark of task %d: %v", id, err)
+			}
+			treePatched = landed && r.landBranchEncodes(ctx, dir, onto, s.branch)
+		}
+	}
+	var patch []byte
+	if treePatched {
+		patch, err = landing.TreeDiff(ctx, dir, onto, s.branch, io.Discard)
+		if err != nil {
+			return "", nil, "", fmt.Errorf("diff %s %s: %v", onto, s.branch, err)
+		}
+	} else {
+		patch, err = landing.Diff(ctx, dir, diffBase, s.branch, io.Discard)
+		if err != nil {
+			return "", nil, "", fmt.Errorf("diff %s...%s: %v", diffBase, s.branch, err)
+		}
+	}
+	if len(patch) > 0 {
+		// The message the hand-driven land builds (§7.1), from the data
+		// the grant carries — the worker's own commit_message (§5.4)
+		// included, which Message puts in place of the built subject and
+		// body when the worker wrote one; the head is the fetched one,
+		// the runner's to say.
+		msg, _ := landing.Message(landing.Task{
+			ID:            s.taskID,
+			Title:         s.msg.Title,
+			Branch:        s.branch,
+			Head:          strings.TrimSpace(head),
+			Spec:          s.msg.Spec,
+			Summary:       s.msg.Summary,
+			CommitMessage: s.msg.CommitMessage,
+			Family:        s.msg.Family,
+			Model:         s.msg.Model,
+		})
+		res, err := landing.Squash(ctx, dir, s.taskID, msg, patch, io.Discard)
+		if err != nil {
+			var conflict *landing.Conflict
+			if errors.As(err, &conflict) {
+				// §7.1: the attempt is discarded — nothing resolved,
+				// nothing pushed — and the conflicting files are the
+				// job's record. Git itself named none: its own words
+				// carry the failure instead.
+				r.discardLandAttempt(ctx, dir)
+				if len(conflict.Files) > 0 {
+					return commit, conflict.Files, "", nil
+				}
+				return "", nil, fmt.Sprintf("the task's diff no longer applies onto %s: %v", r.grant.LandTarget, conflict.Err), nil
+			}
+			return "", nil, "", fmt.Errorf("squash the task's diff onto %s: %v", r.grant.LandTarget, err)
+		}
+		if !res.Empty {
+			tip, err := r.landText(ctx, dir, "rev-parse", "HEAD")
+			if err != nil {
+				return "", nil, "", err
+			}
+			commit = strings.TrimSpace(tip)
+		}
+		// An empty patch made no commit (§7.1): the record names the
+		// head it was squashed onto, for the landing is already entirely
+		// there.
+	}
+	return commit, nil, "", nil
+}
+
+// landCheck runs the setup and the project's default check on the
+// clone's HEAD (§7.1, §5.7): failed with the check's output when it
+// fails, its log saved as the job's check_log artifact under name with
+// header ahead of it — a batch names the member and commit it checked.
+// err is a setup that would not run (a landSetupError) or a run no
+// longer the runner's.
+func (r *jobRun) landCheck(ctx context.Context, dir, name, header string) (failed bool, output string, err error) {
+	grant := r.grant
+	if grant.CheckCmd == "" {
+		return false, "", nil
+	}
+	if why := r.runSetup(ctx, dir, false); why != "" {
+		if r.gone(ctx, "running the setup before the landing check") {
+			return false, "", errors.New("the run was no longer ours while the landing setup ran")
+		}
+		return false, "", &landSetupError{why}
+	}
+	if r.gone(ctx, "running the setup before the landing check") {
+		return false, "", errors.New("the run was no longer ours while the landing setup ran")
+	}
+	check := runCheckIn(ctx, dir, grant.CheckCmd, r.cfg.CheckTimeout, r.cfg.commandEnv(r.extraEnvVars()...))
+	if r.gone(ctx, "running the landing check") {
+		return false, "", errors.New("the run was no longer ours while the landing check ran")
+	}
+	if !check.Failed() {
+		return false, "", nil
+	}
+	if err := r.saveRecord(ctx, "check_log", name, []byte(header+check.Log)); err != nil {
+		r.cfg.Log.WarnContext(ctx, "save the landing check log", "job_id", grant.JobID, "err", err)
+	}
+	return true, check.Output, nil
 }
 
 // runLandPushPhase performs the push phase of an already-recorded
@@ -611,7 +678,7 @@ func (r *jobRun) runLandPushPhase(ctx context.Context) {
 			return
 		}
 	}
-	r.landPruneFamily(ctx, dir)
+	r.landPruneFamily(ctx, dir, grant.TaskID)
 	r.finishLand(ctx, pushRecordJSON{
 		TargetBranch: grant.LandTarget,
 		Commit:       grant.LandCommit,
@@ -854,12 +921,12 @@ func (r *jobRun) landRemoteHas(ctx context.Context, dir, branch string) (bool, e
 // branches are never the matcher's. A failure — the remote refusing, a
 // network fault — is logged, never the landing's: the push landed the
 // task, and the engine-start sweep tries the deletion again.
-func (r *jobRun) landPruneFamily(ctx context.Context, dir string) {
+func (r *jobRun) landPruneFamily(ctx context.Context, dir string, taskID int64) {
 	grant := r.grant
 	out, err := r.landGit(ctx, dir, "ls-remote", "--heads", "origin")
 	if err != nil {
 		r.cfg.Log.WarnContext(ctx, "list the remote's branches to prune the landed task's family",
-			"job_id", grant.JobID, "task_id", grant.TaskID, "err", trimCmdError(out, err))
+			"job_id", grant.JobID, "task_id", taskID, "err", trimCmdError(out, err))
 		return
 	}
 	var doomed []string
@@ -869,7 +936,7 @@ func (r *jobRun) landPruneFamily(ctx context.Context, dir string) {
 			continue
 		}
 		name := strings.TrimPrefix(f[1], "refs/heads/")
-		if id, _, ok := engine.ParseTaskBranchRef(name); ok && id == grant.TaskID {
+		if id, _, ok := engine.ParseTaskBranchRef(name); ok && id == taskID {
 			doomed = append(doomed, ":"+f[1])
 		}
 	}
@@ -879,7 +946,7 @@ func (r *jobRun) landPruneFamily(ctx context.Context, dir string) {
 	args := append([]string{"push", "--quiet", "origin"}, doomed...)
 	if out, err := r.landGit(ctx, dir, args...); err != nil {
 		r.cfg.Log.WarnContext(ctx, "prune the landed task's branch family from the remote",
-			"job_id", grant.JobID, "task_id", grant.TaskID, "err", trimCmdError(out, err))
+			"job_id", grant.JobID, "task_id", taskID, "err", trimCmdError(out, err))
 	}
 }
 

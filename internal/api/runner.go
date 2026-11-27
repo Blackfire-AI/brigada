@@ -500,6 +500,12 @@ type jobGrant struct {
 	// refs/brigada/land/<target> before it stacks. False for the push
 	// phase and every other kind.
 	DropWaitingRef bool `json:"drop_waiting_ref,omitempty"`
+	// LandBatch marks a batch land job's squash phase (§7.1, §12.3):
+	// LandMembers names every member the batch owns, in batch order, and
+	// the runner lands them as one stack with one push.
+	LandBatch bool `json:"land_batch,omitempty"`
+	// LandMembers is a batch grant's ordered member list (§12.3).
+	LandMembers []engine.LandMember `json:"land_members,omitempty"`
 	// SweepTaskIDs is, for a sweep job (§13.2), the exact set of task ids
 	// whose branch families the runner may delete. Empty for every other kind.
 	SweepTaskIDs []int64 `json:"sweep_task_ids,omitempty"`
@@ -566,6 +572,8 @@ func jobGrantOf(g *engine.LeaseGrant) *jobGrant {
 		LandReady:       g.LandReady,
 		SkipLandReady:   g.SkipLandReady,
 		DropWaitingRef:  g.DropWaitingRef,
+		LandBatch:       g.LandBatch,
+		LandMembers:     g.LandMembers,
 		SweepTaskIDs:    g.SweepTaskIDs,
 		LandMessage:     g.LandMessage,
 		Attempt:         g.Attempt,

@@ -333,3 +333,184 @@ func TestLandNotReadyStreakPerMember(t *testing.T) {
 		t.Errorf("formation once the retry time passed = %+v, want created", sr)
 	}
 }
+
+// leasedBatch forms the four-member batch of landBatchEnv and leases it.
+func leasedBatch(t *testing.T) (*env, []int64, *LeaseGrant) {
+	t.Helper()
+	e, tasks, blocker := landBatchEnv(t)
+	if ans, err := e.eng.Cancel(e.ctx, blocker); err != nil || ans != AnsOK {
+		t.Fatalf("cancel the stand-in batch: %s, %v", ans, err)
+	}
+	e.formBatch()
+	g := e.leaseGit(e.runner1)
+	if g == nil || !g.LandBatch {
+		t.Fatalf("leased %+v, want the batch grant", g)
+	}
+	return e, tasks, g
+}
+
+// batchResult encodes a batch completion of the given member results.
+func batchResult(t *testing.T, errMsg string, members ...landMemberResult) Completion {
+	t.Helper()
+	b, err := json.Marshal(landBatchRecord{Batch: true, Members: members, Error: errMsg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return Completion{Result: string(b)}
+}
+
+func landedResult(task int64, commit string) landMemberResult {
+	return landMemberResult{TaskID: task, Outcome: landMemberLanded,
+		Record: &landRecord{TargetBranch: "main", Commit: commit, CheckPassed: true, Pushed: "pushed"}}
+}
+
+// TestLandBatchGrantNamesEveryMember: the batch's lease grants every
+// member it owns in batch order, each with its own branch, base, approved
+// head, message and its dependencies inside the batch.
+func TestLandBatchGrantNamesEveryMember(t *testing.T) {
+	e, tasks, blocker := landBatchEnv(t)
+	e.exec("INSERT INTO task_deps (plan_id, task_id, depends_on_task_id) VALUES (?, ?, ?)", e.plan, tasks[1], tasks[3])
+	if ans, err := e.eng.Cancel(e.ctx, blocker); err != nil || ans != AnsOK {
+		t.Fatalf("cancel the stand-in batch: %s, %v", ans, err)
+	}
+	e.formBatch()
+	g := e.leaseGit(e.runner1)
+	if g == nil || !g.LandBatch || g.Push {
+		t.Fatalf("leased %+v, want the batch's squash phase", g)
+	}
+	var order []int64
+	for _, m := range g.LandMembers {
+		order = append(order, m.TaskID)
+		if m.Branch == "" || m.BaseRef == "" || m.Message == nil {
+			t.Errorf("member %d is incomplete: %+v", m.TaskID, m)
+		}
+	}
+	if want := []int64{tasks[0], tasks[2], tasks[3], tasks[1]}; !slices.Equal(order, want) {
+		t.Errorf("member order = %v, want %v", order, want)
+	}
+	if deps := g.LandMembers[3].Deps; !slices.Equal(deps, []int64{tasks[3]}) {
+		t.Errorf("deps of task %d = %v, want its in-batch dependency %d", tasks[1], deps, tasks[3])
+	}
+}
+
+// TestLandBatchCompletionSettlesEachMember: a batch completion records
+// each landed member once, parks a conflicting member alone with its
+// files, leaves a dropped member done with no record, and releases every
+// reservation.
+func TestLandBatchCompletionSettlesEachMember(t *testing.T) {
+	e, tasks, g := leasedBatch(t)
+	c := batchResult(t, "",
+		landedResult(tasks[0], "c0"),
+		landMemberResult{TaskID: tasks[1], Outcome: landMemberParked,
+			Record: &landRecord{TargetBranch: "main", Commit: "c0", ConflictFiles: []string{"README.md"}}},
+		landMemberResult{TaskID: tasks[2], Outcome: landMemberDropped, BlockedBy: tasks[1]},
+		landedResult(tasks[3], "c3"))
+	if ans := e.complete(g, c); ans != AnsOK {
+		t.Fatalf("complete the batch: %s", ans)
+	}
+	for _, id := range []int64{tasks[0], tasks[3]} {
+		if n := e.int("SELECT COUNT(*) FROM landings WHERE task_id = ?", id); n != 1 {
+			t.Errorf("landings of task %d = %d, want 1", id, n)
+		}
+	}
+	if state := e.str("SELECT state FROM tasks WHERE id = ?", tasks[1]); state != taskNeedsForeman {
+		t.Errorf("the conflicting member is %s, want needs_foreman", state)
+	}
+	if p, ok := e.taskEvent(tasks[1], evTaskLandFailed); !ok || !strings.Contains(p.Reason, "README.md") {
+		t.Errorf("the conflicting member's land failure = %+v (%v), want its file", p, ok)
+	}
+	if state := e.str("SELECT state FROM tasks WHERE id = ?", tasks[2]); state != taskDone {
+		t.Errorf("the dropped member is %s, want done, waiting", state)
+	}
+	if n := e.int("SELECT COUNT(*) FROM landings WHERE task_id = ?", tasks[2]); n != 0 {
+		t.Errorf("the dropped member has %d landing records, want none", n)
+	}
+	if n := e.int("SELECT COUNT(*) FROM tasks WHERE land_batch_job = ?", g.JobID); n != 0 {
+		t.Errorf("members still reserved by the ended batch = %d", n)
+	}
+	// A repeated report of the same outcome reconciles, landing nothing twice.
+	if ans := e.complete(g, c); ans == AnsOK {
+		if n := e.int("SELECT COUNT(*) FROM landings WHERE task_id = ?", tasks[0]); n != 1 {
+			t.Errorf("landings of task %d after the repeat = %d, want 1", tasks[0], n)
+		}
+	}
+}
+
+// TestLandBatchCompletionRefusesABadMemberList: a completion that leaves
+// a member unsettled without an error, reports one twice or reports a
+// task the batch does not own is refused, nothing settled.
+func TestLandBatchCompletionRefusesABadMemberList(t *testing.T) {
+	e, tasks, g := leasedBatch(t)
+	all := []landMemberResult{landedResult(tasks[0], "c0"), landedResult(tasks[1], "c1"),
+		landedResult(tasks[2], "c2"), landedResult(tasks[3], "c3")}
+	for name, c := range map[string]Completion{
+		"missing":   batchResult(t, "", all[:3]...),
+		"duplicate": batchResult(t, "", append(all, all[0])...),
+		"foreign":   batchResult(t, "", append(all[:3:3], landedResult(9999, "cx"), all[3])...),
+	} {
+		if _, err := e.eng.Complete(e.ctx, g.LeaseOwner, g.JobID, g.LeaseID, c); err == nil {
+			t.Errorf("%s: the completion was accepted", name)
+		}
+	}
+	if n := e.int("SELECT COUNT(*) FROM landings"); n != 0 {
+		t.Errorf("landing records after refused completions = %d, want none", n)
+	}
+	if n := e.int("SELECT COUNT(*) FROM tasks WHERE land_batch_job = ?", g.JobID); n != 4 {
+		t.Errorf("reserved members = %d, want all four still owned", n)
+	}
+}
+
+// TestLandBatchEnvFailure: an environment failure partway through parks
+// every member the batch still owns under one cause key with one wake —
+// members checked locally and members not yet attempted alike — while a
+// member parked for its own content keeps that failure and its dropped
+// dependent keeps waiting.
+func TestLandBatchEnvFailure(t *testing.T) {
+	e, tasks, g := leasedBatch(t)
+	turns := e.foremanJobs()
+	c := batchResult(t, landEnvFetchErr,
+		landMemberResult{TaskID: tasks[0], Outcome: landMemberParked,
+			Record: &landRecord{TargetBranch: "main", Commit: "c0", ConflictFiles: []string{"README.md"}}},
+		landMemberResult{TaskID: tasks[1], Outcome: landMemberDropped, BlockedBy: tasks[0]})
+	if ans := e.complete(g, c); ans != AnsOK {
+		t.Fatalf("complete the batch: %s", ans)
+	}
+	if cause := e.str("SELECT land_env_cause FROM tasks WHERE id = ?", tasks[0]); cause != "" {
+		t.Errorf("the content-parked member's cause = %q, want none: it keeps its own failure", cause)
+	}
+	if state := e.str("SELECT state FROM tasks WHERE id = ?", tasks[1]); state != taskDone {
+		t.Errorf("the dropped member is %s, want done, waiting", state)
+	}
+	for _, id := range tasks[2:] {
+		if cause := e.str("SELECT land_env_cause FROM tasks WHERE id = ?", id); cause != landEnvNetKey {
+			t.Errorf("task %d cause = %q, want %q", id, cause, landEnvNetKey)
+		}
+	}
+	if got := e.countEvents(evLandEnvFailed); got != 1 {
+		t.Errorf("land_env_failed events = %d, want the one wake", got)
+	}
+	if got := e.foremanJobs(); got != turns+1 {
+		t.Errorf("foreman turns = %d, want one more than %d", got, turns)
+	}
+}
+
+// TestLandBatchHeldHoldsEveryMember: land_ready's exit 1 before the first
+// squash gives every member its own hold and its own re-check, nothing
+// recorded.
+func TestLandBatchHeldHoldsEveryMember(t *testing.T) {
+	e, tasks, g := leasedBatch(t)
+	if ans := e.complete(g, Completion{Outcome: OutcomeLandHeld, Result: `{"outcome":"held","line":"CI is red"}`}); ans != AnsOK {
+		t.Fatalf("complete the batch: %s", ans)
+	}
+	for _, id := range tasks {
+		if r := e.str("SELECT COALESCE(reason, '') FROM land_holds WHERE task_id = ? AND state = 'held'", id); !strings.Contains(r, "CI is red") {
+			t.Errorf("task %d hold = %q, want the command's line", id, r)
+		}
+		if n := e.int("SELECT COUNT(*) FROM jobs WHERE key = ? AND status = 'queued'", keyOf(id)); n != 1 {
+			t.Errorf("task %d re-checks queued = %d, want 1", id, n)
+		}
+	}
+	if n := e.int("SELECT COUNT(*) FROM landings"); n != 0 {
+		t.Errorf("landing records = %d, want none", n)
+	}
+}

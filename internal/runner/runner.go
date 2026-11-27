@@ -116,6 +116,9 @@ type Config struct {
 	Ready func()
 	// Log is the runner's logger; nil uses the default.
 	Log *slog.Logger
+	// landRetryPause, when set, replaces landRetryPause between a land
+	// batch's rejected pushes: the tests' seam for the five-push bound.
+	landRetryPause func(attempt int) time.Duration
 }
 
 func (cfg *Config) defaults() error {
