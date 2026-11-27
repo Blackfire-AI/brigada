@@ -90,7 +90,7 @@ tasks:
     base: "gitea-fetcher"
     effort: medium
     skills: ["docs-change", "surface-parity"]
-    state: ready
+    state: running
     branch: ""
     rounds: 0
   - id: 76
