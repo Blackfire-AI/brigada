@@ -7,7 +7,7 @@ title: "Fix #123: per-task tool grants"
 repo: "github.com/Blackfire-AI/brigada"
 state: reviewing
 created: 2026-11-26T20:46:37.109826591Z
-updated: 2026-11-27T20:25:18.647256229Z
+updated: 2026-11-27T20:25:28.688869496Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -133,6 +133,18 @@ tasks:
     base: "grants-approval-v3"
     continue: "grants-approval-v3"
     effort: medium
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 86
+    name: "grants-changelog-v2"
+    title: "CHANGELOG entry for per-task tool grants, rebuilt on grants-lease-v2 (#123)"
+    class: "implement"
+    deps: ["grants-lease-v2"]
+    base: "grants-lease-v2"
+    tier: light
+    effort: low
+    skills: ["docs-change"]
     state: pending
     branch: ""
     rounds: 0
