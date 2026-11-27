@@ -126,6 +126,6 @@ tasks:
     tier: light
     effort: low
     skills: ["docs-change"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-35-r1"
     rounds: 0
