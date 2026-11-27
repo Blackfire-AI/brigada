@@ -58,6 +58,11 @@ type landRecordJSON struct {
 	AfterLandErr  string   `json:"after_land_error,omitempty"`
 	ConflictFiles []string `json:"conflict_files,omitempty"`
 	CheckLog      string   `json:"check_log,omitempty"`
+	// Predecessor is the target's head the landing's push moved from,
+	// set when it pushed to the target (§7.1: the publication's link).
+	Predecessor string `json:"predecessor,omitempty"`
+	// Gate is the land_ready gate's evidence, nil when none ran.
+	Gate *landGateJSON `json:"gate,omitempty"`
 }
 
 // pushRecordJSON is a push phase's completion (§7.1): the landing
@@ -67,6 +72,11 @@ type pushRecordJSON struct {
 	Commit       string `json:"commit"`
 	Pushed       string `json:"pushed"` // 'pushed'
 	AfterLandErr string `json:"after_land_error,omitempty"`
+	// Predecessor is the target's head this push moved from; empty when
+	// the target already held the commit and nothing was pushed.
+	Predecessor string `json:"predecessor,omitempty"`
+	// Gate is the land_ready gate's evidence, nil when none ran.
+	Gate *landGateJSON `json:"gate,omitempty"`
 }
 
 // landHeldJSON is the record a land job's held outcome carries
@@ -75,15 +85,18 @@ type pushRecordJSON struct {
 type landHeldJSON struct {
 	Outcome string `json:"outcome"` // 'held'
 	Line    string `json:"line"`    // the command's first output line
-	// Suspects is the suspect line the gate evidence words (§7.1), empty
-	// while the runner names none.
+	// Suspects is a suspect line the runner words itself; empty — the
+	// engine words it from Gate and its recorded publications (§7.1).
 	Suspects string `json:"suspects,omitempty"`
+	// Gate is the evidence of the run that held.
+	Gate *landGateJSON `json:"gate,omitempty"`
 }
 
 // landReadyJSON is the record a re-check's pass carries (§7.1
 // "Deciding a batch hold"): the command said yes, and nothing landed.
 type landReadyJSON struct {
-	Outcome string `json:"outcome"` // 'ready'
+	Outcome string        `json:"outcome"` // 'ready'
+	Gate    *landGateJSON `json:"gate,omitempty"`
 }
 
 // landNotReadyJSON is the record a land job's not-ready outcome carries
@@ -93,6 +106,9 @@ type landNotReadyJSON struct {
 	Outcome string `json:"outcome"` // 'not ready'
 	Exit    int    `json:"exit"`    // the command's last exit
 	Reason  string `json:"reason,omitempty"`
+	// Gate is the run's evidence: a not-ready answer for moved heads
+	// keeps the raw exit here and in Exit.
+	Gate *landGateJSON `json:"gate,omitempty"`
 }
 
 // isLandJob reports whether the grant is a land job (§7.1): no worker
@@ -179,7 +195,7 @@ func (r *jobRun) runLandSquashPhase(ctx context.Context) {
 	// hold") lands nothing: the command's yes releases the member into
 	// the next batch, with its gate skipped there.
 	if grant.LandRecheck {
-		r.finishLandOutcome(ctx, outcomeLandReady, landReadyJSON{Outcome: outcomeLandReady})
+		r.finishLandOutcome(ctx, outcomeLandReady, landReadyJSON{Outcome: outcomeLandReady, Gate: r.landGate})
 		return
 	}
 	// The landing check sees what a work's check sees (§5.7, §5.8): the
@@ -227,7 +243,9 @@ func (r *jobRun) runLandSquashPhase(ctx context.Context) {
 			return
 		}
 	}
-	r.finishLand(ctx, out.record())
+	rec := out.record()
+	rec.Gate = r.landGate
+	r.finishLand(ctx, rec)
 }
 
 // landSetupError is a failed setup before the landing check: an
@@ -262,6 +280,7 @@ type landOutcome struct {
 	conflict     []string
 	pushRejected bool
 	pushErr      string
+	predecessor  string
 }
 
 func (o *landOutcome) record() landRecordJSON {
@@ -274,6 +293,7 @@ func (o *landOutcome) record() landRecordJSON {
 		AfterLandErr:  o.afterErr,
 		ConflictFiles: o.conflict,
 		CheckLog:      o.checkLog,
+		Predecessor:   o.predecessor,
 	}
 }
 
@@ -412,6 +432,7 @@ func (r *jobRun) landAttempt(ctx context.Context, dir string) (*landOutcome, err
 		o.pushCmd = landPushCmd(grant.LandTarget)
 		o.afterErr = r.runAfterLand(ctx, dir)
 	default:
+		from, _ := r.landText(ctx, dir, "rev-parse", onto)
 		if out, err := r.landGit(ctx, dir, "push", "--quiet", "origin", "HEAD:refs/heads/"+grant.LandTarget); err != nil {
 			// The target moved (§7.1): the attempt is discarded and
 			// the caller retries from a fresh fetch and squash.
@@ -421,6 +442,7 @@ func (r *jobRun) landAttempt(ctx context.Context, dir string) (*landOutcome, err
 			return o, nil
 		}
 		o.pushed = "pushed"
+		o.predecessor = strings.TrimSpace(from)
 		r.landPruneFamily(ctx, dir, grant.TaskID)
 		o.afterErr = r.runAfterLand(ctx, dir)
 	}
@@ -672,6 +694,7 @@ func (r *jobRun) runLandPushPhase(ctx context.Context) {
 	// Two tries: the stack's pushes run at once, so a rejection may be a
 	// later landing's push that already carried this commit — the fresh
 	// fetch tells, and only a target that still lacks it is a failure.
+	predecessor := ""
 	for try := 1; ; try++ {
 		landed, err := r.landIsAncestor(ctx, dir, grant.LandCommit, "refs/heads/"+grant.LandTarget)
 		if err != nil {
@@ -681,8 +704,11 @@ func (r *jobRun) runLandPushPhase(ctx context.Context) {
 		if landed {
 			break
 		}
+		// The publication's link (§7.1): the head this push moves from.
+		from, _ := r.landText(ctx, dir, "rev-parse", "refs/heads/"+grant.LandTarget)
 		out, err := r.landGit(ctx, dir, "push", "--quiet", "origin", "HEAD:refs/heads/"+grant.LandTarget)
 		if err == nil {
+			predecessor = strings.TrimSpace(from)
 			break
 		}
 		if try == 2 {
@@ -700,6 +726,8 @@ func (r *jobRun) runLandPushPhase(ctx context.Context) {
 		Commit:       grant.LandCommit,
 		Pushed:       "pushed",
 		AfterLandErr: r.runAfterLand(ctx, dir),
+		Predecessor:  predecessor,
+		Gate:         r.landGate,
 	})
 }
 
@@ -742,26 +770,47 @@ func (r *jobRun) runLandReady(ctx context.Context, dir string) bool {
 // landReadyAnswer runs the land_ready command once and words its answer:
 // both nil for exit 0, the held record for exit 1, the not-ready record
 // for every other way it could not say yes.
+//
+// The run is observed (§7.1 "The checked head and suspects"): the remote
+// head of the ref it checks immediately before and after, then — when
+// that ref is the landing target — the first landing fetch, which must
+// agree with the head after. Heads that moved, a lookup that failed or a
+// fetch that disagrees make the answer not ready whatever the exit, the
+// raw exit kept. The evidence rides every record of the job.
 func (r *jobRun) landReadyAnswer(ctx context.Context, dir string) (held *landHeldJSON, notReady *landNotReadyJSON) {
 	timeout := r.cfg.CheckTimeout
 	if timeout <= 0 {
 		timeout = defaultCheckTimeout
 	}
+	ev := r.landGateIdentity(dir)
+	ev.Before = r.landRemoteHead(ctx, dir, ev.Ref)
 	res := runCheckIn(ctx, dir, r.grant.LandReady, timeout, r.cfg.commandEnv())
-	if !res.Failed() {
-		return nil, nil
+	ev.After = r.landRemoteHead(ctx, dir, ev.Ref)
+	ev.Exit, ev.Line = res.ExitCode, firstLineOf(res.Output)
+	r.landGate = &ev
+	if res.Failed() && (res.ExitCode != 1 || res.TimedOut) {
+		reason := ""
+		switch {
+		case res.TimedOut:
+			reason = "timed out after " + timeout.String()
+		case res.ExitCode < 0:
+			reason = "the command did not run"
+		}
+		return nil, &landNotReadyJSON{Outcome: outcomeLandNotReady, Exit: res.ExitCode, Reason: reason, Gate: &ev}
 	}
-	if res.ExitCode == 1 && !res.TimedOut {
-		return &landHeldJSON{Outcome: outcomeLandHeld, Line: firstLineOf(res.Output)}, nil
+	if why := landHeadsUnstable(&ev); why != "" {
+		return nil, &landNotReadyJSON{Outcome: outcomeLandNotReady, Exit: res.ExitCode, Reason: why, Gate: &ev}
 	}
-	reason := ""
-	switch {
-	case res.TimedOut:
-		reason = "timed out after " + timeout.String()
-	case res.ExitCode < 0:
-		reason = "the command did not run"
+	if ev.Ref == r.grant.LandTarget {
+		if ok, why := r.landFetchAgrees(ctx, dir, ev.After); !ok {
+			return nil, &landNotReadyJSON{Outcome: outcomeLandNotReady, Exit: res.ExitCode, Reason: why, Gate: &ev}
+		}
 	}
-	return nil, &landNotReadyJSON{Outcome: outcomeLandNotReady, Exit: res.ExitCode, Reason: reason}
+	ev.Stable = true
+	if res.Failed() {
+		return &landHeldJSON{Outcome: outcomeLandHeld, Line: ev.Line, Gate: &ev}, nil
+	}
+	return nil, nil
 }
 
 // finishLandOutcome completes the land job with a land_ready gate

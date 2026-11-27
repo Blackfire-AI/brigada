@@ -52,6 +52,26 @@ type landBatchJSON struct {
 	Members   []landMemberJSON `json:"members"`
 	Error     string           `json:"error,omitempty"`
 	ErrorKind string           `json:"error_kind,omitempty"`
+	// Gate is the land_ready gate's evidence, nil when none ran.
+	Gate *landGateJSON `json:"gate,omitempty"`
+	// Publication is the push that moved the target (§7.1): the head it
+	// moved from, the head it left and the members it published in
+	// landing order with their own commits. nil when nothing reached the
+	// target — under ask and never the stack waits.
+	Publication *landPublicationJSON `json:"publication,omitempty"`
+}
+
+// landPublicationJSON is one recorded publication to the target.
+type landPublicationJSON struct {
+	Predecessor string                  `json:"predecessor"`
+	Final       string                  `json:"final"`
+	Members     []landPublicationMember `json:"members"`
+}
+
+// landPublicationMember is one published member and its own commit.
+type landPublicationMember struct {
+	TaskID int64  `json:"task_id"`
+	Commit string `json:"commit"`
 }
 
 // landMemberJSON is one member's outcome.
@@ -225,7 +245,8 @@ func (r *jobRun) landBatchLoop(ctx context.Context, dir string, settled map[int6
 // finishLandBatch completes the batch with every settled member in batch
 // order and, when the run stopped, the error that settles the rest.
 func (r *jobRun) finishLandBatch(ctx context.Context, settled map[int64]landMemberJSON, errMsg, kind string) {
-	rec := landBatchJSON{Batch: true, Members: []landMemberJSON{}, Error: errMsg, ErrorKind: kind}
+	rec := landBatchJSON{Batch: true, Members: []landMemberJSON{}, Error: errMsg, ErrorKind: kind,
+		Gate: r.landGate, Publication: r.landPub}
 	for _, m := range r.grant.LandMembers {
 		if s, ok := settled[m.TaskID]; ok {
 			rec.Members = append(rec.Members, s)
@@ -352,6 +373,7 @@ func (r *jobRun) landBatchAttempt(ctx context.Context, dir string, settled map[i
 		return nil, err
 	}
 	last = strings.TrimSpace(last)
+	from := last
 	// failed names the members that will not publish in this batch — a
 	// park, a drop, settled before or now — so their dependents drop.
 	failed := func(id int64) bool {
@@ -440,6 +462,13 @@ func (r *jobRun) landBatchAttempt(ctx context.Context, dir string, settled map[i
 		res.rejected = true
 		res.pushErr = pushErr.Error()
 		return res, nil
+	}
+	if !stack {
+		pub := &landPublicationJSON{Predecessor: from, Final: last}
+		for _, s := range res.survivors {
+			pub.Members = append(pub.Members, landPublicationMember{TaskID: s.member.TaskID, Commit: s.commit})
+		}
+		r.landPub = pub
 	}
 	for _, s := range res.survivors {
 		rec := &landRecordJSON{TargetBranch: target, Commit: s.commit, CheckPassed: true}

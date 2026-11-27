@@ -2,6 +2,7 @@ package engine
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"time"
 )
@@ -155,7 +156,20 @@ func (e *Engine) carryCoveredPushesTx(tx *sql.Tx, job *jobRow, target string, no
 // — while the other members' holds wait for their own re-check or the
 // user. A hold decided meanwhile, or a member settled another way, takes
 // nothing.
-func (e *Engine) landRecheckPassedTx(tx *sql.Tx, job *jobRow, now time.Time) error {
+func (e *Engine) landRecheckPassedTx(tx *sql.Tx, job *jobRow, c Completion, now time.Time) error {
+	// The re-check's pass may verify a green baseline (§7.1).
+	var rec struct {
+		Gate *landGateEvidence `json:"gate"`
+	}
+	if json.Unmarshal([]byte(c.Result), &rec) == nil && rec.Gate != nil {
+		target, err := landJobTargetTx(tx, job.ProjectID, job.TaskID)
+		if err != nil {
+			return err
+		}
+		if err := noteLandBaselineTx(tx, job.ProjectID, target, rec.Gate, now); err != nil {
+			return err
+		}
+	}
 	var state string
 	if err := tx.QueryRow("SELECT state FROM tasks WHERE id = ?", job.TaskID).Scan(&state); err != nil {
 		return fmt.Errorf("read task %d: %w", job.TaskID, err)
