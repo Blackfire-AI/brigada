@@ -104,7 +104,7 @@ tasks:
     base: "wl-field"
     effort: medium
     skills: ["cli-flag", "surface-parity"]
-    state: ready
+    state: running
     branch: "brigada/task-52"
     rounds: 0
   - id: 53
