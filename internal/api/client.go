@@ -247,6 +247,20 @@ func (c *Client) RecordLanded(ctx context.Context, repoURL, branch string, lande
 	return c.call(ctx, http.MethodPost, "/v1/landed", body, nil)
 }
 
+// RecordSync reports sync merges detected from the project's landing
+// branch's Brigada-Sync trailer (§7.1): each entry is one commit
+// carrying a Brigada-Sync trailer, newest first, with the trailer's
+// default branch and head. The engine clears a waiting merge whose
+// recorded commit and trailer match.
+func (c *Client) RecordSync(ctx context.Context, repoURL, branch string, sync []engine.SyncCommit) error {
+	body := struct {
+		RepoURL string              `json:"repo_url"`
+		Branch  string              `json:"branch"`
+		Sync    []engine.SyncCommit `json:"sync"`
+	}{repoURL, branch, sync}
+	return c.call(ctx, http.MethodPost, "/v1/synced", body, nil)
+}
+
 // DueProbes lists the runner's due broken-agent probes (§8 "Health"):
 // the failure-broken agents whose next probe is due, for the runner to
 // probe and report.

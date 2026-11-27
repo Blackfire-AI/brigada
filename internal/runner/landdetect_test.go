@@ -111,3 +111,55 @@ func TestReportLandedCarriesTrailerFields(t *testing.T) {
 		t.Errorf("task 7 candidate = %+v, want the commit with empty branch and head", byTask[7][0])
 	}
 }
+
+// TestReportLandedCarriesSyncTrailers: the scan reports a commit carrying
+// a Brigada-Sync trailer — its default branch and head — through the sync
+// report (§7.1): how the engine clears a never-gate merge the user pushed
+// by hand.
+func TestReportLandedCarriesSyncTrailers(t *testing.T) {
+	dir := t.TempDir()
+	landedGit(t, dir, "init", "-q", ".")
+	landedGit(t, dir, "checkout", "-q", "-b", "main")
+	if err := os.WriteFile(filepath.Join(dir, "m.txt"), []byte("m\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	landedGit(t, dir, "add", "-A")
+	landedGit(t, dir, "commit", "-qm", "Merge main into staging\n\nBrigada-Sync: main@aaaa1111")
+	merge := strings.TrimSpace(landedGit(t, dir, "rev-parse", "HEAD"))
+
+	var got struct {
+		RepoURL string              `json:"repo_url"`
+		Branch  string              `json:"branch"`
+		Sync    []engine.SyncCommit `json:"sync"`
+	}
+	syncReported := false
+	client := api.NewClientWithHTTPClient(&http.Client{Transport: landedTransport(func(req *http.Request) (*http.Response, error) {
+		data, err := io.ReadAll(req.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if req.URL.Path == "/v1/synced" {
+			syncReported = true
+			if err := json.Unmarshal(data, &got); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"recorded":0}`)), Header: make(http.Header)}, nil
+	})}, "test-token")
+
+	if err := ReportLanded(context.Background(), client, "https://example.invalid/brigada.git", "main",
+		foreman.Checkout{Path: dir}); err != nil {
+		t.Fatal(err)
+	}
+
+	if !syncReported {
+		t.Fatal("the Brigada-Sync trailer was not reported")
+	}
+	if got.RepoURL != "https://example.invalid/brigada.git" || got.Branch != "main" {
+		t.Fatalf("sync report = %s %s, want the repo and branch", got.RepoURL, got.Branch)
+	}
+	want := []engine.SyncCommit{{Commit: merge, Default: "main", Head: "aaaa1111"}}
+	if len(got.Sync) != 1 || got.Sync[0] != want[0] {
+		t.Fatalf("sync report = %+v, want %+v", got.Sync, want)
+	}
+}

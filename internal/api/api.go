@@ -70,6 +70,7 @@ func (s *Server) Handler() http.Handler {
 	// it; the foreman has no shell to read the branch with, so its role
 	// is not among them.
 	mux.HandleFunc("/v1/landed", s.authed([]string{roleRunner, roleClient, roleAdmin}, s.handleLanded))
+	mux.HandleFunc("/v1/synced", s.authed([]string{roleRunner, roleClient, roleAdmin}, s.handleSync))
 	mux.HandleFunc("/v1/history", s.authed([]string{roleClient, roleAdmin, roleForeman}, s.handleHistory))
 	// The foreman's issue read (§12.1 issues, §12.2): GET alone, the
 	// foreman role alone — the repository comes from the token's own

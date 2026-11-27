@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -464,6 +465,13 @@ func (e *Engine) syncCompletedTx(tx *sql.Tx, job *jobRow, c Completion, now time
 	if err := json.Unmarshal([]byte(c.Result), &rec); err != nil {
 		return e.syncErrorTx(tx, job, Completion{Error: "unreadable sync record"}, now)
 	}
+	// A push phase pushes the recorded merge, no new merge (§7.1); its
+	// completion updates the record the waiting merge left and marks the
+	// push, where a full attempt's pushed merge is just the target made
+	// current.
+	if isSyncPushJob(job) {
+		return e.syncPushCompletedTx(tx, job, rec, now)
+	}
 	switch rec.Outcome {
 	case syncOutcomeCurrent:
 		return e.syncCurrentTx(tx, job, rec, now)
@@ -546,6 +554,44 @@ func (e *Engine) syncMergedTx(tx *sql.Tx, job *jobRow, rec syncRecord, now time.
 	default:
 		return e.syncErrorTx(tx, job, Completion{Error: fmt.Sprintf("the sync merge's push state %q is not pushed, waiting or local", rec.Pushed)}, now)
 	}
+}
+
+// isSyncPushJob reports whether the sync job is the push phase (§7.1) —
+// the job `brigada push approve` queues, whose prompt carries the
+// syncPayload push mark instead of a worker prompt.
+func isSyncPushJob(job *jobRow) bool {
+	var payload syncPayload
+	return json.Unmarshal([]byte(job.Prompt), &payload) == nil && payload.Push
+}
+
+// syncPushCompletedTx applies the sync push phase's completion (§7.1):
+// the recorded merge was pushed, no new merge. The record moves to
+// current — the target now holds the merge, so it holds every default
+// commit — and the push is marked, so a sync re-made after its waiting
+// ref went stale does not wait at ask again for a merge that already
+// landed (syncHeldPushTx reads the push mark).
+func (e *Engine) syncPushCompletedTx(tx *sql.Tx, job *jobRow, rec syncRecord, now time.Time) error {
+	if rec.Outcome != syncOutcomeMerged || rec.Pushed != "pushed" || rec.MergeCommit == "" {
+		return e.syncErrorTx(tx, job, Completion{Error: "the sync push did not push a recorded merge"}, now)
+	}
+	existing, err := landSyncTx(tx, job.ProjectID)
+	if err != nil {
+		return err
+	}
+	if existing == nil || existing.MergeCommit == "" || rec.MergeCommit != existing.MergeCommit {
+		return e.syncErrorTx(tx, job, Completion{Error: "the sync push names a merge other than the recorded one"}, now)
+	}
+	if err := writeLandSyncTx(tx, &landSyncRow{
+		ProjectID: job.ProjectID, State: syncStateCurrent, Behind: 0,
+		DefaultBranch: existing.DefaultBranch, TargetBranch: existing.TargetBranch,
+		DefaultHead: existing.DefaultHead, TargetHead: existing.TargetHead,
+		MergeCommit: rec.MergeCommit, Pushed: "pushed",
+	}, now); err != nil {
+		return err
+	}
+	_, err = appendEventTx(tx, evSyncPushed, job.ProjectID, 0, job.ID,
+		eventPayload{Branch: existing.TargetBranch, Commit: rec.MergeCommit, Pushed: "pushed"}, now)
+	return err
 }
 
 // syncConflictTx records a conflicting merge (§7.1): the attempt is
@@ -802,4 +848,92 @@ func statusSyncTx(tx *sql.Tx, project int64) ([]NeedsYouItem, error) {
 		items = append(items, it)
 	}
 	return items, rows.Err()
+}
+
+// SyncCommit is one sync merge the runner detected (§7.1): a commit on
+// the project's landing branch that carries a Brigada-Sync trailer,
+// naming the default branch and the head the merge brought in.
+type SyncCommit struct {
+	Commit  string `json:"commit"`
+	Default string `json:"default,omitempty"`
+	Head    string `json:"head,omitempty"`
+}
+
+// RecordSync records a sync merge the runner detected from the landing
+// branch's Brigada-Sync trailer (§7.1): the user's hand push under
+// gate_push never, whose merge the land job never made. A waiting merge
+// whose commit is now on the target is pushed — the gate opens, the
+// needs-you line goes — and the pending backoff attempt is cancelled, for
+// the target is current and no sync need run. Each entry is validated
+// against the project's recorded merge: its trailer names the default
+// branch and the head the merge brought in, and its commit is the
+// recorded merge commit.
+func (e *Engine) RecordSync(ctx context.Context, repoURL, branch string, sync []SyncCommit) error {
+	if repoURL == "" {
+		return fmt.Errorf("repo URL is required (product §5 rule 4: repos are addressed by URL)")
+	}
+	if branch == "" {
+		return fmt.Errorf("the default branch is required to record a sync merge")
+	}
+	return e.store.Update(ctx, func(tx *sql.Tx) error {
+		return e.recordSyncTx(tx, repoURL, branch, sync, e.cfg.Now())
+	})
+}
+
+// recordSyncTx applies RecordSync in its caller's transaction.
+func (e *Engine) recordSyncTx(tx *sql.Tx, repoURL, branch string, sync []SyncCommit, now time.Time) error {
+	var project int64
+	err := lookupProjectTx(tx, repoURL, "id", &project)
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("no project for repo %s", RedactRepoURL(repoURL))
+	}
+	if err != nil {
+		return fmt.Errorf("read the project of %s: %w", RedactRepoURL(repoURL), err)
+	}
+	rec, err := landSyncTx(tx, project)
+	if err != nil || rec == nil || rec.State != syncStateWaiting {
+		return err
+	}
+	// Candidates arrive newest first; the first that names the project's
+	// recorded merge settles it.
+	for _, sc := range sync {
+		if sc.Commit == "" || sc.Default == "" || sc.Head == "" {
+			continue
+		}
+		if sc.Default != rec.DefaultBranch || sc.Head != rec.DefaultHead {
+			continue
+		}
+		if rec.MergeCommit != "" && sc.Commit != rec.MergeCommit {
+			continue
+		}
+		return e.settleSyncPushTx(tx, project, rec, sc.Commit, now)
+	}
+	return nil
+}
+
+// settleSyncPushTx clears a waiting sync merge whose commit is on the
+// target (§7.1): the user pushed it by hand under gate_push never, or it
+// landed another way. The record moves to current — the target holds the
+// merge, so it holds every default commit — the merge is marked pushed,
+// and the needs-you line goes. The pending backoff attempt is cancelled:
+// the gate is open, and no sync need run.
+func (e *Engine) settleSyncPushTx(tx *sql.Tx, project int64, rec *landSyncRow, commit string, now time.Time) error {
+	if live, err := liveJobTx(tx, syncKey(project)); err != nil {
+		return err
+	} else if live != nil {
+		if _, err := e.cancelTx(tx, live, "the sync merge reached the target by hand", now); err != nil {
+			return err
+		}
+	}
+	if err := writeLandSyncTx(tx, &landSyncRow{
+		ProjectID: project, State: syncStateCurrent, Behind: 0,
+		DefaultBranch: rec.DefaultBranch, TargetBranch: rec.TargetBranch,
+		DefaultHead: rec.DefaultHead, TargetHead: rec.TargetHead,
+		MergeCommit: commit, Pushed: "pushed",
+	}, now); err != nil {
+		return err
+	}
+	_, err := appendEventTx(tx, evSyncPushed, project, 0, 0,
+		eventPayload{Branch: rec.TargetBranch, Commit: commit, Pushed: "pushed"}, now)
+	return err
 }

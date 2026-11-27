@@ -292,6 +292,171 @@ func TestSyncPushApproveReleasesWaitingMerge(t *testing.T) {
 	}
 }
 
+// TestSyncNeverTrailerClearsWait: under gate_push never a waiting merge
+// carries the exact hand push, and the runner's scan of the merge's
+// Brigada-Sync trailer on the target — reported through RecordSync —
+// clears the wait (§7.1): the record reads current, the merge marked
+// pushed, and the needs-you line goes.
+func TestSyncNeverTrailerClearsWait(t *testing.T) {
+	e := landTargetEnv(t)
+	e.set(map[string]string{SettingGatePush: GateNever})
+	if _, err := e.eng.CreatePlan(e.ctx, e.project, "never merge", []PlanTask{
+		{Name: "root", Spec: "the work", Class: "answer"},
+	}); err != nil {
+		t.Fatalf("create plan: %v", err)
+	}
+	s1 := e.leaseGit(e.runner1)
+	if s1 == nil || s1.Kind != KindSync {
+		t.Fatalf("sync grant = %+v", s1)
+	}
+	if ans := e.complete(s1, Completion{Result: `{"outcome":"merged","behind":2,"merge_commit":"m1","pushed":"local","push_cmd":"git push","default_head":"def-head"}`}); ans != AnsOK {
+		t.Fatalf("complete the local merge: %s", ans)
+	}
+	if state := e.str("SELECT state FROM land_syncs WHERE project_id = ?", e.project); state != syncStateWaiting {
+		t.Errorf("sync state = %q, want waiting", state)
+	}
+	if items := e.syncNeedsYou(); len(items) != 1 || !strings.Contains(items[0].Reason, "push by hand: git push") {
+		t.Fatalf("sync needs-you = %+v, want the hand push", items)
+	}
+	// The user pushes by hand; the runner's scan reads the merge's
+	// Brigada-Sync trailer and reports it, clearing the wait.
+	if err := e.eng.RecordSync(e.ctx, envRepo, "main", []SyncCommit{
+		{Commit: "m1", Default: "main", Head: "def-head"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if state := e.str("SELECT state FROM land_syncs WHERE project_id = ?", e.project); state != syncStateCurrent {
+		t.Errorf("sync state after the trailer read = %q, want current", state)
+	}
+	if pushed := e.str("SELECT pushed FROM land_syncs WHERE project_id = ?", e.project); pushed != "pushed" {
+		t.Errorf("sync pushed after the trailer read = %q, want pushed", pushed)
+	}
+	if p, ok := e.eventPayloadOf(evSyncPushed); !ok || p.Commit != "m1" || p.Pushed != "pushed" {
+		t.Errorf("sync_pushed event = %+v (%t), want the pushed merge m1", p, ok)
+	}
+	if items := e.syncNeedsYou(); len(items) != 0 {
+		t.Errorf("sync needs-you after the trailer read = %+v, want none", items)
+	}
+}
+
+// TestSyncPushApproveRefusedForgetsMerge: a push approve whose recorded
+// merge the target can no longer fast-forward to is refused (§7.1), as a
+// landing's non-fast-forward push is — the waiting merge is forgotten,
+// the sync re-queues on the backoff, and no task parks, for the sync has
+// none.
+func TestSyncPushApproveRefusedForgetsMerge(t *testing.T) {
+	e := landTargetEnv(t)
+	e.set(map[string]string{SettingGatePush: GateAsk})
+	if _, err := e.eng.CreatePlan(e.ctx, e.project, "refused push", []PlanTask{
+		{Name: "root", Spec: "the work", Class: "answer"},
+	}); err != nil {
+		t.Fatalf("create plan: %v", err)
+	}
+	s1 := e.leaseGit(e.runner1)
+	if s1 == nil || s1.Kind != KindSync {
+		t.Fatalf("sync grant = %+v", s1)
+	}
+	if ans := e.complete(s1, Completion{Result: `{"outcome":"merged","behind":2,"merge_commit":"m1","pushed":"waiting"}`}); ans != AnsOK {
+		t.Fatalf("complete the waiting merge: %s", ans)
+	}
+	if _, err := e.eng.PushApprove(e.ctx, envRepo); err != nil {
+		t.Fatalf("push approve: %v", err)
+	}
+	p1 := e.leaseGit(e.runner1)
+	if p1 == nil || p1.Kind != KindSync || !p1.Push || p1.LandCommit != "m1" {
+		t.Fatalf("sync push grant = %+v, want the push phase carrying m1", p1)
+	}
+	if ans := e.complete(p1, Completion{Error: "push the sync merge m1 to brigada/landed: ! [rejected] (non-fast-forward)"}); ans != AnsOK {
+		t.Fatalf("complete the refused push: %s", ans)
+	}
+	if n := e.int("SELECT COUNT(*) FROM land_syncs WHERE project_id = ?", e.project); n != 0 {
+		t.Errorf("land_syncs rows = %d, want the refused merge forgotten", n)
+	}
+	if n := e.int("SELECT COUNT(*) FROM tasks WHERE state = 'needs_foreman'"); n != 0 {
+		t.Errorf("tasks parked = %d, want none: the sync has no task", n)
+	}
+	if n := e.int("SELECT COUNT(*) FROM jobs WHERE kind = 'sync' AND status = 'queued'"); n != 1 {
+		t.Errorf("queued sync jobs = %d, want the refused push re-queued", n)
+	}
+}
+
+// TestSyncHeldMergeWaitsAtAskAnew: a waiting merge is held by the ask
+// gate as a waiting landing is (§7.1): a switch of gate_push to auto
+// pushes nothing, and a sync re-made after its waiting ref went stale
+// waits at ask anew rather than pushing under the new auto.
+func TestSyncHeldMergeWaitsAtAskAnew(t *testing.T) {
+	e := landTargetEnv(t)
+	e.set(map[string]string{SettingGatePush: GateAsk})
+	if _, err := e.eng.CreatePlan(e.ctx, e.project, "held merge", []PlanTask{
+		{Name: "root", Spec: "the work", Class: "answer"},
+	}); err != nil {
+		t.Fatalf("create plan: %v", err)
+	}
+	s1 := e.leaseGit(e.runner1)
+	if s1 == nil || s1.Kind != KindSync {
+		t.Fatalf("sync grant = %+v", s1)
+	}
+	if ans := e.complete(s1, Completion{Result: `{"outcome":"merged","behind":2,"merge_commit":"m1","pushed":"waiting"}`}); ans != AnsOK {
+		t.Fatalf("complete the waiting merge: %s", ans)
+	}
+	if nb := e.queuedSyncNotBefore(); nb == "" {
+		t.Error("the waiting merge did not re-queue on the not-before backoff")
+	}
+	// The user switches to auto: the held merge still does not push
+	// unasked — the re-made sync waits at ask anew.
+	e.set(map[string]string{SettingGatePush: GateAuto})
+	e.clock.Advance(time.Minute)
+	s2 := e.leaseGit(e.runner1)
+	if s2 == nil || s2.Kind != KindSync || s2.GatePush != GateAsk {
+		t.Fatalf("re-made sync grant = %+v, want gate ask, not the new auto", s2)
+	}
+}
+
+// TestSyncPushedMergeNotHeld: once a waiting merge is pushed by the push
+// phase, the push mark clears the held state (§7.1): a sync re-made after
+// the target moved past the ref does not wait at ask for a merge that
+// already landed.
+func TestSyncPushedMergeNotHeld(t *testing.T) {
+	e := landTargetEnv(t)
+	e.set(map[string]string{SettingGatePush: GateAsk})
+	if _, err := e.eng.CreatePlan(e.ctx, e.project, "pushed merge", []PlanTask{
+		{Name: "root", Spec: "the work", Class: "answer"},
+	}); err != nil {
+		t.Fatalf("create plan: %v", err)
+	}
+	s1 := e.leaseGit(e.runner1)
+	if s1 == nil || s1.Kind != KindSync {
+		t.Fatalf("sync grant = %+v", s1)
+	}
+	if ans := e.complete(s1, Completion{Result: `{"outcome":"merged","behind":2,"merge_commit":"m1","pushed":"waiting"}`}); ans != AnsOK {
+		t.Fatalf("complete the waiting merge: %s", ans)
+	}
+	if _, err := e.eng.PushApprove(e.ctx, envRepo); err != nil {
+		t.Fatalf("push approve: %v", err)
+	}
+	p1 := e.leaseGit(e.runner1)
+	if p1 == nil || p1.Kind != KindSync || !p1.Push {
+		t.Fatalf("sync push grant = %+v, want the push phase", p1)
+	}
+	if ans := e.complete(p1, Completion{Result: `{"outcome":"merged","merge_commit":"m1","pushed":"pushed"}`}); ans != AnsOK {
+		t.Fatalf("complete the sync push: %s", ans)
+	}
+	if p, ok := e.eventPayloadOf(evSyncPushed); !ok || p.Commit != "m1" || p.Pushed != "pushed" {
+		t.Fatalf("sync_pushed event = %+v (%t), want the pushed merge m1", p, ok)
+	}
+	var held bool
+	if err := e.st.View(e.ctx, func(tx *sql.Tx) error {
+		var err error
+		held, err = syncHeldPushTx(tx, e.project)
+		return err
+	}); err != nil {
+		t.Fatalf("read the held push: %v", err)
+	}
+	if held {
+		t.Error("the pushed merge is still held at ask")
+	}
+}
+
 // TestSyncLeasesOnlyAfterInFlightLanding: a landing already in flight
 // finishes first (§7.1) — the sync leases only once no land job of the
 // project is leased or running.

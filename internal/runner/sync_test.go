@@ -186,3 +186,105 @@ func TestRunnerSyncMergeRunsNoTaskGate(t *testing.T) {
 		}
 	}
 }
+
+// behindTargetRemote builds a remote whose staging branch sits one hotfix
+// behind main, returns the remote and both heads, and a clone to work in.
+func behindTargetRemote(t *testing.T) (remote, clone, stagingBefore, mainHead string) {
+	t.Helper()
+	remote = newRemote(t)
+	clone = t.TempDir()
+	git(t, clone, "clone", remote, ".")
+	git(t, clone, "checkout", "-b", "staging")
+	git(t, clone, "push", "origin", "staging")
+	stagingBefore = remoteBranchCommit(t, remote, "staging")
+	git(t, clone, "checkout", "main")
+	if err := os.WriteFile(filepath.Join(clone, "hotfix.txt"), []byte("hand merge\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, clone, "add", "-A")
+	git(t, clone, "-c", "user.name=s", "-c", "user.email=s@brigada.invalid", "commit", "-m", "hotfix")
+	git(t, clone, "push", "origin", "main")
+	mainHead = remoteBranchCommit(t, remote, "main")
+	return remote, clone, stagingBefore, mainHead
+}
+
+// submitSyncAndStop submits the project's sync and runs it once to
+// completion, then stops the runner so a re-queued attempt does not race
+// the test's reads.
+func (e *testEnv) submitSyncAndStop(t *testing.T) {
+	t.Helper()
+	sr, err := e.eng.Submit(e.ctx, engine.SubmitParams{
+		Key:       fmt.Sprintf("sync:%d", e.project),
+		ProjectID: e.project,
+		Kind:      engine.KindSync,
+		Mode:      engine.ModeFresh,
+		Labels:    []string{"git"},
+	})
+	if err != nil {
+		t.Fatalf("submit the sync: %v", err)
+	}
+	p := e.startLandRunner(t, reviewScript(reviewApproveResult))
+	e.waitJob(sr.JobID, func(j *engine.JobInfo) bool { return j.Status == "done" })
+	p.stop(t)
+}
+
+// TestRunnerSyncAskWaitsOnWaitingRef: under gate_push ask the sync merge
+// waits at the push gate (§7.1) — pushed fast-forward to the target's
+// waiting ref, alone on it, the target unmoved.
+func TestRunnerSyncAskWaitsOnWaitingRef(t *testing.T) {
+	t.Parallel()
+	markerDir(t)
+	remote, _, stagingBefore, mainHead := behindTargetRemote(t)
+	e := newTestEnv(t, engine.Config{})
+	e.seedProject(remote)
+	e.setProjectSettings(`{"gate_push":"ask","land_target":"staging"}`)
+	e.submitSyncAndStop(t)
+
+	// The target did not move: the merge waits on the waiting ref alone.
+	if got := remoteBranchCommit(t, remote, "staging"); got != stagingBefore {
+		t.Errorf("staging moved under ask: %s, want %s", got, stagingBefore)
+	}
+	waiting := remoteRefCommit(t, remote, "refs/brigada/land/staging")
+	if waiting == "" {
+		t.Fatal("the sync left no waiting ref under ask")
+	}
+	bare := strings.TrimPrefix(remote, "file://")
+	parents := strings.Fields(git(t, "", "--git-dir", bare, "log", "-1", "--format=%P", waiting))
+	if len(parents) != 2 || parents[0] != stagingBefore || parents[1] != mainHead {
+		t.Errorf("waiting merge parents = %v, want [%s %s]", parents, stagingBefore, mainHead)
+	}
+	if state := e.strOf("SELECT state FROM land_syncs WHERE project_id = ?", e.project); state != "waiting" {
+		t.Errorf("sync state = %q, want waiting", state)
+	}
+}
+
+// TestRunnerSyncNeverRecordsHandPush: under gate_push never the merge
+// waits on the same ref and the record carries the exact hand push
+// (§7.1) — the target unmoved, the command naming the fetch of the
+// waiting ref and the push to the target.
+func TestRunnerSyncNeverRecordsHandPush(t *testing.T) {
+	t.Parallel()
+	markerDir(t)
+	remote, _, stagingBefore, _ := behindTargetRemote(t)
+	e := newTestEnv(t, engine.Config{})
+	e.seedProject(remote)
+	e.setProjectSettings(`{"gate_push":"never","land_target":"staging"}`)
+	e.submitSyncAndStop(t)
+
+	if got := remoteBranchCommit(t, remote, "staging"); got != stagingBefore {
+		t.Errorf("staging moved under never: %s, want %s", got, stagingBefore)
+	}
+	if waiting := remoteRefCommit(t, remote, "refs/brigada/land/staging"); waiting == "" {
+		t.Fatal("the sync left no waiting ref under never")
+	}
+	if state := e.strOf("SELECT state FROM land_syncs WHERE project_id = ?", e.project); state != "waiting" {
+		t.Errorf("sync state = %q, want waiting", state)
+	}
+	if pushed := e.strOf("SELECT pushed FROM land_syncs WHERE project_id = ?", e.project); pushed != "local" {
+		t.Errorf("sync pushed = %q, want local under never", pushed)
+	}
+	cmd := e.strOf("SELECT push_cmd FROM land_syncs WHERE project_id = ?", e.project)
+	if want := "git fetch origin refs/brigada/land/staging && git push origin FETCH_HEAD:refs/heads/staging"; cmd != want {
+		t.Errorf("sync push_cmd = %q, want %q", cmd, want)
+	}
+}

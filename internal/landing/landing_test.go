@@ -494,3 +494,45 @@ func TestLandedCommitsNoHistory(t *testing.T) {
 		t.Errorf("LandedCommits on an unborn branch = %v, want none", got)
 	}
 }
+
+// TestSyncCommits: a branch's history lists each commit carrying a
+// Brigada-Sync trailer, newest first, with the trailer's default branch
+// and head split at the last '@' (§7.1): how the engine recognizes a
+// sync merge the user pushed by hand under gate_push never.
+func TestSyncCommits(t *testing.T) {
+	dir := newRepo(t)
+	write(t, dir, "a.txt", "a\n")
+	git(t, dir, "add", "-A")
+	git(t, dir, "commit", "-qm", "Merge main into staging\n\nBrigada-Sync: main@aaaa1111")
+	first := head(t, dir)
+	write(t, dir, "b.txt", "b\n")
+	git(t, dir, "add", "-A")
+	git(t, dir, "commit", "-qm", "no trailer")
+
+	got, err := SyncCommits(context.Background(), dir, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []SyncCandidate{{SHA: first, Default: "main", Head: "aaaa1111"}}
+	if len(got) != len(want) {
+		t.Fatalf("SyncCommits = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("candidate %d = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}
+
+// TestSyncCommitsNoHistory: a ref with no commits lists nothing.
+func TestSyncCommitsNoHistory(t *testing.T) {
+	dir := t.TempDir()
+	git(t, dir, "init", "-q", ".")
+	got, err := SyncCommits(context.Background(), dir, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Errorf("SyncCommits on an unborn branch = %v, want none", got)
+	}
+}
