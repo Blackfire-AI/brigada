@@ -156,6 +156,6 @@ tasks:
     base: ""
     effort: medium
     skills: ["config-setting", "surface-parity"]
-    state: running
-    branch: "brigada/task-88"
+    state: reviewing
+    branch: "brigada/task-88-r1"
     rounds: 0
