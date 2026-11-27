@@ -60,8 +60,8 @@ tasks:
     review_effort: medium
     caps: {restart: 10}
     skills: ["schema-migration", "surface-parity"]
-    state: running
-    branch: "brigada/task-37-r2"
+    state: reviewing
+    branch: "brigada/task-37-r5"
     rounds: 0
   - id: 38
     name: "changelog-53"
