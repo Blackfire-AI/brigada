@@ -55,7 +55,7 @@ tasks:
     continue: "probe-161v2"
     effort: medium
     skills: ["cli-flag", "surface-parity"]
-    state: ready
+    state: running
     branch: "brigada/task-42-r1"
     rounds: 0
   - id: 43
