@@ -73,7 +73,7 @@ tasks:
     review_tier: standard
     review_effort: medium
     caps: {restart: 4}
-    state: reviewing
+    state: done
     branch: "brigada/task-58-r4"
     rounds: 0
   - id: 59
@@ -85,7 +85,7 @@ tasks:
     continue: "sync-runner"
     tier: heavy
     effort: medium
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 60
