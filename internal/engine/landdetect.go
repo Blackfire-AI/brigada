@@ -165,6 +165,11 @@ func (e *Engine) recordLandedTx(tx *sql.Tx, repoURL, branch string, landed []Lan
 		if err := e.releaseDependentLandsTx(tx, id, now); err != nil {
 			return err
 		}
+		// A wait_landed dependent held past this task's landing now has
+		// its work on the target, so its barrier releases (§6.1).
+		if err := e.releaseDependentsTx(tx, project, id, now); err != nil {
+			return err
+		}
 	}
 	// A settled task was live work its plan waited on (#133), and the
 	// release above may have moved a dependent of it — a landing

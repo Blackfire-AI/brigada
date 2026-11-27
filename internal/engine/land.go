@@ -1277,6 +1277,14 @@ func (e *Engine) landSucceededTx(tx *sql.Tx, job *jobRow, rec landRecord, now ti
 	if err := e.releaseDependentLandsTx(tx, job.TaskID, now); err != nil {
 		return err
 	}
+	// A landing pushed to the target releases a wait_landed dependent's
+	// barrier (§6.1); one still waiting or local does not, so the release
+	// runs only on the pushed case.
+	if pushed == "pushed" {
+		if err := e.releaseDependentsTx(tx, job.ProjectID, job.TaskID, now); err != nil {
+			return err
+		}
+	}
 	// The landing proved the environment the failed landings blamed
 	// (issue #116): their causes end, so a recurrence wakes anew.
 	if err := e.recoverLandEnvCausesTx(tx, job.ProjectID, now); err != nil {
@@ -1353,6 +1361,11 @@ func (e *Engine) pushCompletedTx(tx *sql.Tx, job *jobRow, existing *landingRow, 
 	if _, err := appendEventTx(tx, evTaskPushed, job.ProjectID, job.TaskID, job.ID,
 		eventPayload{Status: taskDone, Branch: pr.TargetBranch, Commit: pr.Commit, Pushed: "pushed",
 			AfterLandError: pr.AfterLandErr}, now); err != nil {
+		return err
+	}
+	// The push moved a waiting landing to the target, which releases a
+	// wait_landed dependent's barrier with no foreman action (§6.1).
+	if err := e.releaseDependentsTx(tx, job.ProjectID, job.TaskID, now); err != nil {
 		return err
 	}
 	// The push proved the remote reachable (issue #116): the causes of

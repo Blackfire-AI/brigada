@@ -62,7 +62,7 @@ A run's error is the CLI's own verdict. In codex's stream an `error` event or it
 
 ## 5.3 The worker prompt
 
-A fixed worker template (versioned) plus the task spec verbatim, plus the answer or feedback for follow-up jobs. The template tells the worker to end with the result block (§5.4). The runner appends a base note after the prompt, naming the base ref and the commit the worktree was built on, so a worker that stops on a missing cited section (§5.4) can say what it read. The project's worker instructions (§5.9) and the task's skills (§5.10) follow the template's contract as verbatim data, each in its own delimiters, before the task spec.
+A fixed worker template (versioned) plus the task spec verbatim, plus the answer or feedback for follow-up jobs. The template tells the worker to end with the result block (§5.4). The runner appends a base note after the prompt, naming the base ref and the commit the worktree was built on — and asking a `wait_landed` verification task to name in its result summary the head it verified — so a worker that stops on a missing cited section (§5.4) can say what it read. The project's worker instructions (§5.9) and the task's skills (§5.10) follow the template's contract as verbatim data, each in its own delimiters, before the task spec.
 
 The default `worker.md` and `reviewer.md` that init writes (§5.9) each carry a short "work economically" paragraph; the templates do not, since the paragraphs are judgment, not contract. A work job's tool output totals only 100-400 KB, but it makes 60-150 tool calls and every call resends the whole conversation, so it processes 3-18M tokens.
 

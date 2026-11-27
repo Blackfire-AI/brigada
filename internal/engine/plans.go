@@ -587,16 +587,86 @@ func resolveBaseTx(tx *sql.Tx, taskID int64, now time.Time) error {
 	return nil
 }
 
+// depLandedBarrierTx reports whether an implement dependency dep has its
+// work on the project's land target (§6.1), the wait_landed barrier's
+// reading of one dependency: depLandedForTx (§7.1) minus both
+// waiting-ref allowances — a landing waiting at the push gate or local
+// does not count, and neither does a push-approved land job still in
+// flight. Only a landing pushed or recorded by the trailer scan releases
+// the barrier, so a verification task never starts from work that is not
+// yet on the target.
+func depLandedBarrierTx(tx *sql.Tx, dep int64) (bool, error) {
+	var class string
+	if err := tx.QueryRow("SELECT class FROM tasks WHERE id = ?", dep).Scan(&class); err != nil {
+		return false, fmt.Errorf("read the class of dependency %d: %w", dep, err)
+	}
+	if class != classImplement {
+		return true, nil // never lands, so nothing waits on it
+	}
+	var pushed string
+	err := tx.QueryRow("SELECT pushed FROM landings WHERE task_id = ?", dep).Scan(&pushed)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read the landing of dependency %d: %w", dep, err)
+	}
+	return pushed == "pushed", nil
+}
+
+// waitLandedSatisfiedTx reports whether a wait_landed task's implement
+// dependencies have all landed on the target (§6.1): the barrier the
+// release rule reads past the dependencies' mere completion. A
+// dependency of another class never lands and never blocks; a
+// dependency with no landing, or one not yet pushed, holds the task
+// pending.
+func waitLandedSatisfiedTx(tx *sql.Tx, taskID int64) (bool, error) {
+	rows, err := tx.Query(`SELECT d.depends_on_task_id FROM task_deps d JOIN tasks x ON x.id = d.depends_on_task_id
+		WHERE d.task_id = ? AND x.class = ?`, taskID, classImplement)
+	if err != nil {
+		return false, fmt.Errorf("read the implement dependencies of task %d: %w", taskID, err)
+	}
+	var deps []int64
+	for rows.Next() {
+		var dep int64
+		if err := rows.Scan(&dep); err != nil {
+			rows.Close()
+			return false, fmt.Errorf("read the implement dependencies of task %d: %w", taskID, err)
+		}
+		deps = append(deps, dep)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return false, fmt.Errorf("read the implement dependencies of task %d: %w", taskID, err)
+	}
+	rows.Close()
+	for _, dep := range deps {
+		landed, err := depLandedBarrierTx(tx, dep)
+		if err != nil {
+			return false, err
+		}
+		if !landed {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
 // releaseDependentsTx frees the tasks that waited on a task now done
 // (§6.1): each pending dependent whose dependencies are all done turns
 // ready and has its first work job queued, in the completion's own
 // transaction. A dependent with another dependency still open keeps
 // waiting, and so does one whose dependency failed or parked at
 // needs_foreman: that dependency never reaches done, and the foreman
-// decides the dependent's fate. A dependent of a plan whose spend passed
-// its budget parks instead, at the plan gate (§6.3, planbudget.go).
+// decides the dependent's fate. A wait_landed dependent additionally
+// holds until every implement dependency has landed on the target —
+// pushed or trailer-recorded, never merely done, waiting, local or in
+// flight. A dependent of a plan whose spend passed its budget parks
+// instead, at the plan gate (§6.3, planbudget.go); the budget gate
+// parks before the barrier reads, so a task held on spend parks even
+// when its dependencies are landed.
 func (e *Engine) releaseDependentsTx(tx *sql.Tx, project, done int64, now time.Time) error {
-	rows, err := tx.Query(`SELECT t.id, t.spec, p.id FROM task_deps d JOIN tasks t ON t.id = d.task_id
+	rows, err := tx.Query(`SELECT t.id, t.spec, p.id, t.wait_landed FROM task_deps d JOIN tasks t ON t.id = d.task_id
 		JOIN plans p ON p.id = t.plan_id AND p.state = 'active'
 		WHERE d.depends_on_task_id = ? AND t.state = ?
 		AND NOT EXISTS (SELECT 1 FROM task_deps o JOIN tasks x ON x.id = o.depends_on_task_id
@@ -606,14 +676,15 @@ func (e *Engine) releaseDependentsTx(tx *sql.Tx, project, done int64, now time.T
 		return fmt.Errorf("read the dependents of task %d: %w", done, err)
 	}
 	type freed struct {
-		id   int64
-		spec string
-		plan int64
+		id         int64
+		spec       string
+		plan       int64
+		waitLanded bool
 	}
 	var free []freed
 	for rows.Next() {
 		var f freed
-		if err := rows.Scan(&f.id, &f.spec, &f.plan); err != nil {
+		if err := rows.Scan(&f.id, &f.spec, &f.plan, &f.waitLanded); err != nil {
 			rows.Close()
 			return fmt.Errorf("read the dependents of task %d: %w", done, err)
 		}
@@ -633,6 +704,15 @@ func (e *Engine) releaseDependentsTx(tx *sql.Tx, project, done int64, now time.T
 			return err
 		} else if held {
 			continue
+		}
+		if f.waitLanded {
+			satisfied, err := waitLandedSatisfiedTx(tx, f.id)
+			if err != nil {
+				return err
+			}
+			if !satisfied {
+				continue
+			}
 		}
 		if _, err := tx.Exec(`UPDATE tasks SET state = ?, updated_at = ? WHERE id = ?`,
 			taskReady, fmtTime(now), f.id); err != nil {

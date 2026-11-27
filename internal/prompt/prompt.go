@@ -17,7 +17,7 @@ import (
 // prompts are composed only from fixed, versioned templates plus
 // verbatim data (§1.4), so a template change is a version bump, never a
 // silent edit.
-const WorkerTemplateVersion = 11
+const WorkerTemplateVersion = 12
 
 // ReviewTemplateVersion is the review prompt template's version (§7),
 // under the same rule as the worker's (§1.4).
@@ -673,10 +673,12 @@ func WithPlanReviewRef(p, ref, landTarget, defaultBranch string) string {
 
 // WithWorkerBase appends the note naming the ref and commit a task
 // worker's worktree was built on, so a worker that cannot find a section
-// its spec cites can say what it read (issue #129). The runner adds it
-// once the worktree is made; the engine-stored prompt does not carry it.
+// its spec cites can say what it read (issue #129). A wait_landed
+// verification task names, in its result summary, the head it verified
+// (§6.1). The runner adds the note once the worktree is made; the
+// engine-stored prompt does not carry it.
 func WithWorkerBase(p, ref, commit string) string {
-	return p + fmt.Sprintf("\nBase note: your worktree was built on %q at commit %s.\n", ref, commit)
+	return p + fmt.Sprintf("\nBase note: your worktree was built on %q at commit %s. If your task is a wait_landed verification task, name in your result summary the head commit you verified.\n", ref, commit)
 }
 
 // ComposeReReviewPrompt builds the prompt of a re-review (§7): the fixed

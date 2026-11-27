@@ -188,6 +188,7 @@ type amendNode struct {
 	cont                    int   // the named continued dep, an index into the node list; -1 = none named
 	cancelNow, retargetedBy bool
 	skipApproved            bool // a cancelled task whose skip the user approved
+	waitLanded              bool // the dependent's release waits for landing (§6.1)
 	// extra is the list the task itself named (§5.8), nil when it inherits
 	// the project default; extraRec is the record an added task carries.
 	extra    []ExtraRepo
@@ -1026,7 +1027,7 @@ func joinIDs(ids []int64) string {
 // loadAmendNodesTx reads a plan's tasks, by id, with their dependencies
 // as indexes into the same list.
 func loadAmendNodesTx(tx *sql.Tx, plan int64) ([]amendNode, error) {
-	rows, err := tx.Query(`SELECT id, name, state, title, spec, COALESCE(check_cmd, ''), class, skip_approved, COALESCE(extra_repos, '')
+	rows, err := tx.Query(`SELECT id, name, state, title, spec, COALESCE(check_cmd, ''), class, skip_approved, COALESCE(extra_repos, ''), wait_landed
 		FROM tasks WHERE plan_id = ? ORDER BY id`, plan)
 	if err != nil {
 		return nil, fmt.Errorf("read the tasks of plan %d: %w", plan, err)
@@ -1035,7 +1036,7 @@ func loadAmendNodesTx(tx *sql.Tx, plan int64) ([]amendNode, error) {
 	for rows.Next() {
 		n := amendNode{base: -1, cont: -1}
 		var extraRec string
-		if err := rows.Scan(&n.id, &n.name, &n.state, &n.title, &n.spec, &n.check, &n.class, &n.skipApproved, &extraRec); err != nil {
+		if err := rows.Scan(&n.id, &n.name, &n.state, &n.title, &n.spec, &n.check, &n.class, &n.skipApproved, &extraRec, &n.waitLanded); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("read the tasks of plan %d: %w", plan, err)
 		}
@@ -1141,11 +1142,12 @@ func startedWorkTx(tx *sql.Tx, plan int64, now time.Time) ([]CreatedTask, error)
 
 // readyPlanTasksTx starts every pending task of an active plan whose
 // dependencies are all done — none counts — turning it ready with its
-// first work job queued, as creation and approval do. A task of a plan
-// whose spend passed its budget parks instead, at the plan gate (§6.3,
-// planbudget.go), and is returned among the held.
+// first work job queued, as creation and approval do. A wait_landed task
+// also waits for every implement dependency's landing (§6.1). A task of
+// a plan whose spend passed its budget parks instead, at the plan gate
+// (§6.3, planbudget.go), and is returned among the held.
 func (e *Engine) readyPlanTasksTx(tx *sql.Tx, project, plan int64, now time.Time) ([]CreatedTask, []HeldTask, error) {
-	rows, err := tx.Query(`SELECT t.id, t.name, t.spec FROM tasks t
+	rows, err := tx.Query(`SELECT t.id, t.name, t.spec, t.wait_landed FROM tasks t
 		WHERE t.plan_id = ? AND t.state = ?
 		AND NOT EXISTS (SELECT 1 FROM task_deps o JOIN tasks x ON x.id = o.depends_on_task_id
 			WHERE o.task_id = t.id AND x.state <> ?)
@@ -1156,11 +1158,12 @@ func (e *Engine) readyPlanTasksTx(tx *sql.Tx, project, plan int64, now time.Time
 	type wave struct {
 		id         int64
 		name, spec string
+		waitLanded bool
 	}
 	var first []wave
 	for rows.Next() {
 		var w wave
-		if err := rows.Scan(&w.id, &w.name, &w.spec); err != nil {
+		if err := rows.Scan(&w.id, &w.name, &w.spec, &w.waitLanded); err != nil {
 			rows.Close()
 			return nil, nil, fmt.Errorf("read the ready tasks of plan %d: %w", plan, err)
 		}
@@ -1184,6 +1187,15 @@ func (e *Engine) readyPlanTasksTx(tx *sql.Tx, project, plan int64, now time.Time
 			held = append(held, HeldTask{TaskID: w.id, Name: w.name, Reason: gate.heldReason})
 			continue
 		}
+		if w.waitLanded {
+			satisfied, err := waitLandedSatisfiedTx(tx, w.id)
+			if err != nil {
+				return nil, nil, err
+			}
+			if !satisfied {
+				continue
+			}
+		}
 		if _, err := tx.Exec(`UPDATE tasks SET state = ?, updated_at = ? WHERE id = ?`,
 			taskReady, fmtTime(now), w.id); err != nil {
 			return nil, nil, fmt.Errorf("ready task %d: %w", w.id, err)
@@ -1200,16 +1212,18 @@ func (e *Engine) readyPlanTasksTx(tx *sql.Tx, project, plan int64, now time.Time
 // planLiveWorkTx reads, from a plan's nodes alone, whether live work
 // remains (§6.2, #133) and which task ids hold it — no writes, no events,
 // no wake. Live work is: a task not done, cancelled, failed, retired or
-// pending; a done task whose land job is queued or running (§7.1: the
-// plan closes when the landing has an outcome, so a failed landing
-// counts against it); a done task with no landing record held at the
-// land gate (its landing waits on the user's release); and a done task
-// with no landing record the land rule would land — done, implement,
-// approved (§7.1) — with no rejected hold declining it: most often a
-// dependency of its own has not landed, so no land job exists. A hold
-// the user rejected is that decline (§6.3), not live work, and a hold
-// on a landing already recorded is the push phase's (§7.1), beside a
-// waiting push — neither holds a plan open. A retired task is settled
+// permanently-waiting pending (a pending task behind a dead dependency
+// is named, never live); a wait_landed pending task still waiting on the
+// landing barrier (§6.1); a done task whose land job is queued or
+// running (§7.1: the plan closes when the landing has an outcome, so a
+// failed landing counts against it); a done task with no landing record
+// held at the land gate (its landing waits on the user's release); and a
+// done task with no landing record the land rule would land — done,
+// implement, approved (§7.1) — with no rejected hold declining it: most
+// often a dependency of its own has not landed, so no land job exists. A
+// hold the user rejected is that decline (§6.3), not live work, and a
+// hold on a landing already recorded is the push phase's (§7.1), beside
+// a waiting push — neither holds a plan open. A retired task is settled
 // (§6.2): it never lands and never waits, so it is not live work
 // either. The plan-close rule (finishPlanIfClosedTx) and the start-up
 // reopen pass (ReopenStrandedPlans, #137) both read it here, so a plan
@@ -1280,17 +1294,56 @@ func planLiveWorkTx(tx *sql.Tx, nodes []amendNode) ([]int64, error) {
 					continue
 				}
 			}
-		case taskCancelled, taskFailed, taskPending, taskRetired:
+		case taskPending:
+			// A pending task usually waits on a dependency that will
+			// never be done, and the close names it. The exception is a
+			// wait_landed task whose dependencies are all done and none
+			// of whose implement dependencies' landings was declined
+			// (§6.1): it is held only by the landing barrier, so it is
+			// live work that keeps the plan open until the landing
+			// settles and the task runs.
+			if n.waitLanded {
+				still, err := waitLandedLiveTx(tx, nodes, n.deps)
+				if err != nil {
+					return nil, err
+				}
+				if still {
+					live = append(live, n.id)
+				}
+			}
+		case taskCancelled, taskFailed, taskRetired:
 			// The close names these — the failed, the abandoned or
-			// approved skip, the never-run, the retired — and so does
-			// the pass not reopen over them: a pending task behind a
-			// failed one never kept a plan open (#137), and a retired
-			// one is settled for good (§6.2).
+			// approved skip, the retired — and so does the pass not
+			// reopen over them: a retired one is settled for good (§6.2).
 		default:
 			live = append(live, n.id) // live work remains
 		}
 	}
 	return live, nil
+}
+
+// waitLandedLiveTx reports whether a pending wait_landed task is still
+// live work (§6.1): every dependency done, and no implement dependency's
+// landing declined, so the landing barrier alone holds it and will
+// settle. A dependency still open, or a declined landing, leaves it to
+// the close's "never run" report.
+func waitLandedLiveTx(tx *sql.Tx, nodes []amendNode, deps []int) (bool, error) {
+	for _, j := range deps {
+		if nodes[j].state != taskDone {
+			return false, nil // a dep still open: not this task's turn
+		}
+		if nodes[j].class != classImplement {
+			continue // a non-implement dep never lands, so never declines
+		}
+		rejected, err := rejectedLandHoldTx(tx, nodes[j].id)
+		if err != nil {
+			return false, err
+		}
+		if rejected {
+			return false, nil // the landing will never happen
+		}
+	}
+	return true, nil
 }
 
 // finishPlanIfClosedTx finishes an active plan with no live work left

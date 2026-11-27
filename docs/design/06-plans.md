@@ -6,6 +6,8 @@ A plan is a DAG of tasks with dependencies. Task fields: title, spec, check, cla
 
 The optional boolean task field `wait_landed` (default false) marks a dependent whose release waits for landing rather than mere completion: a task with `wait_landed` true stays pending until every `implement` dependency has actually landed on the target, where a plain dependent is released as soon as its dependencies are done. `plan_create` and `plan_amend`'s `add` take it, `status` shows it beside tier and effort, and the plan file carries it (§6.4).
 
+The release rule reads `wait_landed`: such a dependent is released only when every dependency is done and every `implement` dependency has a landing on the target — pushed, or recorded by the trailer scan (§7.1). A landing that waits at the push gate or sits local does not release it, and neither does a push-approved land job still in flight; only work actually on the target clears the barrier. A non-implement dependency never lands and never holds it, a task with no dependencies is ready as any other, and a cross-plan dependency is satisfied at creation, writes no edge row, and counts as done from the start, so a `wait_landed` task with such a dependency never waits. The barrier re-checks wherever a landing settles later — a land job pushed, a push phase completed, or a trailer recorded — and releases the task with no foreman action.
+
 ### Bases and dependency rounds
 
 **Base ref.** A task's work starts from the project's land target — `land_target` when set (§6.3), else the default branch — the same branch approved work lands on (§7.1): the runner materializes that branch for the worktree (§5.1), and the land job's diff is taken against that base.
