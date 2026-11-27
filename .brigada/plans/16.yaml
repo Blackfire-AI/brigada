@@ -82,6 +82,6 @@ tasks:
     base: ""
     effort: medium
     skills: ["schema-migration", "surface-parity"]
-    state: running
+    state: needs_foreman
     branch: "brigada/task-49-r2"
     rounds: 0
