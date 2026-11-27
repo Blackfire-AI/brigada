@@ -27,6 +27,9 @@ type TaskInfo struct {
 	// LatestJobID is the task's newest job of any kind; 0 before the
 	// first one was queued.
 	LatestJobID int64 `json:"latest_job_id,omitempty"`
+	// ToolGrants are the task's tool grants (§6.1); empty when it grants
+	// none.
+	ToolGrants []string `json:"tool_grants,omitempty"`
 }
 
 // Task reads one task by id; nil when there is none.
@@ -34,18 +37,20 @@ func (e *Engine) Task(ctx context.Context, id int64) (*TaskInfo, error) {
 	var info *TaskInfo
 	err := e.store.View(ctx, func(tx *sql.Tx) error {
 		t := &TaskInfo{ID: id}
+		var grants string
 		err := tx.QueryRow(`SELECT pl.project_id, t.plan_id, t.title, t.state, t.tier, t.effective_tier, t.effort,
 				COALESCE(NULLIF(t.repo_url, ''), p.repo_url), t.base_ref, COALESCE(t.branch, ''),
-				COALESCE((SELECT MAX(j.id) FROM jobs j WHERE j.task_id = t.id), 0)
+				COALESCE((SELECT MAX(j.id) FROM jobs j WHERE j.task_id = t.id), 0), t.tool_grants
 			FROM tasks t JOIN plans pl ON pl.id = t.plan_id JOIN projects p ON p.id = pl.project_id
 			WHERE t.id = ?`, id).
-			Scan(&t.ProjectID, &t.PlanID, &t.Title, &t.State, &t.Tier, &t.EffectiveTier, &t.Effort, &t.RepoURL, &t.BaseRef, &t.Branch, &t.LatestJobID)
+			Scan(&t.ProjectID, &t.PlanID, &t.Title, &t.State, &t.Tier, &t.EffectiveTier, &t.Effort, &t.RepoURL, &t.BaseRef, &t.Branch, &t.LatestJobID, &grants)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
 		if err != nil {
 			return err
 		}
+		t.ToolGrants = parseTaskToolGrants(grants)
 		info = t
 		return nil
 	})

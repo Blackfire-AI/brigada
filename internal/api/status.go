@@ -120,15 +120,16 @@ func (s *Server) handleTaskSubmit(w http.ResponseWriter, r *http.Request, _ iden
 		return
 	}
 	res, err := s.eng.SubmitTask(r.Context(), engine.TaskParams{
-		RepoURL:  req.RepoURL,
-		BaseRef:  req.BaseRef,
-		Title:    req.Title,
-		Spec:     req.Spec,
-		CheckCmd: req.CheckCmd,
-		Class:    req.Class,
-		Harness:  req.Harness,
-		Labels:   nonNil(req.Labels),
-		Skills:   req.Skills,
+		RepoURL:    req.RepoURL,
+		BaseRef:    req.BaseRef,
+		Title:      req.Title,
+		Spec:       req.Spec,
+		CheckCmd:   req.CheckCmd,
+		Class:      req.Class,
+		Harness:    req.Harness,
+		Labels:     nonNil(req.Labels),
+		Skills:     req.Skills,
+		ToolGrants: req.ToolGrants,
 	})
 	if err != nil {
 		// Like the job submit: a task the engine will not take is the
@@ -161,6 +162,10 @@ type taskSubmitRequest struct {
 	// Skills (§5.10) names, in order, the project's imported skills the
 	// task's prompts carry; absent or empty = none.
 	Skills []string `json:"skills,omitempty"`
+	// ToolGrants (§6.1) are the Claude Code permission patterns the task
+	// grants its worker, each one of the allowlist; absent or empty =
+	// none.
+	ToolGrants []string `json:"tool_grants,omitempty"`
 }
 
 // taskSubmitResponse names what the submit created: the project it

@@ -2,7 +2,7 @@
 
 ## 6.1 Task graph
 
-A plan is a DAG of tasks with dependencies. Task fields: title, spec, check, class (`implement` | `review` | `answer` | …), deps, repo and base ref, caps, tier and effort, skills (an ordered list of skill names, §5.10, resolved once at creation with their texts and digests), and `wait_landed`.
+A plan is a DAG of tasks with dependencies. Task fields: title, spec, check, class (`implement` | `review` | `answer` | …), deps, repo and base ref, caps, tier and effort, skills (an ordered list of skill names, §5.10, resolved once at creation with their texts and digests), `wait_landed`, and tool grants (an allowlisted list of Claude Code permission patterns, below).
 
 The optional boolean task field `wait_landed` (default false) marks a dependent whose release waits for landing rather than mere completion: a task with `wait_landed` true stays pending until every `implement` dependency has actually landed on the target, where a plain dependent is released as soon as its dependencies are done. `plan_create` and `plan_amend`'s `add` take it, `status` shows it beside tier and effort, and the plan file carries it (§6.4).
 
@@ -66,6 +66,12 @@ The continuation is a saving, never a requirement: the task starts fresh when th
 `plan_create` and `plan_amend`'s `add` take it as an optional `caps` object per task; an unknown key or an out-of-range value refuses the whole call. `plan_amend`'s `retier` entries take `caps` too, for a `pending`, `ready` or `needs_foreman` task, merged key by key into what the task has, so the foreman can give a parked task more restarts before `task_restart`. The engine stores it in `tasks.caps`; `status` shows a non-default value beside tier and effort (`restarts 4`) and the plan file carries it (§6.4).
 
 Neither tier nor effort is an approval trigger, and caps are not either (§6.3).
+
+### Tool grants
+
+A task's optional `tool_grants` field names the Claude Code permission patterns its worker is granted, drawn from the binary's allowlist — exactly `Bash(git merge:*)`, `Bash(git checkout:*)`, `Bash(git restore:*)`, `Bash(git cherry-pick:*)` and `Bash(git add:*)`. `plan_create`, `plan_amend` (an added task, a respec) and the debug task submit validate the list at entry: a pattern outside the set refuses the whole call, naming the pattern. A respec's `tool_grants` replaces the recorded list — omitted keeps it, `[]` clears it — as its `skills` does. The engine stores the list in `tasks.tool_grants` (§11) and the task read returns it; a task without one is unchanged.
+
+The patterns are prefix rules, so `Bash(git checkout:*)` also matches a branch switch. The allowlist is not the security boundary — the pipeline's structure is (§5.2): the worktree carries no push URL, and the runner alone commits, pushes and lands. On the default claude agent (`bypassPermissions`) a grant widens nothing, that scope already permitting these commands; its value is widening narrow pattern-scoped agents, the approval trigger and visibility.
 
 ### Default check and task states
 
