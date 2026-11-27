@@ -18,6 +18,8 @@
 
 - A CLI that could not be built or started — the worker's, the reviewer's, the foreman's — completes the job with the same kind `infra`: a command that never ran is the environment's failure, not the agent's, so it never counts toward the failure streak, and a work job so failed is retried like a fetch failure above.
 
+  A failure of the runner's publish step (§5.4), the kind `publish`, never counts toward the failure streak either, and it is neither an infra failure: it joins no infra streak (it ends one) and gets no infra backoff.
+
   A CLI that starts but cannot reach its provider is the same: the adapter sorts a connection or name-lookup failure (`Cannot connect to API`, `could not resolve host`, `connection refused`, `connection reset`) as `infra`, and the runner keeps that kind only while the run has produced no message or tool call; the same words after real output are an ordinary failure of the agent.
 
 - The worktree path is session-stable: a task job runs at `worktrees/task-<task>-<role>-s<gen>` — role `author` for the work and fix jobs, `review` for the review jobs — and the generation is the one the engine stamps on the lease in `jobs.session_gen`: the attempt, counted in the task's restarts, the same count that names the attempt's branch.

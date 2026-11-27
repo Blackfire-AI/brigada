@@ -416,6 +416,7 @@ func infraStreakTx(tx *sql.Tx, key string) (n int, began string, err error) {
 		if err := rows.Scan(&status, &kind, &created); err != nil {
 			return 0, "", fmt.Errorf("read the jobs of key %s: %w", key, err)
 		}
+		// A publish failure is not an infra failure: it ends the streak.
 		if status != statusFailed || kind != ErrorKindInfra {
 			break
 		}
