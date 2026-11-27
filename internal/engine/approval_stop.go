@@ -232,15 +232,35 @@ func planHoldAsksTx(tx *sql.Tx, project, plan int64) (approvalSettings, []holdAs
 }
 
 // heldTaskAsksTx is planHoldAsksTx for the tasks a plan rule holds alone
-// in an active plan (§6.3): the per-task rules alone, for a task held
-// alone never tripped the task count or gate_plan.
-func heldTaskAsksTx(tx *sql.Tx, project int64, held []int64) (approvalSettings, []holdAsk, error) {
+// in an active plan (§6.3): the per-task rules, and the max_tasks ask a
+// task an amendment held for growing the plan past approval_max_tasks
+// carries — the plan's post-amendment total, so `brigada plan approve
+// --and-stop-asking` raises the limit to it. gate_plan never holds a
+// task alone, so no ask for it can reach this path.
+func heldTaskAsksTx(tx *sql.Tx, project, plan int64, held []int64) (approvalSettings, []holdAsk, error) {
 	marks := strings.TrimSuffix(strings.Repeat("?, ", len(held)), ", ")
 	args := make([]any, len(held))
 	for i, id := range held {
 		args[i] = id
 	}
-	return holdAsksTx(tx, project, "id IN ("+marks+")", args, false)
+	s, asks, err := holdAsksTx(tx, project, "id IN ("+marks+")", args, false)
+	if err != nil {
+		return approvalSettings{}, nil, err
+	}
+	// The count is the plan's, not the held tasks': a task held for the
+	// task-count rule was held because the plan's total passed the limit,
+	// and the hold's ask names that total (holdAsk.count naming the
+	// post-amendment total), not the additions alone.
+	if *s.MaxTasks > 0 {
+		var count int
+		if err := tx.QueryRow("SELECT COUNT(*) FROM tasks WHERE plan_id = ? AND state <> ?", plan, taskCancelled).Scan(&count); err != nil {
+			return approvalSettings{}, nil, fmt.Errorf("count the tasks of plan %d: %w", plan, err)
+		}
+		if count > *s.MaxTasks {
+			asks = append(asks, holdAsk{kind: holdMaxTasks, count: count})
+		}
+	}
+	return s, asks, nil
 }
 
 // holdAsksTx evaluates the tasks where names against the project's

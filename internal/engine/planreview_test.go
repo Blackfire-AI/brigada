@@ -525,6 +525,71 @@ func TestComposePlanReviewInput(t *testing.T) {
 	}
 }
 
+// TestPlanShapeOf (§6.2): the structural preflight's arithmetic — the task
+// count, the critical path (the longest dependency chain), the expected
+// worker, fix and review invocations from the round caps and the restart
+// allowance, and the planned verification runs (the review-class tasks).
+func TestPlanShapeOf(t *testing.T) {
+	view := planReviewPlanView{
+		RoundCaps: RoundCaps{Fix: 2, Review: 2, Restart: 3},
+		Tasks: []planReviewTaskView{
+			{ID: 1, Class: "implement"},
+			{ID: 2, Class: "implement", DepIDs: []int64{1}},
+			{ID: 3, Class: "review", DepIDs: []int64{2}},
+			{ID: 4, Class: "answer"},
+			{ID: 5, Class: "implement", DepIDs: []int64{1, 4}, Caps: map[string]int{roundFix: 5, roundRestart: 1}},
+		},
+	}
+	got := planShapeOf(view)
+	if got.tasks != 5 {
+		t.Errorf("tasks = %d, want 5", got.tasks)
+	}
+	if got.critical != 3 {
+		t.Errorf("critical path = %d, want 3 (1 → 2 → 3)", got.critical)
+	}
+	// Defaults (fix 2, review 2, restart 3) give (1+2+2) × (3+1) = 20
+	// invocations per task; task 5 overrides fix to 5 and restart to 1,
+	// giving (1+5+2) × (1+1) = 16. The worker counts one per task times
+	// the allowance: 4×4 + 2 = 18.
+	if got.worker != 18 || got.fix != 42 || got.review != 36 {
+		t.Errorf("invocations = worker %d, fix %d, review %d; want 18, 42, 36", got.worker, got.fix, got.review)
+	}
+	if got.verify != 1 {
+		t.Errorf("verification runs = %d, want 1 (task 3 is review-class)", got.verify)
+	}
+}
+
+// TestComposePlanReviewInputShapeSection (§6.2): the input carries the
+// plan's deterministic shape — the task count, the critical path, the
+// expected invocations with the formula, and the planned verification
+// runs — beside the project's approval controls.
+func TestComposePlanReviewInputShapeSection(t *testing.T) {
+	plan := planReviewPlanView{
+		ID: 12, Title: "ship it",
+		RoundCaps: RoundCaps{Fix: 2, Review: 2, Restart: 3},
+		MaxTasks:  3,
+		Budget:    "2000000",
+		Tasks: []planReviewTaskView{
+			{ID: 1, Name: "base", Class: ""},
+			{ID: 2, Name: "top", Class: "deploy", DepIDs: []int64{1}},
+			{ID: 3, Name: "check", Class: "review", DepIDs: []int64{2}},
+		},
+	}
+	got := composePlanReviewInput(1, plan, nil, "", "")
+	for _, want := range []string{
+		"Plan shape: 3 tasks; critical path 3 tasks (the longest dependency chain); expected invocations 60; planned verification runs 1 (review-class tasks).",
+		"Expected invocations are the sum over the tasks of (1 worker + fix_rounds fixes + review_rounds reviews), times the restart allowance (restart + 1).",
+		"Approval controls: approval_max_tasks 3, approval_budget 2000000.",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("input lacks %q:\n%s", want, got)
+		}
+	}
+	if got := approvalControlsText(0, ""); got != "approval_max_tasks off, approval_budget none" {
+		t.Errorf("controls off = %q, want the off and none words", got)
+	}
+}
+
 // TestPlanReviewInputMarksCancelledTask: a task cancelled under a live
 // round is marked cancelled in the round the amendment work composes
 // (#249), so a reviewer cannot read it as pending parallel work, while a

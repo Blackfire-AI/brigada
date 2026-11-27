@@ -627,9 +627,11 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 	// only), a check other than the project's default_check — and one
 	// that trips is held alone, its
 	// own needs-you line naming the rule, while the plan stays active.
-	// The whole-plan triggers (the task count, gate_plan) do not apply to
-	// a plan already running. An awaiting plan is re-evaluated whole, as
-	// at creation, and stays awaiting. An active plan the project reviews
+	// gate_plan never applies to a plan already running; the task count
+	// does — an amendment that grows the plan past approval_max_tasks
+	// holds the added tasks (below). An awaiting plan is re-evaluated
+	// whole, as at creation, and stays awaiting. An active plan the
+	// project reviews
 	// (§6.2) holds its added and respecified tasks pending instead:
 	// the plan turns reviewing, the per-task rules wait for the verdict,
 	// and a reviewing plan amended is the foreman's answer to a changes
@@ -666,6 +668,22 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 			n := nodes[existing+k]
 			if reasons := settings.taskHoldReasons(PlanTask{Spec: n.spec, Check: n.check, Class: n.class, ExtraRepos: n.extra}); len(reasons) > 0 {
 				addedHold[k] = strings.Join(reasons, "; ")
+			}
+		}
+		// The task-count envelope reaches an amendment (§6.3): growing an
+		// active plan past approval_max_tasks holds the tasks the
+		// amendment adds at the plan gate, with the max_tasks reason
+		// naming the post-amendment total, while the plan stays active
+		// and its other work runs on. gate_plan still never holds an
+		// amendment.
+		if *settings.MaxTasks > 0 && len(kept) > *settings.MaxTasks {
+			why := maxTasksHoldReason(len(kept), *settings.MaxTasks)
+			for k := range am.Add {
+				if addedHold[k] != "" {
+					addedHold[k] += "; " + why
+				} else {
+					addedHold[k] = why
+				}
 			}
 		}
 	default:
