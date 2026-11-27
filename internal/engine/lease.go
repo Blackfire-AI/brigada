@@ -135,6 +135,14 @@ type LeaseGrant struct {
 	// refs/brigada/land/<target> before it stacks. False for the push
 	// phase and every other kind.
 	DropWaitingRef bool
+	// LandBatch is true for a batch land job's squash phase (§7.1, §12.3):
+	// LandMembers then names every member the batch owns, in batch order,
+	// and the runner lands them as one stack with one push. The grant's
+	// one-task fields describe the lead. False on every other grant.
+	LandBatch bool
+	// LandMembers is a batch grant's ordered member list (§12.3). Empty
+	// for every other grant.
+	LandMembers []LandMember
 	// SweepTaskIDs is, for a sweep job (§13.2), the exact set of task ids
 	// whose branch families the runner may delete. Empty for every other kind.
 	SweepTaskIDs []int64

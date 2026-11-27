@@ -52,6 +52,9 @@ func TestLandEnvFailureWakesOncePerCause(t *testing.T) {
 	author := e.agented("landenv-author", "anthropic", "implement")
 	reviewer := e.agented("landenv-reviewer", "google", "implement", "review")
 	t1, t2, t3 := e.task, e.addTask("{}"), e.addTask("{}")
+	// One landing per job, so each task fails in a land job of its own;
+	// a batch's failure parking every member is TestLandBatchEnvFailure.
+	e.setSettings(`{"land_batch_max":1}`)
 
 	for _, task := range []int64{t1, t2, t3} {
 		e.runTaskToDone(task, author, reviewer)
@@ -223,6 +226,7 @@ func TestLandEnvFailureRecurrenceAfterForemanActs(t *testing.T) {
 	reviewer := e.agented("landenv-reviewer", "google", "implement", "review")
 	t1, t2, t3 := e.task, e.addTask("{}"), e.addTask("{}")
 
+	e.setSettings(`{"land_batch_max":1}`) // one landing per job, as above
 	for _, task := range []int64{t1, t2, t3} {
 		e.runTaskToDone(task, author, reviewer)
 	}
@@ -329,6 +333,7 @@ func TestLandEnvClass(t *testing.T) {
 		{"", "look for staging on https://example.invalid/brigada.git: exit 128", "remote"},
 		{"", "clone https://example.invalid/brigada.git: fatal: the remote end hung up", "remote"},
 		{"", "fetch main from https://example.invalid/brigada.git: could not resolve host example.invalid", "network"},
+		{"", "push the land batch to main: fatal: '/gone.git' does not appear to be a git repository\nfatal: Could not read from remote repository.", "remote"},
 		{"", "fetch main from https://example.invalid/brigada.git: connection timed out", "network"},
 		{"", "clone https://example.invalid/brigada.git: could not read Username for 'https://example.invalid': terminal prompts disabled", "auth"},
 		{"", "fetch main from https://example.invalid/brigada.git: permission denied (publickey)", "auth"},

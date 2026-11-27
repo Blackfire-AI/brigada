@@ -167,7 +167,7 @@ A **rule** turns `auto` into `ask` for the one plan or task that trips it, and t
 
 The rules are flat keys in `.brigada/project.yaml` (schema 1 is flat by design; no expression language):
 
-**Partly implemented: batch landing; not implemented: `land_ready` suspect attribution.** `land_batch_max` below bounds the batch the land rule forms and reserves (§7.1), but the batch job lands its lead member alone and the rest re-form the next batch; a `land_ready` hold carries the command's first output line and no suspects. The `land_batch_max` row and paragraph, the `land_ready` attribution sentences, the batch sentences that follow, and §7.1's batch and suspects paragraphs state the designs.
+**Partly implemented: batch landing; not implemented: `land_ready` suspect attribution.** `land_batch_max` below bounds the batch the land rule forms and reserves, and the batch job lands its members as one stack with one push (§7.1); a `land_ready` hold carries the command's first output line and no suspects. The `land_batch_max` row and paragraph, the `land_ready` attribution sentences, the batch sentences that follow, and §7.1's batch and suspects paragraphs state the designs.
 
 | Key | Gate it holds | Default |
 |---|---|---|

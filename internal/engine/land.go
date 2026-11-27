@@ -747,10 +747,23 @@ func (r landRecord) validate() error {
 // nothing pushed, and the foreman restarts it with a note. Success keeps
 // the task done and marks it landed.
 func (e *Engine) landCompletedTx(tx *sql.Tx, job *jobRow, c Completion, now time.Time) error {
-	// Every member is released once per batch (§7.1): the completion
-	// settles the lead's landing below, and the job's end releases the
-	// rest. The batch's outcome then re-runs the rule, forming the next
-	// batch from whatever is still ready.
+	// A batch job settles every member it owns (§7.1 "Running a batch"),
+	// its reservations standing until each member's outcome is written so
+	// no formation in this transaction reserves a member twice; then
+	// every member is released once, and the batch's outcome re-runs the
+	// rule, forming the next batch from whatever is still ready.
+	if isLandBatchKey(job.Key) {
+		members, _, err := landBatchMembersTx(tx, job.ID)
+		if err != nil {
+			return err
+		}
+		if len(members) > 0 {
+			if err := e.landBatchCompletedTx(tx, job, members, c, now); err != nil {
+				return err
+			}
+			return e.endLandBatchTx(tx, job, now)
+		}
+	}
 	if err := releaseLandBatchTx(tx, job.ID); err != nil {
 		return err
 	}
@@ -770,30 +783,43 @@ func (e *Engine) landOutcomeTx(tx *sql.Tx, job *jobRow, c Completion, now time.T
 		return e.landNotReadyTx(tx, job, c, now)
 	}
 	if c.Error != "" {
-		// A push rejected because the target moved, for a task whose
-		// landing is already recorded as pushed — by its trailer on the
-		// default branch — leaves nothing for the foreman.
-		if existing, err := landingTx(tx, job.TaskID); err != nil {
-			return err
-		} else if existing != nil && existing.Pushed == "pushed" && pushRejected(c.Error) {
-			// The trailer scan may have settled the task while this job
-			// was live, leaving the plan open; the job's end closes it.
-			return e.finishLandPlanTx(tx, job, now)
-		}
-		// The runner could not attempt the landing at all (git failed):
-		// an environment failure — a fetch that cannot reach the remote,
-		// refused credentials, a lost runner — parks under its cause key
-		// and wakes once per cause (issue #116); anything else waits for
-		// the foreman like any failure, one wake per task.
-		key, words, env, err := landEnvCauseTx(tx, job.ProjectID, c)
-		if err != nil {
-			return err
-		}
-		if env {
-			return e.landEnvFailedTx(tx, job, key, words, c.Error, now)
-		}
-		return e.needsForemanTx(tx, job, evTaskLandFailed, eventPayload{Reason: boundNote(c.Error)}, now)
+		return e.landErrorTx(tx, job, c, now)
 	}
+	return e.landRecordTx(tx, job, c, now)
+}
+
+// landErrorTx applies a land job's error to its task (§7.1): the runner
+// could not attempt the landing, or lost it partway. A batch applies it
+// to every member it leaves unsettled.
+func (e *Engine) landErrorTx(tx *sql.Tx, job *jobRow, c Completion, now time.Time) error {
+	// A push rejected because the target moved, for a task whose
+	// landing is already recorded as pushed — by its trailer on the
+	// default branch — leaves nothing for the foreman.
+	if existing, err := landingTx(tx, job.TaskID); err != nil {
+		return err
+	} else if existing != nil && existing.Pushed == "pushed" && pushRejected(c.Error) {
+		// The trailer scan may have settled the task while this job
+		// was live, leaving the plan open; the job's end closes it.
+		return e.finishLandPlanTx(tx, job, now)
+	}
+	// The runner could not attempt the landing at all (git failed):
+	// an environment failure — a fetch that cannot reach the remote,
+	// refused credentials, a lost runner — parks under its cause key
+	// and wakes once per cause (issue #116); anything else waits for
+	// the foreman like any failure, one wake per task.
+	key, words, env, err := landEnvCauseTx(tx, job.ProjectID, c)
+	if err != nil {
+		return err
+	}
+	if env {
+		return e.landEnvFailedTx(tx, job, key, words, c.Error, now)
+	}
+	return e.needsForemanTx(tx, job, evTaskLandFailed, eventPayload{Reason: boundNote(c.Error)}, now)
+}
+
+// landRecordTx applies a one-task land job's record (§7.1): the push
+// phase's, or the landing's own.
+func (e *Engine) landRecordTx(tx *sql.Tx, job *jobRow, c Completion, now time.Time) error {
 	// The push phase reuses the land job (§7.1): the landing record
 	// already exists — pushed = waiting — and this completion is the
 	// push's, decoded and applied to that record, never re-squashed.
@@ -1058,7 +1084,7 @@ func landEnvClass(kind, msg string) string {
 	if pushRejected(m) {
 		return ""
 	}
-	for _, s := range []string{"clone ", "fetch ", "ls-remote", "look for "} {
+	for _, s := range []string{"clone ", "fetch ", "ls-remote", "look for ", "could not read from remote repository"} {
 		if strings.Contains(m, s) {
 			return "remote"
 		}
@@ -1738,13 +1764,22 @@ func (e *Engine) landLeaseGrantTx(tx *sql.Tx, j *jobRow, owner int64, leaseID st
 	if target == "" {
 		target = defaultBranch
 	}
+	// A batch job is always a squash phase (§12.3): its grant names every
+	// member it still owns, in batch order; the push phase of a recorded
+	// landing runs on the member's own key.
+	var members []LandMember
+	if isLandBatchKey(j.Key) {
+		if members, err = e.landBatchGrantMembersTx(tx, j, e.cfg.Now()); err != nil {
+			return nil, err
+		}
+	}
 	// The push phase reuses the land job: the landing record exists, so
 	// the grant is the push's alone — the repo to push to, the target
 	// and the recorded commit. No runner affinity: the commit waits on
 	// the remote's waiting ref, where any runner fetches it.
 	if existing, err := landingTx(tx, j.TaskID); err != nil {
 		return nil, err
-	} else if existing != nil {
+	} else if existing != nil && !isLandBatchKey(j.Key) {
 		repo, _, _, _, err := taskInfoTx(tx, j)
 		if err != nil {
 			return nil, err
@@ -1801,6 +1836,16 @@ func (e *Engine) landLeaseGrantTx(tx *sql.Tx, j *jobRow, owner int64, leaseID st
 		if err != nil {
 			return nil, err
 		}
+		// One push publishes a batch: a member re-made under the held
+		// gate keeps the whole batch waiting for the user's yes.
+		for _, m := range members {
+			if held {
+				break
+			}
+			if held, err = heldPushTx(tx, m.TaskID); err != nil {
+				return nil, err
+			}
+		}
 		if held {
 			gatePush = GateAsk
 		}
@@ -1848,6 +1893,8 @@ func (e *Engine) landLeaseGrantTx(tx *sql.Tx, j *jobRow, owner int64, leaseID st
 		AfterLand:      s.AfterLand,
 		LandReady:      s.LandReady,
 		SkipLandReady:  j.SkipLandReady,
+		LandBatch:      isLandBatchKey(j.Key),
+		LandMembers:    members,
 		Attempt:        j.Attempts + 1,
 		TimeCap:        e.cfg.ClassCaps[j.Kind],
 	}, nil

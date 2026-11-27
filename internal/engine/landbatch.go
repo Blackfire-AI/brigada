@@ -276,6 +276,13 @@ func (e *Engine) formLandBatchTx(tx *sql.Tx, project, trigger int64, now time.Ti
 	} else if live != nil {
 		return SubmitResult{Answer: AnsPending, JobID: live.ID}, nil
 	}
+	if settling, err := settlingLandBatchTx(tx, project); err != nil {
+		return SubmitResult{}, err
+	} else if settling != 0 {
+		// The batch that ended is still settling its members (or awaits the
+		// sweep's release): its end re-forms the next batch.
+		return SubmitResult{Answer: AnsPending, JobID: settling}, nil
+	}
 	max, err := landBatchMaxTx(tx, project)
 	if err != nil {
 		return SubmitResult{}, err
@@ -373,4 +380,364 @@ func (e *Engine) sweepLandBatchesTx(tx *sql.Tx, now time.Time) error {
 		}
 	}
 	return nil
+}
+
+// LandMember is one member of a batch land grant (§12.3 "Land batch
+// grants and completion"): the task, its plan, the result branch to
+// squash and its recorded base, the approved head that must be the
+// branch's fetched head, the members of this batch it depends on — the
+// runner skips a member whose dependency in the batch failed — and the
+// data its own squash commit message is built from.
+type LandMember struct {
+	TaskID       int64        `json:"task_id"`
+	PlanID       int64        `json:"plan_id"`
+	Branch       string       `json:"branch"`
+	BaseRef      string       `json:"base_ref"`
+	ApprovedHead string       `json:"approved_head,omitempty"`
+	Deps         []int64      `json:"deps,omitempty"`
+	Message      *LandMessage `json:"message"`
+}
+
+// The outcomes a batch completion reports per member (§12.3).
+const (
+	landMemberLanded  = "landed"  // published: the record carries its own commit and push state
+	landMemberParked  = "parked"  // its own content failure: conflict, failed check, moved head, rejected push
+	landMemberDropped = "dropped" // skipped to wait: a dependency in the batch parked or dropped
+)
+
+// landBatchRecord is a batch land job's completion (§7.1 "Running a
+// batch", §12.3): one result per granted member, in batch order, and —
+// when the run stopped partway — the job-level failure that settles
+// every member the results leave unsettled. Batch marks the shape, so a
+// one-task record is still read as one.
+type landBatchRecord struct {
+	Batch     bool               `json:"batch"`
+	Members   []landMemberResult `json:"members"`
+	Error     string             `json:"error,omitempty"`
+	ErrorKind string             `json:"error_kind,omitempty"`
+}
+
+// landMemberResult is one member's outcome in a batch completion.
+type landMemberResult struct {
+	TaskID    int64       `json:"task_id"`
+	Outcome   string      `json:"outcome"`
+	Record    *landRecord `json:"record,omitempty"`     // landed: the landing record; parked: the conflict files or check log
+	Reason    string      `json:"reason,omitempty"`     // parked without a record: a moved head, a rejected push
+	BlockedBy int64       `json:"blocked_by,omitempty"` // dropped: the member it waits on
+}
+
+// landBatchMembersTx lists the tasks the batch job reserves, in batch
+// order (§7.1): dependency order among the members, then task id lowest
+// first — the order formation picked them in, read again from the
+// reservations so the grant and the completion agree. deps maps each
+// member to its dependencies inside the batch.
+func landBatchMembersTx(tx *sql.Tx, job int64) (order []int64, deps map[int64][]int64, err error) {
+	rows, err := tx.Query("SELECT id FROM tasks WHERE land_batch_job = ? ORDER BY id", job)
+	if err != nil {
+		return nil, nil, fmt.Errorf("read the members of land batch %d: %w", job, err)
+	}
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, nil, fmt.Errorf("read the members of land batch %d: %w", job, err)
+		}
+		ids = append(ids, id)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, nil, fmt.Errorf("read the members of land batch %d: %w", job, err)
+	}
+	deps = map[int64][]int64{}
+	for _, id := range ids {
+		all, err := taskDepsTx(tx, id)
+		if err != nil {
+			return nil, nil, err
+		}
+		for _, d := range all {
+			if slices.Contains(ids, d) {
+				deps[id] = append(deps[id], d)
+			}
+		}
+	}
+	picked := map[int64]bool{}
+	for len(order) < len(ids) {
+		next := int64(0)
+		for _, id := range ids {
+			if picked[id] {
+				continue
+			}
+			ready := true
+			for _, d := range deps[id] {
+				if !picked[d] {
+					ready = false
+					break
+				}
+			}
+			if ready {
+				next = id
+				break
+			}
+		}
+		if next == 0 {
+			// A cycle cannot form among landable tasks; were one stored,
+			// the rest keep id order rather than vanish from the batch.
+			for _, id := range ids {
+				if !picked[id] {
+					next = id
+					break
+				}
+			}
+		}
+		picked[next] = true
+		order = append(order, next)
+	}
+	return order, deps, nil
+}
+
+// settlingLandBatchTx names a job of the project whose reservations
+// outlive it (§7.1): a batch completing in this transaction, its members
+// still being settled, or one cancelled or failed whose members the
+// sweep has not released yet. 0 when none. Formation waits for it, so a
+// member is never reserved into a new batch while its outcome from the
+// old one is still to be written.
+func settlingLandBatchTx(tx *sql.Tx, project int64) (int64, error) {
+	var job int64
+	err := tx.QueryRow(`SELECT COALESCE(MIN(j.id), 0) FROM tasks t JOIN jobs j ON j.id = t.land_batch_job
+		WHERE j.project_id = ? AND j.status NOT IN ('queued', 'leased', 'running')`, project).Scan(&job)
+	if err != nil {
+		return 0, fmt.Errorf("read the settling land batches of project %d: %w", project, err)
+	}
+	return job, nil
+}
+
+// landBatchGrantMembersTx builds a batch grant's member list at its lease
+// (§12.3), in batch order. A member settled since formation — its landing
+// recorded by a trailer — is released and left out; a member whose
+// recorded base is a superseded round is refused under the stale-base
+// rule (issue #124), parked with task_base_stale naming both refs and no
+// commit, and released; a member whose dependency in the batch was left
+// out is released to wait for it, as a dependent of a held task waits.
+// Independent members stay.
+func (e *Engine) landBatchGrantMembersTx(tx *sql.Tx, j *jobRow, now time.Time) ([]LandMember, error) {
+	order, deps, err := landBatchMembersTx(tx, j.ID)
+	if err != nil {
+		return nil, err
+	}
+	out := []LandMember{}
+	left := map[int64]bool{}
+	for _, id := range order {
+		drop := false
+		for _, d := range deps[id] {
+			if left[d] {
+				drop = true
+			}
+		}
+		if !drop {
+			if l, err := landingTx(tx, id); err != nil {
+				return nil, err
+			} else if l != nil {
+				drop = true
+			}
+		}
+		if !drop {
+			dep, baseRef, depBranch, stale, err := staleBaseTx(tx, id)
+			if err != nil {
+				return nil, err
+			}
+			if stale {
+				var project int64
+				if err := tx.QueryRow(`SELECT p.project_id FROM tasks t JOIN plans p ON p.id = t.plan_id WHERE t.id = ?`, id).
+					Scan(&project); err != nil {
+					return nil, fmt.Errorf("read the project of task %d: %w", id, err)
+				}
+				if err := e.parkStaleBaseTx(tx, project, id, dep, baseRef, depBranch, "the landing is refused", true, now); err != nil {
+					return nil, err
+				}
+				drop = true
+			}
+		}
+		if drop {
+			left[id] = true
+			if err := releaseLandMemberTx(tx, id); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		m := LandMember{TaskID: id, Deps: deps[id]}
+		if err := tx.QueryRow("SELECT plan_id, base_ref, COALESCE(branch, '') FROM tasks WHERE id = ?", id).
+			Scan(&m.PlanID, &m.BaseRef, &m.Branch); err != nil {
+			return nil, fmt.Errorf("read task %d: %w", id, err)
+		}
+		if m.ApprovedHead, err = approvedHeadTx(tx, id); err != nil {
+			return nil, err
+		}
+		if m.Message, err = landMessageTx(tx, id); err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, nil
+}
+
+// memberJob is the batch job as seen by one member's outcome: the job's
+// id, project and lease, with the member as its task, so the one-task
+// outcome paths — the record, the park, the hold, the retry — apply to
+// that member alone.
+func memberJob(job *jobRow, task int64) *jobRow {
+	m := *job
+	m.TaskID = task
+	return &m
+}
+
+// landBatchCompletedTx applies a batch land job's completion to every
+// member it owns (§7.1, §12.3), members in batch order; the caller
+// releases the reservations and re-forms after it. The land_ready gate's
+// answer before the first squash covers the batch: held gives every
+// member its own hold, not ready requeues every member's landing on its
+// own backoff. A job error — a lost runner, a setup that would not run,
+// an environment the batch could not reach — settles every member: an
+// environment failure parks them all under its one cause key, one wake
+// listing them. A batch record settles each member by its own outcome —
+// landed members recorded once (a record already written is reconciled,
+// not written again), parked members parked alone, dropped members left
+// to wait — and its job-level error settles the members it reports no
+// outcome for. A record with a duplicate or foreign member, or one that
+// leaves a member unsettled without an error, is refused.
+func (e *Engine) landBatchCompletedTx(tx *sql.Tx, job *jobRow, members []int64, c Completion, now time.Time) error {
+	switch {
+	case c.Outcome == OutcomeLandHeld:
+		for _, id := range members {
+			if settled, err := landingTx(tx, id); err != nil {
+				return err
+			} else if settled != nil {
+				continue // recorded: a trailer settled it while the batch ran
+			}
+			if err := e.landHeldTx(tx, memberJob(job, id), c, now); err != nil {
+				return err
+			}
+		}
+		return nil
+	case c.Outcome == OutcomeLandNotReady:
+		for _, id := range members {
+			if settled, err := landingTx(tx, id); err != nil {
+				return err
+			} else if settled != nil {
+				continue // recorded: a trailer settled it while the batch ran
+			}
+			if err := e.landNotReadyTx(tx, memberJob(job, id), c, now); err != nil {
+				return err
+			}
+		}
+		return nil
+	case c.Error != "":
+		for _, id := range members {
+			if settled, err := landingTx(tx, id); err != nil {
+				return err
+			} else if settled != nil {
+				continue // recorded: a trailer settled it while the batch ran
+			}
+			if err := e.landErrorTx(tx, memberJob(job, id), c, now); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	var rec landBatchRecord
+	if err := json.Unmarshal([]byte(c.Result), &rec); err != nil || !rec.Batch {
+		// A one-task record speaks for the lead alone, as a batch's lease
+		// carried before its grant named members.
+		if err := releaseLandBatchTx(tx, job.ID); err != nil {
+			return err
+		}
+		return e.landOutcomeTx(tx, job, c, now)
+	}
+	seen := map[int64]bool{}
+	for _, r := range rec.Members {
+		if seen[r.TaskID] {
+			return fmt.Errorf("land batch %d reports task %d twice", job.ID, r.TaskID)
+		}
+		seen[r.TaskID] = true
+		if !slices.Contains(members, r.TaskID) {
+			// A member released since its lease — a trailer recorded its
+			// landing — is reconciled by that record, not refused.
+			if l, err := landingTx(tx, r.TaskID); err != nil {
+				return err
+			} else if l != nil {
+				continue
+			}
+			return fmt.Errorf("land batch %d reports task %d, which it does not own", job.ID, r.TaskID)
+		}
+	}
+	if rec.Error == "" {
+		for _, id := range members {
+			if !seen[id] {
+				return fmt.Errorf("land batch %d leaves its member task %d unsettled", job.ID, id)
+			}
+		}
+	}
+	byTask := map[int64]landMemberResult{}
+	for _, r := range rec.Members {
+		byTask[r.TaskID] = r
+	}
+	for _, id := range members {
+		r, ok := byTask[id]
+		mj := memberJob(job, id)
+		if !ok {
+			if settled, err := landingTx(tx, id); err != nil {
+				return err
+			} else if settled != nil {
+				continue // recorded: a trailer settled it while the batch ran
+			}
+			// No outcome of its own: the job-level failure settles it.
+			if err := e.landErrorTx(tx, mj, Completion{Error: rec.Error, ErrorKind: rec.ErrorKind}, now); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := e.landMemberOutcomeTx(tx, mj, r, now); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// landMemberOutcomeTx applies one member's own outcome (§7.1): landed is
+// its landing record, written once; parked is its own land failure with
+// its conflicting files, its check log or its reason; dropped leaves it
+// done to wait for the member it depends on, nothing recorded.
+func (e *Engine) landMemberOutcomeTx(tx *sql.Tx, mj *jobRow, r landMemberResult, now time.Time) error {
+	switch r.Outcome {
+	case landMemberLanded:
+		if l, err := landingTx(tx, mj.TaskID); err != nil {
+			return err
+		} else if l != nil {
+			return nil // reconciled: the record is already written
+		}
+		if r.Record == nil {
+			return e.needsForemanTx(tx, mj, evTaskLandFailed, eventPayload{Reason: "the batch reported a landing without its record"}, now)
+		}
+		if err := r.Record.validate(); err != nil {
+			return e.needsForemanTx(tx, mj, evTaskLandFailed, eventPayload{Reason: boundNote(err.Error())}, now)
+		}
+		return e.landSucceededTx(tx, mj, *r.Record, now)
+	case landMemberParked:
+		switch {
+		case r.Record != nil && len(r.Record.ConflictFiles) > 0:
+			return e.landConflictTx(tx, mj, *r.Record, now)
+		case r.Record != nil && !r.Record.CheckPassed:
+			return e.landCheckFailedTx(tx, mj, *r.Record, now)
+		}
+		reason := r.Reason
+		if reason == "" {
+			reason = "the landing failed in its batch"
+		}
+		return e.needsForemanTx(tx, mj, evTaskLandFailed, eventPayload{Reason: boundNote(reason)}, now)
+	case landMemberDropped:
+		return nil // waits, done, for its dependency's landing (§6.3)
+	}
+	return e.needsForemanTx(tx, mj, evTaskLandFailed,
+		eventPayload{Reason: boundNote(fmt.Sprintf("the batch reported the unknown outcome %q", r.Outcome))}, now)
 }
