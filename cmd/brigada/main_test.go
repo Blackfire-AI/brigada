@@ -90,6 +90,18 @@ func TestRun(t *testing.T) {
 			wantErr:  "task submit needs --spec FILE",
 		},
 		{
+			name:     "task submit with a tool grant missing its pattern is a usage error",
+			args:     []string{"task", "submit", "--repo", "https://example.invalid/x.git", "--spec", "-", "--tool-grant"},
+			wantCode: 2,
+			wantErr:  "tool-grant",
+		},
+		{
+			name:     "task submit with a misspelled tool grant flag is a usage error",
+			args:     []string{"task", "submit", "--repo", "https://example.invalid/x.git", "--spec", "-", "--tool-grants", "x"},
+			wantCode: 2,
+			wantErr:  "tool-grants",
+		},
+		{
 			name:     "project without a subcommand is a usage error",
 			args:     []string{"project"},
 			wantCode: 2,

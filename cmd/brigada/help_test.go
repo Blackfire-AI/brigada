@@ -193,3 +193,15 @@ func TestUsageErrorHelpHint(t *testing.T) {
 		})
 	}
 }
+
+// TestTaskSubmitHelpNamesToolGrant: the submit's help lists the repeatable
+// --tool-grant flag (§6.1) in its synopsis and flag table.
+func TestTaskSubmitHelpNamesToolGrant(t *testing.T) {
+	var out, errb bytes.Buffer
+	if code := run(context.Background(), []string{"task", "submit", "--help"}, &out, &errb); code != 0 {
+		t.Fatalf("code=%d stderr=%q", code, errb.String())
+	}
+	if help := out.String() + errb.String(); !strings.Contains(help, "[--tool-grant PATTERN]...") || !strings.Contains(help, "-tool-grant") {
+		t.Errorf("help lacks the flag:\n%s", help)
+	}
+}

@@ -714,6 +714,13 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 			}
 		}
 		leased := eventPayload{Lease: leasePrefix(leaseID), Owner: owner, Attempt: j.Attempts + 1}
+		if j.TaskID != 0 {
+			var grants string
+			if err := tx.QueryRow("SELECT tool_grants FROM tasks WHERE id = ?", j.TaskID).Scan(&grants); err != nil {
+				return nil, fmt.Errorf("read the tool grants of task %d: %w", j.TaskID, err)
+			}
+			leased.ToolGrants = parseTaskToolGrants(grants)
+		}
 		if j.PromptMeta != "" {
 			var meta promptMeta
 			if err := json.Unmarshal([]byte(j.PromptMeta), &meta); err == nil {
