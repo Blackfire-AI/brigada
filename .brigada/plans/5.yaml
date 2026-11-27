@@ -69,7 +69,7 @@ tasks:
     effort: medium
     review_tier: standard
     review_effort: medium
-    state: done
+    state: needs_foreman
     branch: "brigada/task-12"
     rounds: 1
   - id: 50
