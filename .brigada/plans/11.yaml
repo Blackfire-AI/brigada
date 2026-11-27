@@ -122,7 +122,7 @@ tasks:
     continue: "sync-docs-v2"
     effort: medium
     skills: ["config-setting", "schema-migration"]
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 63
@@ -209,6 +209,6 @@ tasks:
     tier: light
     effort: low
     skills: ["docs-change"]
-    state: reviewing
+    state: done
     branch: "brigada/task-70-r3"
     rounds: 0
