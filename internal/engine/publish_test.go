@@ -2,6 +2,7 @@ package engine
 
 import (
 	"database/sql"
+	"strings"
 	"testing"
 )
 
@@ -64,5 +65,144 @@ func TestPublishFailureEndsTheInfraStreak(t *testing.T) {
 	}
 	if n != 1 {
 		t.Errorf("infra streak after infra, infra, publish, infra = %d, want 1", n)
+	}
+}
+
+// leaseRefused is the runner's completion of a push the lease refused
+// (§5.4).
+var leaseRefused = Completion{
+	Error:     "publish the branch, lease refused: stale info: the remote's task/1-1 moved",
+	ErrorKind: ErrorKindPublish,
+}
+
+// assertPublishRetrySpentNothing checks the publish retry's books: no
+// restart, no tier or effort bump, no foreman wake.
+func assertPublishRetrySpentNothing(e *env) {
+	e.t.Helper()
+	if n := e.int("SELECT COUNT(*) FROM jobs WHERE task_id = ? AND restart = 1", e.task); n != 0 {
+		e.t.Errorf("restart jobs = %d, want none: a publish retry is not a restart", n)
+	}
+	for _, kind := range []string{evTaskRestarted, evTaskTierBumped, evTaskEffortBumped} {
+		if n := e.countEvents(kind); n != 0 {
+			e.t.Errorf("%s events = %d, want none", kind, n)
+		}
+	}
+}
+
+// TestPublishFailureOfWorkIsRetriedOnce: a work job whose push failed is
+// queued again once on its key (§5.4), leasable at once, with the same
+// prompt; the task keeps its state and nothing is spent.
+func TestPublishFailureOfWorkIsRetriedOnce(t *testing.T) {
+	e := newEnv(t)
+	author := e.agented("author", "fam", "implement")
+	e.submit(e.work())
+	g := e.leaseAny(author)
+	if g == nil {
+		t.Fatal("nothing to lease")
+	}
+	if ans := e.complete(g, leaseRefused); ans != AnsOK {
+		t.Fatalf("complete = %s", ans)
+	}
+	retry := e.int("SELECT id FROM jobs WHERE key = ? AND status = 'queued'", g.Key)
+	if retry == 0 {
+		t.Fatal("no publish retry queued")
+	}
+	if got, want := e.str("SELECT prompt FROM jobs WHERE id = ?", retry),
+		e.str("SELECT prompt FROM jobs WHERE id = ?", g.JobID); got != want {
+		t.Errorf("retry prompt = %q, want the job's own %q", got, want)
+	}
+	if state := e.str("SELECT state FROM tasks WHERE id = ?", e.task); state != taskRunning {
+		t.Errorf("task state = %s, want running behind the retry", state)
+	}
+	if n := e.countEvents(evTaskFailed); n != 0 {
+		t.Errorf("task_failed events = %d, want none", n)
+	}
+	if got := e.foremanJobs(); got != 0 {
+		t.Errorf("foreman turns = %d, want none", got)
+	}
+	if p, ok := e.eventPayloadOf(evTaskPublishRetry); !ok || !strings.Contains(p.Reason, "lease refused") {
+		t.Errorf("task_publish_retry payload = %+v (%t), want the failure's words", p, ok)
+	}
+	assertPublishRetrySpentNothing(e)
+	// No infra backoff: the retry leases at once.
+	if g := e.leaseAny(author); g == nil || g.JobID != retry {
+		t.Fatalf("grant = %+v, want the retry %d at once", g, retry)
+	}
+}
+
+// TestPublishFailureOfFixRoundRetrySpendsNoRound: a fix round whose push
+// failed is queued again once on the author's session, spending no round.
+func TestPublishFailureOfFixRoundRetrySpendsNoRound(t *testing.T) {
+	e := newEnv(t)
+	author := e.agented("author", "anthropic", "implement")
+	fix := driveFixRound(e, author, roundFix)
+	if ans := e.complete(fix, leaseRefused); ans != AnsOK {
+		t.Fatalf("complete the fix round: %s", ans)
+	}
+	retry := e.int("SELECT id FROM jobs WHERE task_id = ? AND kind = 'fix' AND status = 'queued'", e.task)
+	if retry == 0 {
+		t.Fatal("no publish retry of the fix round queued")
+	}
+	if round := e.str("SELECT round FROM jobs WHERE id = ?", retry); round != "" {
+		t.Errorf("retry round = %q, want none: the retry spends no round", round)
+	}
+	if mode := e.str("SELECT mode FROM jobs WHERE id = ?", retry); mode != string(ModeSession) {
+		t.Errorf("retry mode = %s, want session", mode)
+	}
+	if got, want := e.str("SELECT prompt FROM jobs WHERE id = ?", retry),
+		e.str("SELECT prompt FROM jobs WHERE id = ?", fix.JobID); got != want {
+		t.Errorf("retry prompt = %q, want the round's own %q", got, want)
+	}
+	if n := e.countEvents(evTaskFailed); n != 0 {
+		t.Errorf("task_failed events = %d, want none", n)
+	}
+	assertPublishRetrySpentNothing(e)
+	if g := e.authorLease(author); g == nil || g.JobID != retry {
+		t.Fatalf("grant = %+v, want the retried fix %d at once", g, retry)
+	}
+}
+
+// TestSecondPublishFailureParksNamingThePublish: the retry's own publish
+// failure is not retried again; the task parks at needs_foreman with the
+// publish failure, the lease refusal and the local branch as its reason,
+// and no restart or tier bump is spent.
+func TestSecondPublishFailureParksNamingThePublish(t *testing.T) {
+	for _, kind := range []Kind{KindWork, KindFix} {
+		t.Run(string(kind), func(t *testing.T) {
+			e := newEnv(t)
+			author := e.agented("author", "anthropic", "implement")
+			var g *LeaseGrant
+			if kind == KindFix {
+				g = driveFixRound(e, author, roundFix)
+			} else {
+				e.submit(e.work())
+				g = e.authorLease(author)
+			}
+			if ans := e.complete(g, leaseRefused); ans != AnsOK {
+				t.Fatalf("complete = %s", ans)
+			}
+			retry := e.authorLease(author)
+			if retry == nil || retry.Key != g.Key {
+				t.Fatalf("grant = %+v, want the publish retry on %s", retry, g.Key)
+			}
+			if ans := e.complete(retry, leaseRefused); ans != AnsOK {
+				t.Fatalf("complete the retry = %s", ans)
+			}
+			if state := e.str("SELECT state FROM tasks WHERE id = ?", e.task); state != taskNeedsForeman {
+				t.Fatalf("task state = %s, want needs_foreman", state)
+			}
+			if n := e.int("SELECT COUNT(*) FROM jobs WHERE key = ? AND status = 'queued'", g.Key); n != 0 {
+				t.Errorf("queued jobs on the key = %d, want none: the one retry is spent", n)
+			}
+			if n := e.countEvents(evTaskPublishRetry); n != 1 {
+				t.Errorf("task_publish_retry events = %d, want 1", n)
+			}
+			p, ok := e.eventPayloadOf(evTaskFailed)
+			if !ok || !strings.Contains(p.Reason, "publish failure") || !strings.Contains(p.Reason, "lease refused") ||
+				!strings.Contains(p.Reason, "locally, not on the remote") || strings.Contains(p.Reason, "network outage") {
+				t.Errorf("task_failed payload = %+v (%t), want the publish failure named", p, ok)
+			}
+			assertPublishRetrySpentNothing(e)
+		})
 	}
 }
