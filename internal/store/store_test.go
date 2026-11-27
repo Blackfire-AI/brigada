@@ -1159,6 +1159,62 @@ func TestTaskSettledAtMigrationKeepsTheRows(t *testing.T) {
 	}
 }
 
+// TestTaskToolGrantsMigrationKeepsTheRows builds the store of a binary
+// that predates 0086_task_tool_grants — the store carrying 0085 — and
+// opens it with this binary: the column exists, every old row grants
+// none (the empty default), the rows keep their values, and the column
+// takes the JSON array the engine writes, never NULL.
+func TestTaskToolGrantsMigrationKeepsTheRows(t *testing.T) {
+	migs, err := allMigrations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := 0
+	for _, m := range migs {
+		if m.name == "task_tool_grants" {
+			before = m.version - 1
+			break
+		}
+	}
+	if before != 85 {
+		t.Fatalf("task_tool_grants applies after version %d, want 85 (0085_quota_scope)", before)
+	}
+	path := filepath.Join(t.TempDir(), "store.db")
+	db, err := sql.Open("sqlite", dsn(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range migs[:before] {
+		exec(t, db, m.sql)
+	}
+	exec(t, db, "PRAGMA user_version = "+strconv.Itoa(before))
+	project := insertProject(t, db)
+	plan := insertPlan(t, db, project)
+	task := insertTask(t, db, plan)
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s := openStore(t, path)
+	if cols := queryStrings(t, s.db, "SELECT name FROM pragma_table_info('tasks')"); !slices.Contains(cols, "tool_grants") {
+		t.Errorf("tasks after upgrade has no tool_grants column: %v", cols)
+	}
+	if got := queryString(t, s.db, "SELECT tool_grants FROM tasks WHERE id = ?", task); got != "" {
+		t.Errorf("old task tool_grants = %q, want '': no old row grants anything", got)
+	}
+	if got := queryString(t, s.db, "SELECT state FROM tasks WHERE id = ?", task); got != "ready" {
+		t.Errorf("existing task state = %q, want ready untouched", got)
+	}
+	// The column takes the JSON array of patterns the engine writes.
+	grants := `["Bash(git merge:*)","Bash(git checkout:*)"]`
+	exec(t, s.db, "UPDATE tasks SET tool_grants = ? WHERE id = ?", grants, task)
+	if got := queryString(t, s.db, "SELECT tool_grants FROM tasks WHERE id = ?", task); got != grants {
+		t.Errorf("tool_grants = %q, want %q", got, grants)
+	}
+	if _, err := s.db.Exec("UPDATE tasks SET tool_grants = NULL WHERE id = ?", task); err == nil {
+		t.Error("tool_grants took NULL, want the NOT NULL refusal")
+	}
+}
+
 // TestLandingSourceMigration pins what 0056_landing_source added (§7.1):
 // a landing record names how it was made — 'job' by default, 'trailer'
 // for one detected from the default branch — and no other word.

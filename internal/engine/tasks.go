@@ -32,6 +32,10 @@ type TaskParams struct {
 	// prompts carry (§5.10): resolved and copied onto the task once, at
 	// creation; nil or empty = none.
 	Skills []string
+	// ToolGrants are the Claude Code permission patterns the task grants
+	// its worker (§6.1), each one of ToolGrantAllowlist; nil or empty =
+	// none.
+	ToolGrants []string
 }
 
 // TaskResult is what SubmitTask did: the task it created, the project it
@@ -78,6 +82,9 @@ func (e *Engine) submitTaskTx(tx *sql.Tx, p TaskParams, now time.Time) (TaskResu
 		return TaskResult{}, CheckBaseFetchable(p.BaseRef)
 	case p.Spec == "":
 		return TaskResult{}, fmt.Errorf("spec is required: the worker's task, verbatim (§1.4)")
+	}
+	if err := validateToolGrants(p.ToolGrants); err != nil {
+		return TaskResult{}, err
 	}
 	class := p.Class
 	if class == "" {
@@ -149,9 +156,9 @@ func (e *Engine) submitTaskTx(tx *sql.Tx, p TaskParams, now time.Time) (TaskResu
 		return TaskResult{}, err
 	}
 	extraRec := extraReposRecord(extraDef.spec(nil))
-	task, err := tx.Exec(`INSERT INTO tasks (plan_id, title, spec, check_cmd, class, state, base_ref, caps, repo_url, setup, extra_repos, created_at, updated_at)
-		VALUES (?, ?, ?, NULLIF(?, ''), ?, 'ready', ?, '{}', NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?)`,
-		planID, title, p.Spec, p.CheckCmd, class, p.BaseRef, taskRepo, setup, extraRec, nowStr, nowStr)
+	task, err := tx.Exec(`INSERT INTO tasks (plan_id, title, spec, check_cmd, class, state, base_ref, caps, repo_url, setup, extra_repos, tool_grants, created_at, updated_at)
+		VALUES (?, ?, ?, NULLIF(?, ''), ?, 'ready', ?, '{}', NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?)`,
+		planID, title, p.Spec, p.CheckCmd, class, p.BaseRef, taskRepo, setup, extraRec, taskToolGrantsJSON(p.ToolGrants), nowStr, nowStr)
 	if err != nil {
 		return TaskResult{}, fmt.Errorf("create the task: %w", err)
 	}

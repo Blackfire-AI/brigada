@@ -71,7 +71,7 @@ func (s *Server) handlePlanCreate(w http.ResponseWriter, r *http.Request, id ide
 	}
 	tasks := make([]engine.PlanTask, len(req.Tasks))
 	for i, t := range req.Tasks {
-		tasks[i] = engine.PlanTask{Title: t.Title, Name: t.Name, Deps: t.Deps, Base: t.Base, Continue: t.Continue, Spec: t.Spec, Check: t.Check, Class: t.Class, Tier: t.Tier, Effort: t.Effort, ReviewTier: t.ReviewTier, ReviewEffort: t.ReviewEffort, Caps: t.Caps, ExtraRepos: t.ExtraRepos, Skills: t.Skills}
+		tasks[i] = engine.PlanTask{Title: t.Title, Name: t.Name, Deps: t.Deps, Base: t.Base, Continue: t.Continue, Spec: t.Spec, Check: t.Check, Class: t.Class, Tier: t.Tier, Effort: t.Effort, ReviewTier: t.ReviewTier, ReviewEffort: t.ReviewEffort, Caps: t.Caps, ExtraRepos: t.ExtraRepos, Skills: t.Skills, ToolGrants: t.ToolGrants}
 	}
 	res, err := s.eng.CreatePlan(r.Context(), project, req.Title, tasks)
 	if err != nil {
@@ -156,6 +156,10 @@ type planTaskBody struct {
 	// task's prompts carry; absent or empty = none. An unknown or
 	// repeated name refuses the whole call.
 	Skills []string `json:"skills,omitempty"`
+	// ToolGrants (§6.1) are the Claude Code permission patterns the task
+	// grants its worker; absent or empty = none. A pattern outside the
+	// allowlist refuses the whole call, named.
+	ToolGrants []string `json:"tool_grants,omitempty"`
 }
 
 // planCreateResponse names what the call created: the plan, the
@@ -321,7 +325,7 @@ func (s *Server) handlePlanAmend(w http.ResponseWriter, r *http.Request, id iden
 		am.Cancel = append(am.Cancel, engine.PlanCancel{Task: c.Task, Reason: c.Reason})
 	}
 	for _, t := range req.Add {
-		am.Add = append(am.Add, engine.PlanTask{Title: t.Title, Name: t.Name, Deps: t.Deps, Base: t.Base, Continue: t.Continue, Spec: t.Spec, Check: t.Check, Class: t.Class, Tier: t.Tier, Effort: t.Effort, ReviewTier: t.ReviewTier, ReviewEffort: t.ReviewEffort, Caps: t.Caps, ExtraRepos: t.ExtraRepos, Skills: t.Skills})
+		am.Add = append(am.Add, engine.PlanTask{Title: t.Title, Name: t.Name, Deps: t.Deps, Base: t.Base, Continue: t.Continue, Spec: t.Spec, Check: t.Check, Class: t.Class, Tier: t.Tier, Effort: t.Effort, ReviewTier: t.ReviewTier, ReviewEffort: t.ReviewEffort, Caps: t.Caps, ExtraRepos: t.ExtraRepos, Skills: t.Skills, ToolGrants: t.ToolGrants})
 	}
 	for _, rt := range req.Retarget {
 		am.Retarget = append(am.Retarget, engine.PlanRetarget{Task: rt.Task, Deps: rt.Deps, Base: rt.Base, Continue: rt.Continue})
@@ -330,7 +334,7 @@ func (s *Server) handlePlanAmend(w http.ResponseWriter, r *http.Request, id iden
 		am.Retier = append(am.Retier, engine.PlanRetier{Task: rt.Task, Tier: rt.Tier, Effort: rt.Effort, ReviewTier: rt.ReviewTier, ReviewEffort: rt.ReviewEffort, Caps: rt.Caps, Skills: rt.Skills})
 	}
 	for _, rs := range req.Respec {
-		am.Respec = append(am.Respec, engine.PlanRespec{Task: rs.Task, Spec: rs.Spec, Mode: rs.Mode, Skills: rs.Skills})
+		am.Respec = append(am.Respec, engine.PlanRespec{Task: rs.Task, Spec: rs.Spec, Mode: rs.Mode, Skills: rs.Skills, ToolGrants: rs.ToolGrants})
 	}
 	res, err := s.eng.AmendPlan(r.Context(), project, planID, am)
 	switch {
@@ -413,6 +417,9 @@ type planRespecBody struct {
 	// the task has not started; absent keeps them, [] clears them. No
 	// omitempty: [] must survive the trip.
 	Skills []string `json:"skills"`
+	// ToolGrants (§6.1) replaces the task's tool grants; absent keeps
+	// them, [] clears them. No omitempty: [] must survive the trip.
+	ToolGrants []string `json:"tool_grants"`
 }
 
 type planRetierBody struct {

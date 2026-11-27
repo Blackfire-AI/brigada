@@ -273,6 +273,10 @@ type TaskSubmit struct {
 	// Skills names, in order, the project's imported skills the task's
 	// prompts carry (§5.10); nil or empty = none.
 	Skills []string
+	// ToolGrants are the Claude Code permission patterns the task grants
+	// its worker (§6.1), each one of engine.ToolGrantAllowlist; nil or
+	// empty = none.
+	ToolGrants []string
 }
 
 // TaskSubmitResult names what the submit created.
@@ -288,15 +292,16 @@ type TaskSubmitResult struct {
 // debug path until the foreman's plan tools exist).
 func (c *Client) SubmitTask(ctx context.Context, t TaskSubmit) (TaskSubmitResult, error) {
 	body := taskSubmitRequest{
-		RepoURL:  t.RepoURL,
-		BaseRef:  t.BaseRef,
-		Title:    t.Title,
-		Spec:     t.Spec,
-		CheckCmd: t.CheckCmd,
-		Class:    t.Class,
-		Harness:  t.Harness,
-		Labels:   t.Labels,
-		Skills:   t.Skills,
+		RepoURL:    t.RepoURL,
+		BaseRef:    t.BaseRef,
+		Title:      t.Title,
+		Spec:       t.Spec,
+		CheckCmd:   t.CheckCmd,
+		Class:      t.Class,
+		Harness:    t.Harness,
+		Labels:     t.Labels,
+		Skills:     t.Skills,
+		ToolGrants: t.ToolGrants,
 	}
 	var out taskSubmitResponse
 	if err := c.call(ctx, http.MethodPost, "/v1/tasks", body, &out); err != nil {
@@ -351,6 +356,10 @@ type PlanTask struct {
 	// Skills names, in order, the project's imported skills the task's
 	// prompts carry (§5.10); nil or empty = none.
 	Skills []string `json:"skills,omitempty"`
+	// ToolGrants are the Claude Code permission patterns the task grants
+	// its worker (§6.1), each one of engine.ToolGrantAllowlist; nil or
+	// empty = none.
+	ToolGrants []string `json:"tool_grants,omitempty"`
 }
 
 // PlanCreateResult names what the call created: the plan, the first
@@ -384,7 +393,7 @@ type PlanCreatedTask struct {
 func (c *Client) CreatePlan(ctx context.Context, p PlanCreate, idemKey string) (PlanCreateResult, error) {
 	body := planCreateRequest{RepoURL: p.RepoURL, Title: p.Title, Tasks: make([]planTaskBody, len(p.Tasks))}
 	for i, t := range p.Tasks {
-		body.Tasks[i] = planTaskBody{Title: t.Title, Name: t.Name, Deps: t.Deps, Base: t.Base, Continue: t.Continue, Spec: t.Spec, Check: t.Check, Class: t.Class, Tier: t.Tier, Effort: t.Effort, ReviewTier: t.ReviewTier, ReviewEffort: t.ReviewEffort, Caps: t.Caps, ExtraRepos: t.ExtraRepos, Skills: t.Skills}
+		body.Tasks[i] = planTaskBody{Title: t.Title, Name: t.Name, Deps: t.Deps, Base: t.Base, Continue: t.Continue, Spec: t.Spec, Check: t.Check, Class: t.Class, Tier: t.Tier, Effort: t.Effort, ReviewTier: t.ReviewTier, ReviewEffort: t.ReviewEffort, Caps: t.Caps, ExtraRepos: t.ExtraRepos, Skills: t.Skills, ToolGrants: t.ToolGrants}
 	}
 	var out planCreateResponse
 	if err := c.callKeyed(ctx, http.MethodPost, "/v1/plans", idemKey, body, &out); err != nil {
@@ -427,11 +436,13 @@ type PlanCancel struct {
 
 // PlanRespec edits the spec of a pending task: Mode replace (the default)
 // or append. Skills, when not nil, replaces the task's recorded skills.
+// ToolGrants, when not nil, replaces the task's tool grants (§6.1).
 type PlanRespec struct {
-	Task   string
-	Spec   string
-	Mode   string
-	Skills []string
+	Task       string
+	Spec       string
+	Mode       string
+	Skills     []string
+	ToolGrants []string
 }
 
 // PlanRetier changes a waiting or parked task's tier, effort, review tier or
@@ -489,7 +500,7 @@ func (c *Client) AmendPlan(ctx context.Context, plan int64, a PlanAmend, idemKey
 		body.Cancel = append(body.Cancel, planCancelBody{Task: c.Task, Reason: c.Reason})
 	}
 	for _, t := range a.Add {
-		body.Add = append(body.Add, planTaskBody{Title: t.Title, Name: t.Name, Deps: t.Deps, Base: t.Base, Continue: t.Continue, Spec: t.Spec, Check: t.Check, Class: t.Class, Tier: t.Tier, Effort: t.Effort, ReviewTier: t.ReviewTier, ReviewEffort: t.ReviewEffort, Caps: t.Caps, ExtraRepos: t.ExtraRepos, Skills: t.Skills})
+		body.Add = append(body.Add, planTaskBody{Title: t.Title, Name: t.Name, Deps: t.Deps, Base: t.Base, Continue: t.Continue, Spec: t.Spec, Check: t.Check, Class: t.Class, Tier: t.Tier, Effort: t.Effort, ReviewTier: t.ReviewTier, ReviewEffort: t.ReviewEffort, Caps: t.Caps, ExtraRepos: t.ExtraRepos, Skills: t.Skills, ToolGrants: t.ToolGrants})
 	}
 	for _, rt := range a.Retarget {
 		body.Retarget = append(body.Retarget, planRetargetBody{Task: rt.Task, Deps: rt.Deps, Base: rt.Base, Continue: rt.Continue})
@@ -498,7 +509,7 @@ func (c *Client) AmendPlan(ctx context.Context, plan int64, a PlanAmend, idemKey
 		body.Retier = append(body.Retier, planRetierBody{Task: rt.Task, Tier: rt.Tier, Effort: rt.Effort, ReviewTier: rt.ReviewTier, ReviewEffort: rt.ReviewEffort, Caps: rt.Caps, Skills: rt.Skills})
 	}
 	for _, rs := range a.Respec {
-		body.Respec = append(body.Respec, planRespecBody{Task: rs.Task, Spec: rs.Spec, Mode: rs.Mode, Skills: rs.Skills})
+		body.Respec = append(body.Respec, planRespecBody{Task: rs.Task, Spec: rs.Spec, Mode: rs.Mode, Skills: rs.Skills, ToolGrants: rs.ToolGrants})
 	}
 	var out planAmendResponse
 	path := "/v1/plans/" + strconv.FormatInt(plan, 10) + "/amend"
