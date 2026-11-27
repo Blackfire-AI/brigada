@@ -22,6 +22,7 @@ approval_classes: [implement, "review"]
 approval_protected_paths:
   - infra/**
   - 'db/*.sql'
+approval_tool_grants: ["Bash(git merge:*)", "Bash(git add:*)"]
 branch_retention_days: 0
 land_batch_max: 20
 `
@@ -78,6 +79,7 @@ land_batch_max: 20
 		{"list item holding the separator", string(cfgFile("approval_protected_paths: [\"a+b\"]\n")), "separates list items"},
 		{"protected path absolute", string(cfgFile("approval_protected_paths: [/etc/passwd]\n")), "repo-relative"},
 		{"protected path home", string(cfgFile("approval_protected_paths: [\"~/x\"]\n")), "repo-relative"},
+		{"tool grant outside the allowlist", string(cfgFile("approval_tool_grants: [\"Bash(git push:*)\"]\n")), "not in the tool-grant allowlist"},
 		{"protected path bad glob", string(cfgFile("approval_protected_paths: [\"bad[glob\"]\n")), "not a valid glob"},
 		{"nested map", string(cfgFile("default_check:\n  cmd: x\n")), "nested structures"},
 		{"list under a scalar", string(cfgFile("default_check: x\n  - y\n")), "already has a value"},
@@ -119,6 +121,7 @@ land_batch_max: 20
 			SettingApprovalMaxTasks:       `3`,
 			SettingApprovalClasses:        `["implement","review"]`,
 			SettingApprovalProtectedPaths: `["infra/**","db/*.sql"]`,
+			SettingApprovalToolGrants:     `["Bash(git merge:*)","Bash(git add:*)"]`,
 			SettingBranchRetentionDays:    `0`,
 			SettingLandBatchMax:           `20`,
 		}
