@@ -145,9 +145,9 @@ tasks:
     tier: light
     effort: low
     skills: ["docs-change"]
-    state: reviewing
+    state: running
     branch: "brigada/task-86-r1"
-    rounds: 0
+    rounds: 1
   - id: 88
     name: "grants-approval-v4"
     title: "Per-task tool grants: approval trigger, setting, plan-review view, on the current brigada/landed (Refs #123)"
