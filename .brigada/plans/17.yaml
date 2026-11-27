@@ -66,9 +66,9 @@ tasks:
     base: ""
     effort: medium
     skills: ["bugfix"]
-    state: running
+    state: ready
     branch: "brigada/task-82"
-    rounds: 2
+    rounds: 0
   - id: 83
     name: "publish-kind"
     title: "The publish error kind never counts against the agent and retries once (Closes #275)"
