@@ -68,7 +68,7 @@ tasks:
     effort: low
     caps: {restart: 10}
     skills: ["docs-change"]
-    state: reviewing
+    state: done
     branch: "brigada/task-43-r4"
     rounds: 0
   - id: 55
