@@ -46,8 +46,8 @@ tasks:
     review_tier: standard
     review_effort: medium
     skills: ["bugfix", "surface-parity"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-18"
     rounds: 0
   - id: 34
     name: "changelog-264"
