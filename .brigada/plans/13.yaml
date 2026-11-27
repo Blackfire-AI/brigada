@@ -7,7 +7,7 @@ title: "Fix #123: per-task tool grants"
 repo: "github.com/Blackfire-AI/brigada"
 state: reviewing
 created: 2026-11-26T20:46:37.109826591Z
-updated: 2026-11-27T20:42:55.011967006Z
+updated: 2026-11-27T20:43:26.039812425Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -122,16 +122,16 @@ tasks:
     base: "grants-surfaces"
     effort: medium
     skills: ["config-setting", "surface-parity"]
-    state: reviewing
+    state: cancelled
     branch: "brigada/task-84"
     rounds: 0
   - id: 85
     name: "grants-lease-v2"
     title: "Grant rides the lease to the adapter; runner refuses an unfinished merge, rebuilt on grants-approval-v3 (Closes #123)"
     class: "implement"
-    deps: ["grants-approval-v3"]
-    base: "grants-approval-v3"
-    continue: "grants-approval-v3"
+    deps: ["grants-approval-v4"]
+    base: "grants-approval-v4"
+    continue: "grants-approval-v4"
     effort: medium
     state: pending
     branch: ""
@@ -145,6 +145,17 @@ tasks:
     tier: light
     effort: low
     skills: ["docs-change"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 88
+    name: "grants-approval-v4"
+    title: "Per-task tool grants: approval trigger, setting, plan-review view, on the current brigada/landed (Refs #123)"
+    class: "implement"
+    deps: []
+    base: ""
+    effort: medium
+    skills: ["config-setting", "surface-parity"]
     state: pending
     branch: ""
     rounds: 0
