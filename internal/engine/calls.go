@@ -290,8 +290,8 @@ func (e *Engine) Complete(ctx context.Context, owner, jobID int64, leaseID strin
 	}
 	if c.Outcome != "" {
 		if !isStopOutcome(c.Outcome) && !isLandOutcome(c.Outcome) {
-			return "", fmt.Errorf("complete job %d: outcome must be %s, %s, %s or %s when set, not %q",
-				jobID, OutcomeStalled, OutcomeTimeCap, OutcomeLandHeld, OutcomeLandNotReady, c.Outcome)
+			return "", fmt.Errorf("complete job %d: outcome must be %s, %s, %s, %s or %s when set, not %q",
+				jobID, OutcomeStalled, OutcomeTimeCap, OutcomeLandHeld, OutcomeLandNotReady, OutcomeLandReady, c.Outcome)
 		}
 		if c.Error != "" {
 			return "", fmt.Errorf("complete job %d: an outcome names a stopped run's result, not an error", jobID)

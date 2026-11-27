@@ -31,6 +31,7 @@ const (
 const (
 	outcomeLandHeld     = engine.OutcomeLandHeld
 	outcomeLandNotReady = engine.OutcomeLandNotReady
+	outcomeLandReady    = engine.OutcomeLandReady
 )
 
 // WorkerResult is the parsed result block of a worker's final message

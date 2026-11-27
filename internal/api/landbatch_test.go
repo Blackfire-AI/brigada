@@ -27,3 +27,25 @@ func TestLandBatchGrantCarriesItsMembers(t *testing.T) {
 		t.Errorf("batch grant = %+v, want its mark and both members in order", g)
 	}
 }
+
+// TestLandBatchGrantCarriesGateReleases: a member's released gate and a
+// re-check's mark reach the runner (§7.1 "Deciding a batch hold").
+func TestLandBatchGrantCarriesGateReleases(t *testing.T) {
+	members := []engine.LandMember{{TaskID: 3, Branch: "brigada/task-3", BaseRef: "main", SkipLandReady: true}}
+	for _, lg := range []*engine.LeaseGrant{
+		{Kind: engine.KindLand, LandBatch: true, LandMembers: members},
+		{Kind: engine.KindLand, LandRecheck: true},
+	} {
+		b, err := json.Marshal(jobGrantOf(lg))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var g JobGrant
+		if err := json.Unmarshal(b, &g); err != nil {
+			t.Fatal(err)
+		}
+		if g.LandRecheck != lg.LandRecheck || (lg.LandBatch && !g.LandMembers[0].SkipLandReady) {
+			t.Errorf("grant = %+v, want the re-check mark %v and every member's release", g, lg.LandRecheck)
+		}
+	}
+}

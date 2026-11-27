@@ -87,6 +87,11 @@ const (
 const (
 	OutcomeLandHeld     = "held"
 	OutcomeLandNotReady = "not ready"
+	// OutcomeLandReady is a land_ready re-check's pass (§7.1 "Deciding a
+	// batch hold"): the re-check of a squash-phase hold runs the command
+	// alone and lands nothing, and its exit 0 releases the member into
+	// one next batch with its gate skipped.
+	OutcomeLandReady = "ready"
 )
 
 // isStopOutcome reports whether outcome is one the runner may complete
@@ -98,7 +103,7 @@ func isStopOutcome(outcome string) bool {
 // isLandOutcome reports whether outcome is one of the land_ready
 // gate's (issue #87), a land job's alone to complete with.
 func isLandOutcome(outcome string) bool {
-	return outcome == OutcomeLandHeld || outcome == OutcomeLandNotReady
+	return outcome == OutcomeLandHeld || outcome == OutcomeLandNotReady || outcome == OutcomeLandReady
 }
 
 // Answer is how an engine call went. Errors are reserved for the store

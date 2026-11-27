@@ -128,6 +128,13 @@ type LeaseGrant struct {
 	// was already released by an approval (issue #87): the runner runs
 	// no command and lands. False on every grant but a released hold's.
 	SkipLandReady bool
+	// LandRecheck is true for the engine's re-check of a squash-phase
+	// land_ready hold (§7.1 "Deciding a batch hold"): a land job on the
+	// held member's own key whose runner runs the command and lands
+	// nothing — its exit 0 completes with OutcomeLandReady, and the
+	// engine releases the member into one next batch with its gate
+	// skipped. False on every other grant.
+	LandRecheck bool
 	// DropWaitingRef is true for a land job's squash phase (§7.1) when
 	// the engine has marked the target's waiting ref stale (issue #205):
 	// the landings that sat on it are forgotten, so their commits must

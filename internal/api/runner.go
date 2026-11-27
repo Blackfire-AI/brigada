@@ -189,9 +189,10 @@ func (s *Server) handleComplete(w http.ResponseWriter, r *http.Request, runnerID
 	}
 	if req.Outcome != "" &&
 		(req.Outcome != engine.OutcomeStalled && req.Outcome != engine.OutcomeTimeCap &&
-			req.Outcome != engine.OutcomeLandHeld && req.Outcome != engine.OutcomeLandNotReady || req.Error != "") {
+			req.Outcome != engine.OutcomeLandHeld && req.Outcome != engine.OutcomeLandNotReady &&
+			req.Outcome != engine.OutcomeLandReady || req.Error != "") {
 		writeError(w, http.StatusBadRequest, codeBadRequest,
-			"outcome must be stalled, time_cap, held or not ready, with a result")
+			"outcome must be stalled, time_cap, held, not ready or ready, with a result")
 		return
 	}
 	c := engine.Completion{
@@ -494,6 +495,11 @@ type jobGrant struct {
 	// (issue #87): the engine sets it when an approval already released
 	// the gate's hold.
 	SkipLandReady bool `json:"skip_land_ready,omitempty"`
+	// LandRecheck marks the engine's re-check of a squash-phase
+	// land_ready hold (§7.1 "Deciding a batch hold"): the runner runs the
+	// command alone and lands nothing; its exit 0 completes with the
+	// outcome ready, which releases the member into one next batch.
+	LandRecheck bool `json:"land_recheck,omitempty"`
 	// DropWaitingRef tells a land job's squash phase (issue #205) that
 	// the engine marked the target's waiting ref stale: the landings
 	// that sat on it are forgotten, and the runner deletes
@@ -571,6 +577,7 @@ func jobGrantOf(g *engine.LeaseGrant) *jobGrant {
 		AfterLand:       g.AfterLand,
 		LandReady:       g.LandReady,
 		SkipLandReady:   g.SkipLandReady,
+		LandRecheck:     g.LandRecheck,
 		DropWaitingRef:  g.DropWaitingRef,
 		LandBatch:       g.LandBatch,
 		LandMembers:     g.LandMembers,
