@@ -19,7 +19,10 @@ updated: 2026-11-27T19:25:07.157180141Z
 # describe the model needed and how hard it should think (§6.1);
 # review_tier and review_effort do the same for its reviews (§7, §8); caps
 # override the task's fix_rounds, review_rounds and restart budgets (§6.1);
-# skills name the project's skills the task carries, in order (§5.10).
+# skills name the project's skills the task carries, in order (§5.10);
+# tool_grants name the permission patterns its worker is granted (§6.1);
+# wait_landed holds a dependent pending until its implement deps have
+# actually landed on the target, not merely been done (§6.1).
 tasks:
   - id: 25
     name: "tools-field"
@@ -45,7 +48,7 @@ tasks:
     effort: medium
     review_tier: standard
     review_effort: medium
-    state: done
+    state: needs_foreman
     branch: "brigada/task-26-r1"
     rounds: 1
   - id: 44
