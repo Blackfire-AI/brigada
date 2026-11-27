@@ -68,8 +68,8 @@ tasks:
     effort: low
     caps: {restart: 10}
     skills: ["docs-change"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-43-r4"
     rounds: 0
   - id: 55
     name: "probe-161v2"
