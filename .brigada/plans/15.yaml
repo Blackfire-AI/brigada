@@ -64,6 +64,6 @@ tasks:
     base: ""
     effort: medium
     caps: {restart: 6}
-    state: ready
+    state: needs_foreman
     branch: ""
     rounds: 0
