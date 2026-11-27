@@ -71,8 +71,8 @@ tasks:
     continue: "sync-engine"
     tier: heavy
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-58-r2"
     rounds: 0
   - id: 59
     name: "sync-waiting"
