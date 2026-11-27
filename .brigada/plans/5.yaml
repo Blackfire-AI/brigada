@@ -126,6 +126,6 @@ tasks:
     base: "wl-field"
     tier: heavy
     effort: high
-    state: ready
+    state: running
     branch: ""
     rounds: 0
