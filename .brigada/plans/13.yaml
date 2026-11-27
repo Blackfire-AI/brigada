@@ -69,7 +69,7 @@ tasks:
     continue: "grants-core-v2"
     effort: medium
     skills: ["surface-parity", "cli-flag"]
-    state: reviewing
+    state: needs_foreman
     branch: "brigada/task-45-r1"
     rounds: 0
   - id: 46
@@ -82,7 +82,7 @@ tasks:
     tier: heavy
     effort: medium
     skills: ["config-setting", "surface-parity"]
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 47
