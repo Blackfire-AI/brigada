@@ -5,9 +5,9 @@
 plan: 12
 title: "Fix #161: probe the push path at init and brigada doctor"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: reviewing
 created: 2026-11-26T20:46:37.083219715Z
-updated: 2026-11-26T22:16:03.584497902Z
+updated: 2026-11-27T13:35:36.721466553Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
