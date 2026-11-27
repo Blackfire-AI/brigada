@@ -69,8 +69,8 @@ tasks:
     continue: "grants-core-v2"
     effort: medium
     skills: ["surface-parity", "cli-flag"]
-    state: running
-    branch: "brigada/task-45-r1"
+    state: reviewing
+    branch: "brigada/task-45-r2"
     rounds: 0
   - id: 46
     name: "grants-approval"
