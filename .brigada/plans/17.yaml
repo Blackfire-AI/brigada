@@ -91,6 +91,6 @@ tasks:
     tier: heavy
     effort: medium
     skills: ["bugfix"]
-    state: reviewing
+    state: done
     branch: "brigada/task-87"
     rounds: 0
