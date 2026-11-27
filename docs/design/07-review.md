@@ -32,7 +32,7 @@ Its prompt (`internal/prompt`, beside the review template) says this is a re-rev
 
 - the findings are the reviewer's own and are not repeated;
 - it carries the fix round's summary (the one place a reviewer sees an author's account, to be checked against the diff, never trusted in place of it) and the check result verbatim;
-- the runner writes the fix round's diff alone, the branch's commits since the head the previous review judged, into the diff file (the head is in the author job's result, set by the runner);
+- the runner writes the fix round's diff alone, the branch's commits since the head the previous review judged, into the diff file (the head is in the author job's result, set by the runner); a fix round that rewrote the branch (an amend, a rebuild on a new base, published with the lease of §5.4) leaves that head out of the branch's history, and the file then holds the whole change, base to branch, under a line saying the branch was rewritten, and the prompt tells the reviewer a since-diff is not the fix round alone then;
 - the verdict covers the whole change.
 
 The verdict block is the same contract.

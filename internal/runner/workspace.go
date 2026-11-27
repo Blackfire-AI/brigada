@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -70,6 +71,13 @@ type workspace struct {
 	holdsDir bool
 	repoURL  string
 	gitEnv   []string
+	// leased is whether leaseSHA was recorded; leaseSHA is the commit the
+	// remote's branch held when the job's worktree was prepared ("" when
+	// the remote had no such branch), the lease ensurePushed publishes
+	// under (§5.4). A workspace built without it publishes with a plain
+	// push.
+	leased   bool
+	leaseSHA string
 }
 
 // prepareWorkspace materializes the workspace for a leased job (§5.1):
@@ -120,13 +128,18 @@ func prepareWorkspace(ctx context.Context, cfg *Config, grant *api.JobGrant) (*w
 		return nil, err
 	}
 	start := baseRef
+	// leaseFromStart is whether the worktree starts at the remote head of
+	// its own branch, which then is the lease; otherwise the worktree did
+	// not start from the remote's branch, and the lease stays empty: only
+	// a branch that does not exist yet is created, and one that exists is
+	// refused rather than overwritten.
+	leaseFromStart := false
 	if isFixJob(grant) && grant.Branch != "" {
 		// The round continues the task's branch (§3): the worktree
 		// starts at the branch's head as the remote holds it, fetched by
 		// name — the mirror's own fetch skips the runners' brigada/
 		// namespace — so the round's work builds on the work before it
-		// and its push is a fast-forward of the branch, never a force.
-		// A remote that answers cleanly that it holds no such branch —
+		// and its push is the lease push of §5.4. A remote that answers cleanly that it holds no such branch —
 		// nothing was ever pushed — leaves the round on the base ref,
 		// where the work itself starts. A remote that cannot be asked at
 		// all fails the job instead: reading that as absence would
@@ -139,6 +152,7 @@ func prepareWorkspace(ctx context.Context, cfg *Config, grant *api.JobGrant) (*w
 				return nil, err
 			}
 			start = grant.Branch
+			leaseFromStart = true
 		}
 	} else if grant.SeedBranch != "" {
 		// A stop-running restart's fresh attempt (§5.6) carries on the
@@ -156,6 +170,7 @@ func prepareWorkspace(ctx context.Context, cfg *Config, grant *api.JobGrant) (*w
 			start = grant.SeedBranch
 		}
 	}
+	w.leased = true
 	// A worktree left behind by a crashed run of the same job would make
 	// the add below fail on the path; the path is the task's and one
 	// live job holds its key (§12.1), so what sits at this path now is
@@ -182,6 +197,9 @@ func prepareWorkspace(ctx context.Context, cfg *Config, grant *api.JobGrant) (*w
 		return nil, fmt.Errorf("read the worktree's base commit: %w", trimCmdError(out, err))
 	}
 	w.base = strings.TrimSpace(string(out))
+	if leaseFromStart {
+		w.leaseSHA = w.base // the head the worktree really started from
+	}
 	named := baseRef
 	if grant.SeedBranch != "" && start == grant.SeedBranch {
 		named = start // the seeded attempt is told the branch it carries on
@@ -553,6 +571,33 @@ func brigadaRef(ref string) string {
 	return ""
 }
 
+// leaseRefusedError is a publish the remote refused because the branch
+// no longer holds the commit the job started from (§5.4): someone else
+// moved it, and the runner's rewrite would have discarded their work.
+type leaseRefusedError struct{ err error }
+
+func (e *leaseRefusedError) Error() string {
+	return "the branch moved on the remote since the job started: " + e.err.Error()
+}
+
+func (e *leaseRefusedError) Unwrap() error { return e.err }
+
+// isLeaseRefused reports whether err is a refused lease push, as against
+// any other failure to publish.
+func isLeaseRefused(err error) bool {
+	var l *leaseRefusedError
+	return errors.As(err, &l)
+}
+
+// leaseRejected reads git's push output for the lease's refusal: a
+// rejected ref whose stale info is the lease's own words. A hook's or a
+// protected branch's "[remote rejected]" is another failure.
+func leaseRejected(out []byte) bool {
+	s := string(out)
+	return strings.Contains(s, "(stale info)") ||
+		(strings.Contains(s, "[rejected]") && !strings.Contains(s, "[remote rejected]"))
+}
+
 // ensurePushed verifies the branch on the remote holds exactly the
 // worktree's commit, and makes it so when it does not (§5.4). The
 // template tells the worker to leave the commit and the push to the
@@ -565,6 +610,12 @@ func brigadaRef(ref string) string {
 // worker left uncommitted are committed, then the remote's SHA is
 // compared with the worktree's HEAD, and a mismatch is pushed. A
 // ls-remote that still disagrees after the push was no push.
+//
+// The push is a lease push: it replaces the remote branch only while
+// the branch still holds the commit the job started from (or still does
+// not exist, when it did not), so a worker that rewrote its own pushed
+// branch — an amend, a rebuild on a new base — publishes, and a branch
+// someone else moved meanwhile is refused with a *leaseRefusedError.
 func (w *workspace) ensurePushed(ctx context.Context) error {
 	if err := w.commitLeftovers(ctx); err != nil {
 		return err
@@ -573,17 +624,40 @@ func (w *workspace) ensurePushed(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if remote, ok := w.remoteBranchSHA(ctx); ok && remote == head {
+	remote, remoteOK := w.remoteBranchSHA(ctx)
+	if remoteOK && remote == head {
+		w.leaseSHA = head
 		return nil // the worker pushed exactly what sits in the worktree
 	}
-	if out, err := w.git(ctx, "-C", w.dir, "push", w.repoURL, "HEAD:refs/heads/"+w.branch); err != nil {
-		return fmt.Errorf("push %s to %s: %w", w.branch, redactURL(w.repoURL), trimCmdError(out, err))
+	lease := w.leaseSHA
+	if remoteOK && remote != lease {
+		// A remote head the worktree's own history holds — the worker's
+		// early push, followed by more work — is a plain fast-forward:
+		// nothing of anyone's is lost, so it is the lease. A head the
+		// worktree lacks is another writer's, and the job's start stays
+		// the lease.
+		if _, err := w.git(ctx, "-C", w.dir, "merge-base", "--is-ancestor", remote, head); err == nil {
+			lease = remote
+		}
+	}
+	args := []string{"-C", w.dir, "push"}
+	if w.leased {
+		args = append(args, "--force-with-lease=refs/heads/"+w.branch+":"+lease)
+	}
+	args = append(args, w.repoURL, "HEAD:refs/heads/"+w.branch)
+	if out, err := w.git(ctx, args...); err != nil {
+		err = fmt.Errorf("push %s to %s: %w", w.branch, redactURL(w.repoURL), trimCmdError(out, err))
+		if w.leased && leaseRejected(out) {
+			return &leaseRefusedError{err}
+		}
+		return err
 	}
 	remote, ok := w.remoteBranchSHA(ctx)
 	if !ok || remote != head {
 		return fmt.Errorf("branch %s on %s does not hold the worktree's commit after pushing it",
 			w.branch, redactURL(w.repoURL))
 	}
+	w.leaseSHA = head // a later push of this workspace leases on what this one published
 	return nil
 }
 

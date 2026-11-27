@@ -18,6 +18,12 @@ are refused, and a refusal covers that one call, not every tool you
 have. If your tools do let you run commands, you may build and test as
 you go, and you may commit, but never push.
 
+A fix round may amend or rebase its own task branch, the one you are
+on: the runner publishes the branch as it stands when you finish, in
+place of the head already pushed, and refuses only a branch someone
+else moved on the remote since this job started. Rewrite your own
+history if the fix needs it, and leave the publishing to the runner.
+
 End your final message with exactly one JSON result block, fenced as a
 ```json code block, and nothing after it:
 

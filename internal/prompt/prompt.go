@@ -17,7 +17,7 @@ import (
 // prompts are composed only from fixed, versioned templates plus
 // verbatim data (§1.4), so a template change is a version bump, never a
 // silent edit.
-const WorkerTemplateVersion = 12
+const WorkerTemplateVersion = 13
 
 // ReviewTemplateVersion is the review prompt template's version (§7),
 // under the same rule as the worker's (§1.4).
@@ -25,7 +25,7 @@ const ReviewTemplateVersion = 9
 
 // ReReviewTemplateVersion is the re-review prompt's version (§7): the
 // prompt a reviewer resuming its own session is sent after a fix round.
-const ReReviewTemplateVersion = 2
+const ReReviewTemplateVersion = 3
 
 // WorkerOpener and ReviewerOpener are the first words of every worker
 // and reviewer prompt the engine composes. They are a contract: the
@@ -61,6 +61,12 @@ by brigada: it decides which edits and commands run unasked and which
 are refused, and a refusal covers that one call, not every tool you
 have. If your tools do let you run commands, you may build and test as
 you go, and you may commit, but never push.
+
+A fix round may amend or rebase its own task branch, the one you are
+on: the runner publishes the branch as it stands when you finish, in
+place of the head already pushed, and refuses only a branch someone
+else moved on the remote since this job started. Rewrite your own
+history if the fix needs it, and leave the publishing to the runner.
 
 End your final message with exactly one JSON result block, fenced as a
 %FENCE%json code block, and nothing after it:
@@ -546,14 +552,30 @@ before: do not edit files, do not commit, do not push. You cannot
 message anyone mid-run: whatever you need to say goes in your final
 message's verdict block, and it is read only after you exit.
 
-The runner wrote the fix round alone — what the branch gained since the
-head you reviewed — into the file %DIFFFILE% at
-the worktree's root, as the output of
+The runner wrote a diff into the file %DIFFFILE% at the worktree's
+root, so you need no shell to see it: read that file first. The fix
+round either added commits on top of the head you reviewed or rewrote
+the branch (an amend, or a rebuild on a new base), and the file says
+which:
+
+- When the head you reviewed is still in the branch's history, the file
+  holds the fix round alone, what the branch gained since that head, as
+  the output of
 
   git diff %SINCE%..%BRANCH%
 
-so you need no shell to see it: read that file first. The whole change
-is still the base to the branch,
+- When the fix round rewrote the branch, that head is no longer in its
+  history, and %SINCE%..%BRANCH% is not the fix round alone: it would
+  mix the fix with the base's own changes. The file then opens with a
+  line saying the branch was rewritten, and holds the whole change. Do
+  not rely on a since-diff then; read the whole change, the base to the
+  branch,
+
+  git diff %BASE%...%BRANCH%
+
+  and check your earlier findings against it one by one.
+
+Either way the whole change is the base to the branch,
 
   git diff %BASE%...%BRANCH%
 

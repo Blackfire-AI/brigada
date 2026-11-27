@@ -73,6 +73,14 @@ const minSubstantiveFindings = 80
 // charged.
 const ErrorKindInfra = "infra"
 
+// ErrorKindPublish sorts a completion's Error as a failure in the
+// runner's publish step after the CLI finished (§5.4): the worker's
+// branch could not be pushed to the remote — the lease refused it
+// because the branch moved since the job started, or the push failed
+// for another reason. The worker's own run was sound, so the failure
+// is no verdict on the agent.
+const ErrorKindPublish = "publish"
+
 // taskRunningTx moves a task off ready when one of its jobs is leased
 // (§6.1): running while the work happens. A fix round's lease also takes
 // the task back out of reviewing (§3): the review asked for changes, the

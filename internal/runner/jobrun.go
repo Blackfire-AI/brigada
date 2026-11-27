@@ -800,7 +800,7 @@ func (r *jobRun) finish(ctx context.Context, ad adapter.Adapter, ws *workspace, 
 			if r.gone(ctx, "pushing the branch") {
 				return
 			}
-			r.finishWithError(ctx, err.Error())
+			r.finishWithPublishError(ctx, err)
 			return
 		}
 		if head, err := ws.worktreeHead(ctx); err == nil {
@@ -974,6 +974,27 @@ func (r *jobRun) finishWithInfraError(ctx context.Context, msg string) {
 		SessionID: r.sessionIDOf(),
 		ErrorKind: engine.ErrorKindInfra,
 	})
+}
+
+// finishWithPublishError completes the job with a failure of the
+// publish step after the CLI finished (§5.4): the branch could not be
+// pushed. The kind is engine.ErrorKindPublish whatever the cause, and
+// the text says whether the lease refused it — the branch moved on the
+// remote since the job started — or the push failed otherwise.
+func (r *jobRun) finishWithPublishError(ctx context.Context, err error) {
+	comp := publishCompletion(err)
+	comp.SessionID = r.sessionIDOf()
+	r.deliverError(ctx, comp)
+}
+
+// publishCompletion is the completion of a failed publish: the publish
+// kind and an error text that says whether the lease refused the push.
+func publishCompletion(err error) api.Completion {
+	msg := "publish the branch, push failed (not a lease refusal): " + err.Error()
+	if isLeaseRefused(err) {
+		msg = "publish the branch, lease refused: " + err.Error()
+	}
+	return api.Completion{Error: msg, ErrorKind: engine.ErrorKindPublish}
 }
 
 func (r *jobRun) deliverError(ctx context.Context, comp api.Completion) {
