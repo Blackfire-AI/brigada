@@ -83,6 +83,7 @@ func summary(it Item) string {
 			Skills       []string `json:"skills"`
 		} `json:"prompt"`
 		ToolGrants []string `json:"tool_grants"`
+		Note       string   `json:"note"`
 	}
 	if json.Unmarshal(it.Payload, &p) != nil {
 		return string(it.Payload)
@@ -129,6 +130,12 @@ func summary(it Item) string {
 		add("after_land_error", p.AfterLand)
 	}
 	add("reason", p.Reason)
+	if it.Kind == "task_note_set" {
+		if p.Note == "" {
+			p.Note = "(cleared)"
+		}
+		add("note", p.Note)
+	}
 	add("report", p.Report)
 	add("lease", p.Lease)
 	addInt("owner", p.Owner)

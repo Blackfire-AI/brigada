@@ -968,3 +968,63 @@ func TestServeCallPlanAccept(t *testing.T) {
 		t.Errorf("accept an active plan = %q, error %v, want the refusal", text, isError)
 	}
 }
+
+func TestServeCallPlanAmendNote(t *testing.T) {
+	e := newEnvToken(t, foremanTokenFile, "foreman-secret-9")
+	s := start(t, e)
+	a := s.call(1, "tools/call", map[string]any{"name": "plan_create", "arguments": map[string]any{
+		"title": "two steps",
+		"tasks": []any{
+			map[string]any{"name": "a", "spec": "one"},
+			map[string]any{"name": "b", "spec": "two", "deps": []any{"a"}},
+		},
+	}})
+	if text, isError := toolText(t, a); isError {
+		t.Fatalf("plan_create errored: %s", text)
+	}
+	a = s.call(2, "tools/call", map[string]any{"name": "plan_amend", "arguments": map[string]any{
+		"plan": 1,
+		"note": []any{map[string]any{"task": "b", "note": "use the v2 client"}},
+	}})
+	text, isError := toolText(t, a)
+	if isError || !strings.Contains(text, "noted task 2") {
+		t.Fatalf("note = %q, error %v", text, isError)
+	}
+	var note string
+	if err := e.st.View(t.Context(), func(tx *sql.Tx) error {
+		return tx.QueryRow("SELECT COALESCE(note, '') FROM tasks WHERE name = 'b'").Scan(&note)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if note != "use the v2 client" {
+		t.Errorf("note = %q", note)
+	}
+	a = s.call(3, "tools/call", map[string]any{"name": "plan_amend", "arguments": map[string]any{
+		"plan": 1,
+		"note": []any{map[string]any{"task": "ghost", "note": "x"}},
+	}})
+	if _, isError = toolText(t, a); !isError {
+		t.Error("a note on an unknown task was accepted")
+	}
+}
+
+func TestPlanAmendNoteSchema(t *testing.T) {
+	for _, tool := range tools {
+		if tool.Name != "plan_amend" {
+			continue
+		}
+		props := tool.InputSchema.(map[string]any)["properties"].(map[string]any)
+		n, ok := props["note"].(map[string]any)
+		if !ok {
+			t.Fatal("note missing from schema")
+		}
+		fields := n["items"].(map[string]any)["properties"].(map[string]any)
+		for _, field := range []string{"task", "note"} {
+			if _, ok := fields[field]; !ok {
+				t.Errorf("note missing %s", field)
+			}
+		}
+		return
+	}
+	t.Fatal("no plan_amend tool")
+}

@@ -572,3 +572,63 @@ func TestPlanWaitLandedRoundTrip(t *testing.T) {
 		t.Error("status shows build waiting for landing, want false")
 	}
 }
+
+// TestPlanAmendNoteRoundTrip: the amend endpoint carries a note item to
+// the engine and back, an empty note clears, and a settled task is refused
+// naming its state (§6.2).
+func TestPlanAmendNoteRoundTrip(t *testing.T) {
+	ctx := t.Context()
+	st := openFreshStore(t, filepath.Join(t.TempDir(), "store.db"))
+	t.Cleanup(func() { st.Close() })
+	eng := engine.New(st, engine.Config{PlanReview: &planReviewOff})
+	if _, err := eng.SetProjectForeman(ctx, "https://example.invalid/note.git", "claude", "sonnet"); err != nil {
+		t.Fatal(err)
+	}
+	tokens := filepath.Join(t.TempDir(), "tokens")
+	if err := os.WriteFile(tokens, []byte(tokenFileBody), 0600); err != nil {
+		t.Fatal(err)
+	}
+	srv, err := New(ctx, st, eng, nil, tokens)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := NewClientWithHTTPClient(&http.Client{Transport: funcTransport(func(r *http.Request) (*http.Response, error) {
+		w := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(w, r)
+		return w.Result(), nil
+	})}, "foreman-secret-1")
+	plan, err := c.CreatePlan(ctx, PlanCreate{Title: "note", Tasks: []PlanTask{
+		{Name: "build", Spec: "build it"},
+		{Name: "ship", Spec: "ship it", Deps: []string{"build"}},
+	}}, "note-plan")
+	if err != nil {
+		t.Fatal(err)
+	}
+	note := func() (n sql.NullString) {
+		if err := st.View(ctx, func(tx *sql.Tx) error {
+			return tx.QueryRow("SELECT note FROM tasks WHERE name = 'ship'").Scan(&n)
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	res, err := c.AmendPlan(ctx, plan.PlanID, PlanAmend{Note: []PlanNote{{Task: "ship", Note: "use the v2 client"}}}, "note-call")
+	if err != nil || len(res.Noted) != 1 {
+		t.Fatalf("amend = %+v (%v)", res, err)
+	}
+	if got := note(); got.String != "use the v2 client" {
+		t.Errorf("note = %+v", got)
+	}
+	if _, err := c.AmendPlan(ctx, plan.PlanID, PlanAmend{Note: []PlanNote{{Task: "ship", Note: ""}}}, "note-clear"); err != nil {
+		t.Fatal(err)
+	}
+	if got := note(); got.Valid {
+		t.Errorf("note after the clear = %+v, want NULL", got)
+	}
+	if _, err := c.AmendPlan(ctx, plan.PlanID, PlanAmend{Cancel: []PlanCancel{{Task: "ship"}}}, "note-cancel"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.AmendPlan(ctx, plan.PlanID, PlanAmend{Note: []PlanNote{{Task: "ship", Note: "late"}}}, "note-late"); err == nil || !strings.Contains(err.Error(), "cancelled") {
+		t.Errorf("note on a cancelled task: err = %v, want the state named", err)
+	}
+}

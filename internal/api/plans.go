@@ -339,6 +339,9 @@ func (s *Server) handlePlanAmend(w http.ResponseWriter, r *http.Request, id iden
 	for _, rs := range req.Respec {
 		am.Respec = append(am.Respec, engine.PlanRespec{Task: rs.Task, Spec: rs.Spec, Mode: rs.Mode, Skills: rs.Skills, ToolGrants: rs.ToolGrants})
 	}
+	for _, n := range req.Note {
+		am.Note = append(am.Note, engine.PlanNote{Task: n.Task, Note: n.Note})
+	}
 	res, err := s.eng.AmendPlan(r.Context(), project, planID, am)
 	switch {
 	case errors.Is(err, engine.ErrNoPlan):
@@ -358,6 +361,7 @@ func (s *Server) handlePlanAmend(w http.ResponseWriter, r *http.Request, id iden
 		Retargeted: res.Retargeted,
 		Retiered:   res.Retiered,
 		Respecced:  res.Respecced,
+		Noted:      res.Noted,
 		Reasons:    res.Reasons,
 	}
 	for _, t := range res.Added {
@@ -381,6 +385,15 @@ type planAmendRequest struct {
 	Retarget []planRetargetBody `json:"retarget,omitempty"`
 	Retier   []planRetierBody   `json:"retier,omitempty"`
 	Respec   []planRespecBody   `json:"respec,omitempty"`
+	Note     []planNoteBody     `json:"note,omitempty"`
+}
+
+// planNoteBody is one note entry (§6.2): the task, by name or id, and the
+// note its next job carries; an empty note clears the pending one. No
+// omitempty on Note: "" must survive the trip.
+type planNoteBody struct {
+	Task string `json:"task"`
+	Note string `json:"note"`
 }
 
 // planCancelBody is one cancel entry (§6.2): the task, by name or id,
@@ -461,6 +474,7 @@ type planAmendResponse struct {
 	Retargeted []int64           `json:"retargeted,omitempty"`
 	Retiered   []int64           `json:"retiered,omitempty"`
 	Respecced  []int64           `json:"respecced,omitempty"`
+	Noted      []int64           `json:"noted,omitempty"`
 	Started    []planCreatedTask `json:"started,omitempty"`
 	Held       []planHeldTask    `json:"held,omitempty"`
 	Reasons    []string          `json:"reasons,omitempty"`

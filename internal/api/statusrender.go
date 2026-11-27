@@ -3,6 +3,7 @@ package api
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -173,6 +174,10 @@ func StatusSections(st Status) string {
 				}
 				if len(detail) > 0 {
 					line += "  " + strings.Join(detail, " ")
+				}
+				// A pending note (§6.2) rides the line until a job carries it.
+				if t.Note != "" {
+					line += "  note: " + noteGist(t.Note)
 				}
 				lines = append(lines, line)
 			}
@@ -570,4 +575,14 @@ func PlanStatusSections(st Status, now time.Time) string {
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+// noteGist is a pending note on one status line (§6.2): its words on a
+// single line, cut at 80 runes with an ellipsis.
+func noteGist(note string) string {
+	one := strings.Join(strings.Fields(note), " ")
+	if r := []rune(one); len(r) > 80 {
+		one = string(r[:80]) + "…"
+	}
+	return strconv.Quote(one)
 }

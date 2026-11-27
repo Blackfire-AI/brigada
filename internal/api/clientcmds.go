@@ -449,6 +449,14 @@ type PlanAmend struct {
 	Retarget []PlanRetarget
 	Retier   []PlanRetier
 	Respec   []PlanRespec
+	Note     []PlanNote
+}
+
+// PlanNote sets the pending note of a task (§6.2): the words its next
+// worker job carries in its prompt. An empty Note clears the pending one.
+type PlanNote struct {
+	Task string
+	Note string
 }
 
 // PlanCancel names one task to cancel, by name or by id as a decimal,
@@ -504,6 +512,7 @@ type PlanAmendResult struct {
 	Retargeted []int64
 	Retiered   []int64
 	Respecced  []int64
+	Noted      []int64
 	Started    []PlanCreatedTask
 	Held       []PlanHeldTask
 	Reasons    []string
@@ -535,12 +544,15 @@ func (c *Client) AmendPlan(ctx context.Context, plan int64, a PlanAmend, idemKey
 	for _, rs := range a.Respec {
 		body.Respec = append(body.Respec, planRespecBody{Task: rs.Task, Spec: rs.Spec, Mode: rs.Mode, Skills: rs.Skills, ToolGrants: rs.ToolGrants})
 	}
+	for _, n := range a.Note {
+		body.Note = append(body.Note, planNoteBody{Task: n.Task, Note: n.Note})
+	}
 	var out planAmendResponse
 	path := "/v1/plans/" + strconv.FormatInt(plan, 10) + "/amend"
 	if err := c.callKeyed(ctx, http.MethodPost, path, idemKey, body, &out); err != nil {
 		return PlanAmendResult{}, err
 	}
-	res := PlanAmendResult{PlanID: out.PlanID, State: out.State, Cancelled: out.Cancelled, Retargeted: out.Retargeted, Retiered: out.Retiered, Respecced: out.Respecced, Reasons: out.Reasons}
+	res := PlanAmendResult{PlanID: out.PlanID, State: out.State, Cancelled: out.Cancelled, Retargeted: out.Retargeted, Retiered: out.Retiered, Respecced: out.Respecced, Noted: out.Noted, Reasons: out.Reasons}
 	for _, t := range out.Added {
 		res.Added = append(res.Added, PlanCreatedTask{TaskID: t.TaskID, Name: t.Name, JobID: t.JobID})
 	}

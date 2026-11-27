@@ -66,6 +66,7 @@ const (
 	evTaskFailed              = "task_failed"                // the run failed or said nothing usable; the foreman decides (§3)
 	evTaskRetired             = "task_retired"               // a task that will not land was retired (§6.2); Reason carries the caller's words verbatim, Caller who asked — foreman or user
 	evTaskCancelledByAmend    = "task_cancelled_by_amend"    // a plan_amend newly cancelled the task (§6.2); Plan names the plan, Reason carries the caller's words verbatim, "no reason given" when blank, Caller who asked — foreman or user
+	evTaskNoteSet             = "task_note_set"              // a plan_amend set, replaced or cleared the task's pending note (§6.2); Note carries it verbatim ('' = cleared), Caller who asked — foreman or user
 	evTaskLoop                = "task_loop"                  // the worker repeats itself: the same check failure across fix rounds, or the same tool call in a window; the foreman decides (§5.6)
 	evReviewChanges           = "review_changes"             // the reviewer wants changes; a fix round answers them (§3, §7)
 	evReviewNoVerdict         = "review_no_verdict"          // the review ended without a usable verdict; the retry is spent or impossible (§7)
@@ -162,6 +163,7 @@ type eventPayload struct {
 	// (§6.2): the foreman or the user, recorded beside the reason on each
 	// task_retired and task_cancelled_by_amend event.
 	Caller      string `json:"caller,omitempty"`
+	Note        string `json:"note,omitempty"`   // a task_note_set event's note, verbatim (§6.2)
 	Origin      string `json:"origin,omitempty"` // the origin a dispatch_paused or dispatch_resumed event names: user or drain (§8.3)
 	Harness     string `json:"harness,omitempty"`
 	Model       string `json:"model,omitempty"`

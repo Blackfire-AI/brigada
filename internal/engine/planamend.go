@@ -77,6 +77,15 @@ type PlanRespec struct {
 	ToolGrants []string
 }
 
+// PlanNote sets the pending note of a task (§6.2): the words its next
+// worker job carries in its prompt. Task accepts a plan task's name or
+// decimal id. Setting replaces the task's pending note; an empty Note
+// clears it.
+type PlanNote struct {
+	Task string
+	Note string
+}
+
 // PlanCancel names one task an amendment cancels (§6.2): Task accepts a
 // plan task's name or decimal id, and Reason, optional, says why. The
 // reason is recorded verbatim on the task's task_cancelled_by_amend
@@ -102,6 +111,7 @@ type PlanAmendment struct {
 	Retarget []PlanRetarget
 	Retier   []PlanRetier
 	Respec   []PlanRespec
+	Note     []PlanNote
 	// SkipApproved says the user themself approved the cancellations of
 	// this amendment: only a user's token can say so, never the foreman's
 	// own. Without it a cancelled task is an abandoned one, and the
@@ -135,6 +145,7 @@ type AmendPlanResult struct {
 	Retargeted []int64
 	Retiered   []int64
 	Respecced  []int64
+	Noted      []int64
 	Started    []CreatedTask
 	Held       []HeldTask
 	Reasons    []string
@@ -208,8 +219,8 @@ func (n amendNode) label() string {
 }
 
 func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, now time.Time) (AmendPlanResult, error) {
-	if len(am.Add) == 0 && len(am.Cancel) == 0 && len(am.Retarget) == 0 && len(am.Retier) == 0 && len(am.Respec) == 0 {
-		return AmendPlanResult{}, fmt.Errorf("nothing to amend: give tasks to add, cancel, retarget, retier or respec")
+	if len(am.Add) == 0 && len(am.Cancel) == 0 && len(am.Retarget) == 0 && len(am.Retier) == 0 && len(am.Respec) == 0 && len(am.Note) == 0 {
+		return AmendPlanResult{}, fmt.Errorf("nothing to amend: give tasks to add, cancel, retarget, retier, respec or note")
 	}
 	var proj int64
 	var state, baseRef string
@@ -501,6 +512,31 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 		respecSkills[i] = rs.Skills
 		respecGrants[i] = rs.ToolGrants
 		respecced = append(respecced, i)
+	}
+	// A note (§6.2) rides a task that has not settled: pending, ready,
+	// running or parked alike. The next job it creates carries it.
+	var noted []int
+	notedSeen := map[int]bool{}
+	for _, nt := range am.Note {
+		i, err := resolve(nt.Task)
+		if err != nil {
+			return AmendPlanResult{}, fmt.Errorf("note: %w", err)
+		}
+		if i >= existing {
+			return AmendPlanResult{}, fmt.Errorf("note: %s is added by this same amendment; its spec carries what it needs", nodes[i].label())
+		}
+		switch nodes[i].state {
+		case taskDone, taskCancelled, taskRetired:
+			return AmendPlanResult{}, fmt.Errorf("note: %s is %s; a settled task runs no next job to carry a note", nodes[i].label(), nodes[i].state)
+		}
+		if nodes[i].cancelNow {
+			return AmendPlanResult{}, fmt.Errorf("note: %s is cancelled by this same amendment", nodes[i].label())
+		}
+		if notedSeen[i] {
+			return AmendPlanResult{}, fmt.Errorf("note: %s is noted twice in this amendment", nodes[i].label())
+		}
+		notedSeen[i] = true
+		noted = append(noted, i)
 	}
 	// Dependencies resolve after the cancels, against the whole amended
 	// node set, so a task cannot wait on one this amendment cancels.
@@ -794,6 +830,12 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 		}
 		res.Respecced = append(res.Respecced, nodes[i].id)
 	}
+	for k, i := range noted {
+		if err := setTaskNoteTx(tx, proj, nodes[i].id, am.Note[k].Note, am.Caller, now); err != nil {
+			return AmendPlanResult{}, fmt.Errorf("note %s: %w", nodes[i].label(), err)
+		}
+		res.Noted = append(res.Noted, nodes[i].id)
+	}
 	setupRec, err := taskProjectSetupTx(tx, proj)
 	if err != nil {
 		return AmendPlanResult{}, err
@@ -987,6 +1029,9 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 	if len(res.Respecced) > 0 {
 		change = append(change, "respecified "+joinIDs(res.Respecced))
 	}
+	if len(res.Noted) > 0 {
+		change = append(change, "noted "+joinIDs(res.Noted))
+	}
 	for _, h := range res.Held {
 		label := fmt.Sprintf("task %d", h.TaskID)
 		if h.Name != "" {
@@ -997,7 +1042,7 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 	if _, err := appendEventTx(tx, evPlanAmended, proj, 0, 0, eventPayload{
 		Retiered: res.Retiered,
 		Plan:     plan,
-		Count:    int64(len(res.Added) + len(res.Cancelled) + len(res.Retargeted) + len(res.Retiered) + len(res.Respecced)),
+		Count:    int64(len(res.Added) + len(res.Cancelled) + len(res.Retargeted) + len(res.Retiered) + len(res.Respecced) + len(res.Noted)),
 		Status:   newState,
 		Reason:   strings.Join(change, "; "),
 	}, now); err != nil {

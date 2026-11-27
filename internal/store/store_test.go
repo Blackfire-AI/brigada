@@ -1415,3 +1415,53 @@ func TestForemanSessionCwdMigrationClearsForemanSessions(t *testing.T) {
 		}
 	}
 }
+
+// TestTaskNoteMigrationKeepsTheRows builds the store of a binary that
+// predates 0088_task_note — the store carrying 0087 — and opens it with
+// this binary: the column exists, every old row has no pending note
+// (NULL), the rows keep their values, and the column takes a note.
+func TestTaskNoteMigrationKeepsTheRows(t *testing.T) {
+	migs, err := allMigrations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := 0
+	for _, m := range migs {
+		if m.name == "task_note" {
+			before = m.version - 1
+			break
+		}
+	}
+	if before != 87 {
+		t.Fatalf("task_note applies after version %d, want 87 (0087_task_tool_grants)", before)
+	}
+	path := filepath.Join(t.TempDir(), "store.db")
+	db, err := sql.Open("sqlite", dsn(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range migs[:before] {
+		exec(t, db, m.sql)
+	}
+	exec(t, db, "PRAGMA user_version = "+strconv.Itoa(before))
+	project := insertProject(t, db)
+	plan := insertPlan(t, db, project)
+	task := insertTask(t, db, plan)
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s := openStore(t, path)
+	if cols := queryStrings(t, s.db, "SELECT name FROM pragma_table_info('tasks')"); !slices.Contains(cols, "note") {
+		t.Errorf("tasks after upgrade has no note column: %v", cols)
+	}
+	if got := queryInt(t, s.db, "SELECT note IS NULL FROM tasks WHERE id = ?", task); got != 1 {
+		t.Errorf("old task note is not NULL: no old row has a pending note")
+	}
+	if got := queryString(t, s.db, "SELECT state FROM tasks WHERE id = ?", task); got != "ready" {
+		t.Errorf("existing task state = %q, want ready untouched", got)
+	}
+	exec(t, s.db, "UPDATE tasks SET note = 'use v2' WHERE id = ?", task)
+	if got := queryString(t, s.db, "SELECT note FROM tasks WHERE id = ?", task); got != "use v2" {
+		t.Errorf("note = %q", got)
+	}
+}

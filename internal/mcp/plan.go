@@ -237,6 +237,14 @@ type planAmendArgs struct {
 	Retarget []planRetargetArg `json:"retarget"`
 	Retier   []planRetierArg   `json:"retier"`
 	Respec   []planRespecArg   `json:"respec"`
+	Note     []planNoteArg     `json:"note"`
+}
+
+// planNoteArg is one note item (§6.2): the task and the note its next job
+// carries; an empty note clears the pending one.
+type planNoteArg struct {
+	Task taskRef `json:"task"`
+	Note string  `json:"note"`
 }
 
 type planRespecArg struct {
@@ -335,6 +343,9 @@ func callPlanAmend(ctx context.Context, c *api.Client, args json.RawMessage) (st
 	for _, rs := range a.Respec {
 		am.Respec = append(am.Respec, api.PlanRespec{Task: string(rs.Task), Spec: rs.Spec, Mode: rs.Mode, Skills: rs.Skills, ToolGrants: rs.ToolGrants})
 	}
+	for _, n := range a.Note {
+		am.Note = append(am.Note, api.PlanNote{Task: string(n.Task), Note: n.Note})
+	}
 	res, err := c.AmendPlan(ctx, a.Plan, am, idemKey("plan_amend", a))
 	if err != nil {
 		return "", err
@@ -362,6 +373,9 @@ func callPlanAmend(ctx context.Context, c *api.Client, args json.RawMessage) (st
 	}
 	for _, id := range res.Respecced {
 		fmt.Fprintf(&b, "\nrespecified task %d", id)
+	}
+	for _, id := range res.Noted {
+		fmt.Fprintf(&b, "\nnoted task %d", id)
 	}
 	for _, t := range res.Started {
 		fmt.Fprintf(&b, "\n%s: work job %d queued", label(t), t.JobID)

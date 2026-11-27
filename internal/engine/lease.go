@@ -671,6 +671,10 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 		if err != nil {
 			return nil, fmt.Errorf("lease job %d: %w", j.ID, err)
 		}
+		// A work or fix job's lease delivers the task's pending note (§6.2).
+		if err := clearDeliveredNoteTx(tx, j, j.FirstLeased == ""); err != nil {
+			return nil, err
+		}
 		usage.Add(cjob.Runner, cjob.Account, cjob.Model, cjob.Plan)
 		if usesKeySession(j) {
 			// The session now sits on this runner: later session jobs on

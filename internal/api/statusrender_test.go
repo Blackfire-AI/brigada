@@ -268,6 +268,26 @@ func TestStatusSectionsShowsWaitLanded(t *testing.T) {
 	}
 }
 
+// TestStatusSectionsShowsPendingNote: a task's pending note (§6.2) rides
+// its line, on one line and bounded; a task without one shows none.
+func TestStatusSectionsShowsPendingNote(t *testing.T) {
+	st := Status{Plans: []engine.StatusPlan{{ID: 1, Tasks: []engine.StatusTask{
+		{ID: 1, Title: "noted", State: "pending", Note: "use the v2\nclient"},
+		{ID: 2, Title: "long", State: "pending", Note: strings.Repeat("x", 200)},
+		{ID: 3, Title: "plain", State: "pending"},
+	}}}}
+	got := StatusSections(st)
+	if !strings.Contains(got, `note: "use the v2 client"`) {
+		t.Errorf("status lacks the pending note:\n%s", got)
+	}
+	if !strings.Contains(got, strings.Repeat("x", 80)+"…") || strings.Contains(got, strings.Repeat("x", 81)) {
+		t.Errorf("a long note is not cut at 80 runes:\n%s", got)
+	}
+	if strings.Contains(got, "plain  note") || strings.Count(got, "note:") != 2 {
+		t.Errorf("a task without a note shows one:\n%s", got)
+	}
+}
+
 // TestStatusSectionsLandReadyStates: the land_ready gate's target state
 // (issue #87) rides the task line — ready, the hold, and the not-ready
 // backoff's wait.
