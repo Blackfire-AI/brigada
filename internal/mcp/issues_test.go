@@ -69,6 +69,11 @@ func TestServeCallIssueRead(t *testing.T) {
 	if !ok {
 		t.Fatalf("the foreman offer lost issue_read: %v", ToolNames())
 	}
+	for _, want := range []string{"tracker", "tracker_url", "gitea", "tracker.<host>.token"} {
+		if !strings.Contains(tool.Description, want) {
+			t.Errorf("issue_read description = %q, want it to name %q", tool.Description, want)
+		}
+	}
 	schema, _ := tool.InputSchema.(map[string]any)
 	props, _ := schema["properties"].(map[string]any)
 	if len(props) == 0 || strings.Contains(strings.Join(propNames(props), " "), "repo") {

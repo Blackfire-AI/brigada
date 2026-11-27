@@ -47,7 +47,9 @@ type IssueComment struct {
 
 // ErrIssueRead marks every reason an issue could not be read that the
 // foreman can report and the user can act on (§12.2): the repository is
-// not on GitHub, gh is missing or not logged in, the project is gone.
+// not on GitHub and the project sets no tracker (the tracker and
+// tracker_url settings name a Gitea forge), gh is missing or not
+// logged in, the project is gone.
 // The API answers it as the caller's refusal with the reason in its
 // message; the tool never falls back to searching anywhere else.
 var ErrIssueRead = errors.New("issue unreadable")

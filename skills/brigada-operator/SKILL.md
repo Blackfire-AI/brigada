@@ -34,7 +34,7 @@ context, ordering and constraints it needs:
 - The foreman reads the issues and pull requests of the project's
   own repository itself; a bare number of that repository is often
   enough. For an issue anywhere else, or when the repository is not
-  on GitHub or gh is not signed in, put its text into the ask; keep
+  on GitHub with no tracker/tracker_url set, or gh is not signed in, put its text into the ask; keep
   the number only as a reference for `Closes` or `Refs` trailers.
 - Name files and document sections; the foreman reads the
   repository.
