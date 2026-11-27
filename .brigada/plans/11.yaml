@@ -85,7 +85,7 @@ tasks:
     continue: "sync-runner"
     tier: heavy
     effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-59"
     rounds: 0
   - id: 60
@@ -97,7 +97,7 @@ tasks:
     continue: "sync-waiting"
     effort: medium
     skills: ["surface-parity"]
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 61
