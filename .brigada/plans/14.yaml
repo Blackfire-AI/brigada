@@ -90,8 +90,8 @@ tasks:
     base: "gitea-fetcher"
     effort: medium
     skills: ["docs-change", "surface-parity"]
-    state: running
-    branch: "brigada/task-75"
+    state: reviewing
+    branch: "brigada/task-75-r1"
     rounds: 0
   - id: 76
     name: "tracker-defaults-140"
