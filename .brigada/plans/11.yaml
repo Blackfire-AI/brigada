@@ -198,7 +198,7 @@ tasks:
     continue: "batch-resume"
     effort: medium
     skills: ["docs-change"]
-    state: reviewing
+    state: done
     branch: "brigada/task-68"
     rounds: 1
   - id: 70
