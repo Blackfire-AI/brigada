@@ -140,3 +140,27 @@ func TestToolGrantsInLeaseEvent(t *testing.T) {
 		t.Errorf("job_leased payload = %s, want the tool grants", payload)
 	}
 }
+
+// TestLeaseGrantCarriesToolGrants: a task's tool grants ride its lease
+// grant, so the runner can hand them to the adapter (§6.1, §12.3); a task
+// without grants carries none.
+func TestLeaseGrantCarriesToolGrants(t *testing.T) {
+	e := newEnv(t)
+	sr := e.submitTask(TaskParams{RepoURL: envRepo, BaseRef: "main", Spec: "a change", ToolGrants: []string{"Bash(git checkout:*)"}})
+	g := e.leaseAny(e.runner1)
+	if g == nil || g.JobID != sr.JobID {
+		t.Fatalf("lease = %+v, want job %d", g, sr.JobID)
+	}
+	if !slices.Equal(g.ToolGrants, []string{"Bash(git checkout:*)"}) {
+		t.Errorf("lease grant tool_grants = %v, want the checkout grant", g.ToolGrants)
+	}
+	// A task with no grants leases none.
+	plain := e.submitTask(TaskParams{RepoURL: envRepo, BaseRef: "main", Spec: "plain"})
+	pg := e.leaseAny(e.runner1)
+	if pg == nil || pg.JobID != plain.JobID {
+		t.Fatalf("lease = %+v, want job %d", pg, plain.JobID)
+	}
+	if len(pg.ToolGrants) != 0 {
+		t.Errorf("grantless lease tool_grants = %v, want none", pg.ToolGrants)
+	}
+}

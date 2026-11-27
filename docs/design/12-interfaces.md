@@ -144,3 +144,5 @@ Status keeps each task's landing state: a live member reads `landing in batch <j
 - `draining` (a restart drain pending, §5.1: the runner exits once its running jobs finish, and status renders the wait).
 
 Fencing as described in the glossary.
+
+A work or fix job's lease grant carries the task's `tool_grants` (§6.1), the allowlisted Claude Code permission patterns its worker is granted. The runner hands them to the adapter, which appends them to a pattern-scoped claude agent's `--allowedTools` and leaves every other scope unchanged (§5.2).
