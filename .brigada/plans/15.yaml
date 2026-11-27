@@ -65,6 +65,6 @@ tasks:
     effort: medium
     review_tier: standard
     caps: {restart: 7}
-    state: needs_foreman
+    state: ready
     branch: "brigada/task-54-r5"
     rounds: 0
