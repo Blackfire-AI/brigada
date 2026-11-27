@@ -67,6 +67,6 @@ tasks:
     base: "gitea-fetcher"
     continue: "gitea-fetcher"
     effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-73"
     rounds: 0
