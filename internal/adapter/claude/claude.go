@@ -187,6 +187,14 @@ func (a *Adapter) Command(job adapter.Job, workdir, resumeSessionID string) (*ex
 		}
 		args = append(args, "--settings", settings)
 	}
+	// A task's tool grants (§6.1) widen a pattern-scoped claude worker's
+	// allowlist — appended, never removing anything — and only when the
+	// resolved permission is a pattern list. A mode-valued permission
+	// (including the default bypassPermissions) and a foreman keep their
+	// own scope; a non-claude adapter never reads them at all.
+	if !foreman && len(job.ToolGrants) > 0 && len(allowed) > 0 {
+		allowed = append(allowed, job.ToolGrants...)
+	}
 	if len(allowed) > 0 {
 		args = append(args, append([]string{"--allowedTools"}, allowed...)...)
 	}

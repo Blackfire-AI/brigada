@@ -434,6 +434,10 @@ type jobGrant struct {
 	// which the runner hands the harness as its own permission mode; empty
 	// when the agent has none to pass. A review's grant carries it as well.
 	Permission string `json:"permission,omitempty"`
+	// ToolGrants are the task's per-task tool grants (§6.1), the Claude
+	// Code permission patterns its worker is granted; empty when the task
+	// grants none. The runner hands them to the adapter.
+	ToolGrants []string `json:"tool_grants,omitempty"`
 	// Setup is the environment step (§5.7) the runner runs before the
 	// worker and again before the check; absent when the task has none.
 	Setup *engine.SetupSpec `json:"setup,omitempty"`
@@ -545,6 +549,7 @@ func jobGrantOf(g *engine.LeaseGrant) *jobGrant {
 		BaseRef:         g.BaseRef,
 		CheckCmd:        g.CheckCmd,
 		Permission:      g.Permission,
+		ToolGrants:      g.ToolGrants,
 		Setup:           g.Setup,
 		ExtraRepos:      g.ExtraRepos,
 		ReviewBranch:    g.ReviewBranch,
