@@ -81,6 +81,6 @@ tasks:
     effort: medium
     caps: {restart: 10}
     skills: ["surface-parity"]
-    state: ready
+    state: running
     branch: "brigada/task-55-r4"
     rounds: 0
