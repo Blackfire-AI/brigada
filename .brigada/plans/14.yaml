@@ -56,7 +56,7 @@ tasks:
     tier: heavy
     effort: medium
     skills: ["config-setting", "surface-parity"]
-    state: reviewing
+    state: done
     branch: "brigada/task-72"
     rounds: 0
   - id: 73
@@ -67,6 +67,6 @@ tasks:
     base: "gitea-fetcher"
     continue: "gitea-fetcher"
     effort: medium
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
