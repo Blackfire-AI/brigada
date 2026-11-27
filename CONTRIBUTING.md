@@ -84,7 +84,7 @@ git push origin v1.0.0-rc.1
 
 A tag with a suffix such as `-rc.1` is published as a prerelease and does not update Homebrew. A release tag without a suffix also updates `Formula/brigada.rb` in [Blackfire-AI/homebrew-tap](https://github.com/Blackfire-AI/homebrew-tap). The maintainer creates that repository and configures the `HOMEBREW_TAP_TOKEN` secret with write access to its contents before releasing.
 
-The `release` workflow builds `brigada-<os>-<arch>` binaries (darwin and linux, amd64 and arm64) with the tag as the version, plus a `.tar.gz` of each and `SHA256SUMS`, and attaches them to a new GitHub release. For tags without a suffix, it then generates the complete Homebrew formula from the release checksums and commits and pushes it to the tap. Verify `brew audit` by hand after the release. `brigada version` prints the tag without its leading `v`; a source build prints `0.0.0-dev+<rev12>` (see [the installation guide](docs/GUIDE.md#1-install-and-brigada-init)).
+The `release` workflow builds `brigada-<os>-<arch>` binaries (darwin and linux, amd64 and arm64) with the tag as the version, plus a `.tar.gz` of each, `.deb` and `.rpm` packages for the Linux architectures, and `SHA256SUMS`, and attaches them all to a new GitHub release. For tags without a suffix, it then generates the complete Homebrew formula from the release checksums and commits and pushes it to the tap. Verify `brew audit` by hand after the release. `brigada version` prints the tag without its leading `v`; a source build prints `0.0.0-dev+<rev12>` (see [the installation guide](docs/GUIDE.md#1-install-and-brigada-init)).
 
 ## License
 

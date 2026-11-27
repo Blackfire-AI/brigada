@@ -22,7 +22,7 @@ Contents:
 
 ## 1. Install and `brigada init`
 
-You need `git`, a repository with a git remote, and signed-in agent CLIs on `PATH`. macOS and Linux on amd64 and arm64 are supported; Windows is not. Homebrew, the install script and the prebuilt binaries need no Go toolchain; `go install` needs Go 1.27 or newer.
+You need `git`, a repository with a git remote, and signed-in agent CLIs on `PATH`. macOS and Linux on amd64 and arm64 are supported; Windows is not. Homebrew, the install script, the prebuilt binaries and the `.deb` and `.rpm` packages need no Go toolchain; `go install` needs Go 1.27 or newer.
 
 ```sh
 brew install blackfire-ai/tap/brigada
@@ -35,6 +35,13 @@ or the install script (it verifies the release against `SHA256SUMS` and installs
 curl -fsSL https://raw.githubusercontent.com/Blackfire-AI/brigada/main/install.sh | sh
 ```
 
+or, on Linux only, install a release's `.deb` or `.rpm` package directly. No apt or dnf repository is hosted, so the packages do not update on their own:
+
+```sh
+sudo apt install ./brigada_<version>_amd64.deb
+sudo dnf install ./brigada-<version>.x86_64.rpm
+```
+
 or `go install`, with `$(go env GOPATH)/bin` on your `PATH`:
 
 ```sh
@@ -42,7 +49,7 @@ go install github.com/Blackfire-AI/brigada/cmd/brigada@latest
 brigada version
 ```
 
-Prebuilt binaries are on the [releases page](https://github.com/Blackfire-AI/brigada/releases).
+Prebuilt binaries, tarballs and the `.deb` and `.rpm` packages are on the [releases page](https://github.com/Blackfire-AI/brigada/releases), listed in `SHA256SUMS` and covered by the release's build provenance attestation.
 
 ### The parts
 

@@ -17,6 +17,11 @@ You need macOS or Linux, a git repository with a remote, and a supported agent C
    brew install blackfire-ai/tap/brigada
    ```
 
+   On Linux, a release's `.deb` and `.rpm` packages install the same binary
+   directly (`sudo apt install ./brigada_<version>_amd64.deb`,
+   `sudo dnf install ./brigada-<version>.x86_64.rpm`); no apt or dnf
+   repository is hosted, so they do not update on their own.
+
 2. Initialize your repository. Init asks which agents to use and which checks to run, then starts brigada:
 
    ```sh
