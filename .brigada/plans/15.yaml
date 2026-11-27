@@ -64,6 +64,6 @@ tasks:
     base: ""
     effort: medium
     caps: {restart: 6}
-    state: ready
+    state: running
     branch: ""
     rounds: 0
