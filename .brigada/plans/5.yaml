@@ -69,9 +69,9 @@ tasks:
     effort: medium
     review_tier: standard
     review_effort: medium
-    state: reviewing
+    state: running
     branch: "brigada/task-12-r1"
-    rounds: 0
+    rounds: 1
   - id: 50
     name: "wl-field"
     title: "wait_landed task field: migration and every read/write surface (Refs #259)"
