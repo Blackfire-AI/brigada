@@ -167,7 +167,7 @@ A **rule** turns `auto` into `ask` for the one plan or task that trips it, and t
 
 The rules are flat keys in `.brigada/project.yaml` (schema 1 is flat by design; no expression language):
 
-**Not implemented: batch landing and `land_ready` suspect attribution.** brigada lands one task per land job — `land_batch_max` below is accepted and validated (1 to 20, default 5) but not yet acted on — a `land_ready` hold carries the command's first output line and no suspects. The `land_batch_max` row and paragraph, the `land_ready` attribution sentences, the batch sentences that follow, and §7.1's batch and suspects paragraphs state the designs.
+**Partly implemented: batch landing; not implemented: `land_ready` suspect attribution.** `land_batch_max` below bounds the batch the land rule forms and reserves (§7.1), but the batch job lands its lead member alone and the rest re-form the next batch; a `land_ready` hold carries the command's first output line and no suspects. The `land_batch_max` row and paragraph, the `land_ready` attribution sentences, the batch sentences that follow, and §7.1's batch and suspects paragraphs state the designs.
 
 | Key | Gate it holds | Default |
 |---|---|---|
@@ -182,7 +182,7 @@ The rules are flat keys in `.brigada/project.yaml` (schema 1 is flat by design; 
 | `approval_tiers` | land | none (`heavy`: the user reads heavy diffs before they land) |
 | `approval_restarted` | land | `false` (`true`: a task that spent a restart or a tier bump waits) |
 | `land_target` | — | the project's default branch; or a staging branch such as `brigada/landed`, which a new task's work builds on too (§6.1) |
-| `land_batch_max` | — | not implemented — the key is refused as unknown: `5`; an integer from 1 to 20 inclusive, with 1 landing one task per job; any other value is refused naming `land_batch_max`. |
+| `land_batch_max` | — | `5`; an integer from 1 to 20 inclusive, the most members one batch reserves (§7.1), with 1 one landing per job; any other value is refused naming `land_batch_max`. |
 | `after_land` | — | none: a repo-relative command the runner runs after a successful land, under the environment of a check (§5.8; product §6); its failure is reported, never undone |
 | `land_ready` | land | none: a repo-relative command path inside the repository the land job runs before landing and the push phase runs before its push; exit 0 lands, exit 1 holds the landing on the command's first output line, and any other exit, a spawn failure or a timeout is not ready — nothing lands and the landing is requeued on the not-before backoff (§3). |
 

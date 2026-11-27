@@ -205,11 +205,12 @@ func (e *Engine) parkStaleBaseTx(tx *sql.Tx, project, taskID, dep int64, baseRef
 // not-ready retry is queued straight from the completion, and the sweep
 // leaves a dependent with a queued land job to this refusal, so the
 // lease is where every pre-squash landing is checked last. Only a task's
-// own pre-squash land job is checked: a push phase has a landing record
+// own pre-squash land job, or the batch it leads (§7.1), is checked: a
+// push phase has a landing record
 // and pushes the recorded commit, and a job with no task — a sync — has
 // no base.
 func (e *Engine) refuseStaleLandTx(tx *sql.Tx, j *jobRow, now time.Time) (bool, error) {
-	if j.TaskID == 0 || j.Key != fmt.Sprintf("task:%d", j.TaskID) {
+	if j.TaskID == 0 || (j.Key != fmt.Sprintf("task:%d", j.TaskID) && !isLandBatchKey(j.Key)) {
 		return false, nil
 	}
 	var have int
@@ -227,6 +228,11 @@ func (e *Engine) refuseStaleLandTx(tx *sql.Tx, j *jobRow, now time.Time) (bool, 
 		return false, err
 	}
 	if err := e.parkStaleBaseTx(tx, j.ProjectID, j.TaskID, dep, baseRef, depBranch, "the landing is refused", true, now); err != nil {
+		return false, err
+	}
+	// A batch the refusal cancelled releases its members, and those still
+	// ready form the next batch without the parked lead (§7.1).
+	if err := e.endLandBatchTx(tx, j, now); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -293,7 +299,7 @@ func (e *Engine) sweepStaleDependentsTx(tx *sql.Tx, project, dep int64, now time
 	rows.Close()
 	var held []staleDependent
 	for _, c := range candidates {
-		live, err := liveJobTx(tx, fmt.Sprintf("task:%d", c.id))
+		live, err := liveTaskOwnerTx(tx, c.id)
 		if err != nil {
 			return err
 		}

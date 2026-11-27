@@ -154,6 +154,11 @@ func (e *Engine) recordLandedTx(tx *sql.Tx, repoURL, branch string, landed []Lan
 		} else if n == 0 {
 			continue
 		}
+		// The record settles the landing, so a batch reservation ends
+		// with it (§7.1).
+		if err := releaseLandMemberTx(tx, lc.TaskID); err != nil {
+			return err
+		}
 		if _, err := e.settleLandedTx(tx, lc.TaskID, lc.Commit, false, now); err != nil {
 			return err
 		}

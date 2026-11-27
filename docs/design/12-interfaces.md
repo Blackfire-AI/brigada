@@ -28,7 +28,7 @@ Groups:
 
 Task jobs are keyed `task:<id>`: one live job per key makes duplicate job creation coalesce into the follow-up flag, which `status` shows; a land job takes its task's key too.
 
-**Not implemented: land batches (§7.1).** brigada lands one task per land job, on the task's own key, and no task carries a batch reservation. In the design, a land batch is keyed `land-batch:<project>` — a project has one land target, so one key covers it — and every member's reservation, a `land_batch_job` field on the task that §11 does not have (it is part of the unbuilt design), holds its `task:<id>` key the way a live job holds it, so a second batch for the target, a second landing job or a duplicate approval coalesces the same way (§7.1).
+**Land batches (§7.1).** A land batch is keyed `land-batch:<project>` — a project has one land target, so one key covers it — and every member's reservation, the task's `land_batch_job` (§11), holds its `task:<id>` key the way a live job holds it, so a second batch for the target, a second landing job or a duplicate approval coalesces the same way (§7.1). The batch run is not built yet: the batch job lands its lead alone, through the one-task grant below, and a not-ready retry, a `land_ready` re-check and a gate-skipped release run on the member's `task:<id>` key.
 
 **Credentials.** Foreman credentials are short-lived and scoped to one turn or one chat: a headless turn keeps the job-lease-scoped credential of §12.2, and an attached chat gets a hold-scoped foreman token, minted at attach, carried by the MCP config the client writes for the chat and revoked at detach, so the chat's tools die with it. A token's role authorizes API calls; the role checks keep a foreman credential out of the user's decisions (§12.2). No direct store access and the engine-as-mailbox rule stand.
 
@@ -106,7 +106,7 @@ Selecting a flag mints nothing, and a selector that the credential in hand does 
 
 ### Land batches
 
-**Not implemented: land batches (§7.1).** brigada lands one task per land job, keyed `task:<id>`, and no grant or completion carries a batch. The paragraphs below describe the design: the grant, the completion and the readers of a batch reservation; the functions they name exist and serve one-task landings.
+**Partly implemented: land batches (§7.1).** Formation, reservation and the readers of a reservation are built; no grant or completion carries a batch yet. A batch job's task is its first member, the lead: its lease is the one-task grant and its completion the one-task record, so it lands the lead, releases every member when it ends, and its outcome re-forms the next batch. The grant and completion paragraphs below describe the design; the readers paragraph is implemented.
 
 **Land batch grants and completion.** A grant carries the batch job id, `land-batch:<project>` key, lease and fence, project, remote, target, push phase/gate and ordered member list. Each member carries task and plan ids, result branch, approved head, recorded base, dependencies, message/trailer data and its gate-skip approval; the grant also carries the check and setup settings and command identity needed for gate evidence. A push grant names the recorded commits and ordered prefix it releases. The runner persists progress before publication as §7.1 requires.
 

@@ -1161,6 +1161,16 @@ func (e *Engine) cancelTaskJobsTx(tx *sql.Tx, task int64, reason string, now tim
 			return err
 		}
 	}
+	// Cancelling a member's task stops the batch that reserves it (§7.1),
+	// as it stops the task's own live jobs; the sweep releases the other
+	// members, and they land in the next batch.
+	if b, err := reservedBatchTx(tx, task); err != nil {
+		return err
+	} else if b != nil {
+		if _, err := e.cancelTx(tx, b, reason, now); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

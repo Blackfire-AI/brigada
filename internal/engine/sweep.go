@@ -644,6 +644,13 @@ func (e *Engine) sweepPolledTx(tx *sql.Tx, now time.Time, polling int64) (rep Sw
 		return rep, err
 	}
 
+	// A batch land job that ended without its completion — cancelled, or
+	// failed by the queue TTL above — releases its members, and the
+	// landings still ready form the next batch (§7.1).
+	if err := e.sweepLandBatchesTx(tx, now); err != nil {
+		return rep, err
+	}
+
 	return rep, nil
 }
 
