@@ -67,6 +67,7 @@ tasks:
     base: "gitea-fetcher"
     continue: "gitea-fetcher"
     effort: medium
-    state: running
+    state: needs_foreman
     branch: ""
     rounds: 0
+    question: "Task 12 (plan 5, anti-fragmentation guidance, defaults 1.3.0) has not landed on base brigada/task-72 at 3a156d4b. internal/defaults/defaults.go has Version = \"1.2.0\" and internal/defaults/versions/ holds only 1.0.0, 1.1.0 and 1.2.0. Please land task 12, or tell me to proceed anyway. Without it the 1.4.0 directory has no 1.3.0 pattern to match."
