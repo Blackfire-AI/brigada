@@ -25,8 +25,13 @@ type Issue struct {
 	// URL is the issue's page on the forge, when it gave one.
 	URL string `json:"url,omitempty"`
 	// PullRequest says the number named a pull request, not an issue:
-	// the same numbers space on GitHub either way.
+	// the same numbers space on GitHub and Gitea either way.
 	PullRequest bool `json:"pull_request,omitempty"`
+	// State is the forge's own word for where the issue stands, open or
+	// closed, when it gave one.
+	State string `json:"state,omitempty"`
+	// Labels are the names of the issue's labels, in the forge's order.
+	Labels []string `json:"labels,omitempty"`
 	// Comments are the asked-for comments, oldest first, as the forge
 	// lists them.
 	Comments []IssueComment `json:"comments,omitempty"`
@@ -64,6 +69,7 @@ func (e *Engine) ReadIssue(ctx context.Context, projectID int64, number int, com
 		return Issue{}, fmt.Errorf("read the issue: the number must be positive")
 	}
 	var repoURL string
+	var tracker trackerSetting
 	var missing bool
 	err := e.store.Update(ctx, func(tx *sql.Tx) error {
 		if _, err := e.sweepTx(tx, e.cfg.Now()); err != nil {
@@ -74,6 +80,10 @@ func (e *Engine) ReadIssue(ctx context.Context, projectID int64, number int, com
 			missing = true
 			return nil
 		}
+		if err != nil {
+			return err
+		}
+		tracker, err = projectTrackerTx(tx, projectID)
 		return err
 	})
 	if err != nil {
@@ -82,11 +92,31 @@ func (e *Engine) ReadIssue(ctx context.Context, projectID int64, number int, com
 	if missing {
 		return Issue{}, fmt.Errorf("%w: no such project", ErrIssueRead)
 	}
-	issue, err := e.cfg.IssueFetch(ctx, repoURL, number, comments)
+	issue, err := e.fetchIssue(ctx, tracker, repoURL, number, comments)
 	if err != nil {
 		return Issue{}, err
 	}
 	return *issue, nil
+}
+
+// fetchIssue dispatches an issue read by the project's tracker setting
+// (§12.2): none reads nothing, gitea reads the forge at tracker_url over
+// its HTTP API, and github or unset read through IssueFetch, the gh seam.
+// An unset tracker on a repository off GitHub is refused with the reason
+// that names the setting; an explicit github one says the repository is
+// not on GitHub.
+func (e *Engine) fetchIssue(ctx context.Context, tracker trackerSetting, repoURL string, number int, comments bool) (*Issue, error) {
+	switch tracker.Kind {
+	case TrackerNone:
+		return nil, trackerRefusal(TrackerNone, false)
+	case TrackerGitea:
+		return e.giteaIssue(ctx, tracker, repoURL, number, comments)
+	}
+	issue, err := e.cfg.IssueFetch(ctx, repoURL, number, comments)
+	if tracker.Kind == "" && errors.Is(err, errNotOnGitHub) {
+		return nil, trackerRefusal("", false)
+	}
+	return issue, err
 }
 
 // ghIssueFetch is the shipped issue fetch (§12.2): the engine reads the
@@ -107,45 +137,82 @@ func ghIssueFetch(ctx context.Context, repoURL string, number int, comments bool
 	if err != nil {
 		return nil, err
 	}
-	var row struct {
-		Number  int    `json:"number"`
-		Title   string `json:"title"`
-		Body    string `json:"body"`
-		HTMLURL string `json:"html_url"`
-		User    struct {
-			Login string `json:"login"`
-		} `json:"user"`
-		PullRequest json.RawMessage `json:"pull_request"`
-	}
-	if err := json.Unmarshal(data, &row); err != nil {
-		return nil, fmt.Errorf("%w: gh's answer is not an issue: %v", ErrIssueRead, err)
-	}
-	out := &Issue{
-		Number: row.Number, Title: row.Title, Body: row.Body,
-		Author: row.User.Login, URL: row.HTMLURL,
-		PullRequest: len(row.PullRequest) > 0,
+	out, err := parseIssue(data, "gh's answer")
+	if err != nil {
+		return nil, err
 	}
 	if comments {
 		data, err := ghGet(ctx, gh, fmt.Sprintf("repos/%s/%s/issues/%d/comments?per_page=100", owner, repo, number))
 		if err != nil {
 			return nil, err
 		}
-		var rows []struct {
-			User struct {
-				Login string `json:"login"`
-			} `json:"user"`
-			Body      string `json:"body"`
-			CreatedAt string `json:"created_at"`
-		}
-		if err := json.Unmarshal(data, &rows); err != nil {
-			return nil, fmt.Errorf("%w: gh's answer is not a comment list: %v", ErrIssueRead, err)
-		}
-		for _, c := range rows {
-			out.Comments = append(out.Comments, IssueComment{Author: c.User.Login, Body: c.Body, CreatedAt: c.CreatedAt})
+		if out.Comments, err = parseIssueComments(data, "gh's answer"); err != nil {
+			return nil, err
 		}
 	}
 	return out, nil
 }
+
+// parseIssue reads one issue as GitHub's and Gitea's REST APIs both
+// answer it (§12.2): the same fields under the same names, so both
+// forges fill an Issue alike. pull_request is an object on a pull
+// request; GitHub leaves it out of an issue and Gitea sends null. from
+// names the answer in a refusal.
+func parseIssue(data []byte, from string) (*Issue, error) {
+	var row struct {
+		Number  int    `json:"number"`
+		Title   string `json:"title"`
+		Body    string `json:"body"`
+		HTMLURL string `json:"html_url"`
+		State   string `json:"state"`
+		User    struct {
+			Login string `json:"login"`
+		} `json:"user"`
+		Labels []struct {
+			Name string `json:"name"`
+		} `json:"labels"`
+		PullRequest *struct{} `json:"pull_request"`
+	}
+	if err := json.Unmarshal(data, &row); err != nil {
+		return nil, fmt.Errorf("%w: %s is not an issue: %v", ErrIssueRead, from, err)
+	}
+	out := &Issue{
+		Number: row.Number, Title: row.Title, Body: row.Body,
+		Author: row.User.Login, URL: row.HTMLURL, State: row.State,
+		PullRequest: row.PullRequest != nil,
+	}
+	for _, l := range row.Labels {
+		if l.Name != "" {
+			out.Labels = append(out.Labels, l.Name)
+		}
+	}
+	return out, nil
+}
+
+// parseIssueComments reads a comment list as GitHub's and Gitea's REST
+// APIs both answer it, oldest first.
+func parseIssueComments(data []byte, from string) ([]IssueComment, error) {
+	var rows []struct {
+		User struct {
+			Login string `json:"login"`
+		} `json:"user"`
+		Body      string `json:"body"`
+		CreatedAt string `json:"created_at"`
+	}
+	if err := json.Unmarshal(data, &rows); err != nil {
+		return nil, fmt.Errorf("%w: %s is not a comment list: %v", ErrIssueRead, from, err)
+	}
+	var out []IssueComment
+	for _, c := range rows {
+		out = append(out, IssueComment{Author: c.User.Login, Body: c.Body, CreatedAt: c.CreatedAt})
+	}
+	return out, nil
+}
+
+// errNotOnGitHub marks githubParts' refusal of a repository on another
+// host, so an unset tracker can answer it with the reason that names the
+// tracker setting.
+var errNotOnGitHub = errors.New("the repository is not on GitHub")
 
 // githubParts reads the owner and repository a project's repo URL names
 // on GitHub (§12.2): the canonical identity of every GitHub form —
@@ -159,7 +226,7 @@ func githubParts(repoURL string) (owner, repo string, err error) {
 	}
 	host, rest, ok := strings.Cut(parts.Canon, "/")
 	if !ok || host != "github.com" {
-		return "", "", fmt.Errorf("%w: the repository is not on GitHub", ErrIssueRead)
+		return "", "", fmt.Errorf("%w: %w", ErrIssueRead, errNotOnGitHub)
 	}
 	owner, repo, ok = strings.Cut(rest, "/")
 	if !ok || owner == "" || repo == "" || strings.Contains(repo, "/") {
