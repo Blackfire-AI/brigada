@@ -5,9 +5,9 @@
 plan: 10
 title: "Fix #264: quota-scope cooling for multi-provider opencode"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: done
 created: 2026-11-26T20:42:36.102423361Z
-updated: 2026-11-26T23:03:02.974122131Z
+updated: 2026-11-27T14:37:52.560265041Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
