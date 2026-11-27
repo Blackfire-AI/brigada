@@ -5,9 +5,9 @@
 plan: 5
 title: "Issue #259 first slice (re-created): landing barrier, plan monitoring, amendment envelope, guidance"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: done
 created: 2026-11-26T20:28:37.793635647Z
-updated: 2026-11-27T14:52:36.159007054Z
+updated: 2026-11-27T20:23:58.351717245Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -19,7 +19,10 @@ updated: 2026-11-27T14:52:36.159007054Z
 # describe the model needed and how hard it should think (§6.1);
 # review_tier and review_effort do the same for its reviews (§7, §8); caps
 # override the task's fix_rounds, review_rounds and restart budgets (§6.1);
-# skills name the project's skills the task carries, in order (§5.10).
+# skills name the project's skills the task carries, in order (§5.10);
+# tool_grants name the permission patterns its worker is granted (§6.1);
+# wait_landed holds a dependent pending until its implement deps have
+# actually landed on the target, not merely been done (§6.1).
 tasks:
   - id: 9
     name: "barrier"
@@ -69,7 +72,7 @@ tasks:
     effort: medium
     review_tier: standard
     review_effort: medium
-    state: needs_foreman
+    state: done
     branch: "brigada/task-12-r2"
     rounds: 0
   - id: 50
