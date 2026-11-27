@@ -45,8 +45,8 @@ tasks:
     effort: medium
     review_tier: standard
     review_effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-26"
     rounds: 0
   - id: 44
     name: "grants-core"
