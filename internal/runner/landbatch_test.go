@@ -578,3 +578,35 @@ func TestLandRecheckLandsNothing(t *testing.T) {
 		t.Errorf("completions %q, want the ready outcome", bodies)
 	}
 }
+
+// TestLandBatchReportsProgress (§7.1): the run reports each park and skip
+// as it is reached and, before the push, every survivor's input, check
+// and publication intent with its place in the stack.
+func TestLandBatchReportsProgress(t *testing.T) {
+	remote := newRemote(t)
+	a := batchMember(t, remote, 1, "main", nil, map[string]string{"a.txt": "a\n"})
+	b := batchMember(t, remote, 2, "main", nil, map[string]string{"README.md": "# b's seed\n"})
+	c := batchMember(t, remote, 3, b.Branch, []int64{2}, map[string]string{"c.txt": "c\n"})
+	d := batchMember(t, remote, 4, "main", nil, map[string]string{"d.txt": "d\n"})
+	pushToMain(t, remote, "README.md", "# another engineer's seed\n")
+	members := []engine.LandMember{a, b, c, d}
+	r, dir := batchRun(t, remote, engine.GateAuto, "", members...)
+	var bodies []string
+	r.client = capturingClient(&bodies)
+	if _, errMsg, _ := batchLoop(r, dir); errMsg != "" {
+		t.Fatalf("the batch stopped: %s", errMsg)
+	}
+	var progress []string
+	for _, b := range bodies {
+		if strings.Contains(b, `"members":[`) && !strings.Contains(b, `"result"`) {
+			progress = append(progress, b)
+		}
+	}
+	joined := strings.Join(progress, "\n")
+	for _, want := range []string{`"task_id":2,"outcome":"parked"`, `"task_id":3,"outcome":"dropped","blocked_by":2`,
+		`"intent":"target","position":1`, `"intent":"target","position":2`} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("progress reports %s lack %s", joined, want)
+		}
+	}
+}

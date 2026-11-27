@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -350,6 +351,42 @@ type agentAdvert struct {
 type jobLeaseRequest struct {
 	JobID   int64  `json:"job_id"`
 	LeaseID string `json:"lease_id"`
+}
+
+// landProgressRequest is a batch land job's progress report (§7.1, §12.3):
+// each member entry its settled outcome — parked or dropped, the member
+// result a completion would carry — or its pre-push input, local check
+// result and publication intent.
+type landProgressRequest struct {
+	jobLeaseRequest
+	Members []json.RawMessage `json:"members"`
+}
+
+// handleLandProgress records a batch land job's per-member progress as it
+// occurs (§7.1 "A lost runner resumes by remote evidence"), so a lost
+// runner's next lease and a terminal failure keep what the run decided.
+// The answer is the lease's, as a heartbeat's is; a member the batch does
+// not own refuses the report naming it.
+func (s *Server) handleLandProgress(w http.ResponseWriter, r *http.Request, runnerID int64) {
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	var req landProgressRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	ans, err := s.eng.LandProgress(r.Context(), runnerID, req.JobID, req.LeaseID, req.Members)
+	if errors.Is(err, engine.ErrLandProgressRefused) {
+		writeError(w, http.StatusBadRequest, codeBadRequest, err.Error())
+		return
+	}
+	if err != nil {
+		s.writeInternal(w, r, fmt.Sprintf("record the progress of land batch %d", req.JobID), err)
+		return
+	}
+	writeJSON(w, http.StatusOK, struct {
+		Answer string `json:"answer"`
+	}{string(ans)})
 }
 
 // heartbeatRequest is a jobLeaseRequest plus the worker's progress

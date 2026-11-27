@@ -551,6 +551,13 @@ func (e *Engine) landBatchGrantMembersTx(tx *sql.Tx, j *jobRow, now time.Time) (
 	if err != nil {
 		return nil, err
 	}
+	// A re-lease after a lost runner keeps what the run already decided
+	// (§7.1): a member it parked parks with its own failure, a dependent it
+	// skipped waits, and neither is squashed again.
+	prog, err := landBatchProgressTx(tx, j.ID)
+	if err != nil {
+		return nil, err
+	}
 	out := []LandMember{}
 	left := map[int64]bool{}
 	for _, id := range order {
@@ -559,6 +566,16 @@ func (e *Engine) landBatchGrantMembersTx(tx *sql.Tx, j *jobRow, now time.Time) (
 			if left[d] {
 				drop = true
 			}
+		}
+		if p, ok := prog[id]; ok && !drop && p.outcome != "" {
+			if l, err := landingTx(tx, id); err != nil {
+				return nil, err
+			} else if l == nil && p.outcome == landMemberParked {
+				if err := e.landMemberOutcomeTx(tx, memberJob(j, id), p.result, nil, now); err != nil {
+					return nil, err
+				}
+			}
+			drop = true
 		}
 		if !drop {
 			if l, err := landingTx(tx, id); err != nil {
@@ -663,22 +680,35 @@ func (e *Engine) landBatchCompletedTx(tx *sql.Tx, job *jobRow, members []int64, 
 		}
 		return nil
 	case c.Error != "":
+		// A terminal error — a lost runner, a setup that would not run —
+		// settles each member by its stored progress first (§7.1): only a
+		// member with none takes the error.
+		prog, err := landBatchProgressTx(tx, job.ID)
+		if err != nil {
+			return err
+		}
+		var spent []int64
 		for _, id := range members {
 			if settled, err := landingTx(tx, id); err != nil {
 				return err
 			} else if settled != nil {
 				continue // recorded: a trailer settled it while the batch ran
 			}
-			if err := e.landErrorTx(tx, memberJob(job, id), c, now); err != nil {
+			requeued, err := e.settleUnreportedTx(tx, memberJob(job, id), prog, c, now)
+			if err != nil {
 				return err
 			}
+			if !requeued {
+				spent = append(spent, id)
+			}
 		}
-		return spendLandSkipTx(tx, members...)
+		return spendLandSkipTx(tx, spent...)
 	}
 	var rec landBatchRecord
 	if err := json.Unmarshal([]byte(c.Result), &rec); err != nil || !rec.Batch {
 		// A one-task record speaks for the lead alone, as a batch's lease
-		// carried before its grant named members.
+		// carried before its grant named members; the other members are
+		// released to form the next batch, never settled by it.
 		if err := releaseLandBatchTx(tx, job.ID); err != nil {
 			return err
 		}
@@ -724,6 +754,11 @@ func (e *Engine) landBatchCompletedTx(tx *sql.Tx, job *jobRow, members []int64, 
 	if err := noteLandBaselineTx(tx, job.ProjectID, target, rec.Gate, now); err != nil {
 		return err
 	}
+	prog, err := landBatchProgressTx(tx, job.ID)
+	if err != nil {
+		return err
+	}
+	requeued := map[int64]bool{}
 	for _, id := range members {
 		r, ok := byTask[id]
 		mj := memberJob(job, id)
@@ -733,10 +768,13 @@ func (e *Engine) landBatchCompletedTx(tx *sql.Tx, job *jobRow, members []int64, 
 			} else if settled != nil {
 				continue // recorded: a trailer settled it while the batch ran
 			}
-			// No outcome of its own: the job-level failure settles it.
-			if err := e.landErrorTx(tx, mj, Completion{Error: rec.Error, ErrorKind: rec.ErrorKind}, now); err != nil {
+			// No outcome in the record: its stored progress, else the
+			// job-level failure, settles it.
+			again, err := e.settleUnreportedTx(tx, mj, prog, Completion{Error: rec.Error, ErrorKind: rec.ErrorKind}, now)
+			if err != nil {
 				return err
 			}
+			requeued[id] = again
 			continue
 		}
 		if err := e.landMemberOutcomeTx(tx, mj, r, rec.Gate, now); err != nil {
@@ -750,7 +788,7 @@ func (e *Engine) landBatchCompletedTx(tx *sql.Tx, job *jobRow, members []int64, 
 	}
 	var spent []int64
 	for _, id := range members {
-		if r, ok := byTask[id]; !ok || r.Outcome != landMemberDropped {
+		if r, ok := byTask[id]; (!ok && !requeued[id]) || (ok && r.Outcome != landMemberDropped) {
 			spent = append(spent, id)
 		}
 	}

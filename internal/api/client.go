@@ -232,6 +232,16 @@ func (c *Client) Release(ctx context.Context, jobID int64, leaseID, reason strin
 	return c.answer(ctx, "/v1/runner/release", req)
 }
 
+// LandProgress reports a batch land job's per-member progress (§7.1):
+// each entry one member's settled outcome or pre-push intent, encoded as
+// the completion's member records are.
+func (c *Client) LandProgress(ctx context.Context, jobID int64, leaseID string, members []json.RawMessage) (engine.Answer, error) {
+	return c.answer(ctx, "/v1/runner/land-progress", landProgressRequest{
+		jobLeaseRequest: jobLeaseRequest{JobID: jobID, LeaseID: leaseID},
+		Members:         members,
+	})
+}
+
 // RecordLanded reports landings detected from the project's default
 // branch (§7.1): each entry is one candidate commit carrying a task's
 // Brigada-Task trailer, newest first per task, with the trailer's branch

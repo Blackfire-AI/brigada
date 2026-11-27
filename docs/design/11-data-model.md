@@ -10,6 +10,7 @@
 - stale land refs (project and target whose waiting ref `refs/brigada/land/<target>` the next landing deletes before it stacks)
 - land publications (added by migration 0092: each push of brigada's that moved a land target — project, target, predecessor and final heads, the land job, and the members it published with their own commits in landing order; the links the suspect line follows, §7.1)
 - land baselines (added by migration 0092: one row per project and target — the last verified green head of the recognized `land_ready` script, one of the recorded publications' final heads, with the remote, command path and content digest it was verified for, §7.1)
+- land batch progress (added by migration 0093: one row per batch land job and member — its settled outcome in that batch, `parked` or `dropped`, with the reported member result, written once; and before the push its approved head, recorded base, local commit and check result, and publication intent, `target` or `waiting` with its stack position; read by the job's next lease and its terminal failure, §7.1)
 - land syncs (one row per project: the sync's state — current, waiting, conflict or behind_stack — the count of default-branch commits the target lacks, both heads, and the recorded merge with its push state, §7.1)
 - `runners`
 - `agents` (runner, adapter, harness, model, family, account, quota_scope, classes, permission, health, cooling until)

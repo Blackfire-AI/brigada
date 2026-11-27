@@ -92,6 +92,42 @@ func isLandBatch(grant *api.JobGrant) bool {
 	return grant.LandBatch && !grant.Push
 }
 
+// landIntentJSON is one survivor's pre-push progress (§7.1): its input,
+// its local commit and check, and where the push publishes it.
+type landIntentJSON struct {
+	TaskID       int64  `json:"task_id"`
+	ApprovedHead string `json:"approved_head,omitempty"`
+	BaseRef      string `json:"base_ref,omitempty"`
+	Commit       string `json:"commit"`
+	CheckPassed  bool   `json:"check_passed"`
+	Intent       string `json:"intent"` // 'target' or 'waiting'
+	Position     int    `json:"position"`
+}
+
+// reportLandProgress hands members' progress to the engine as it occurs
+// (§7.1): a settled park or skip, or a survivor's pre-push intent. It is
+// best effort — the completion still carries every outcome — so a failed
+// report is logged and the run goes on; the heartbeat decides whether
+// the lease is still ours.
+func (r *jobRun) reportLandProgress(ctx context.Context, entries ...any) {
+	if len(entries) == 0 || r.client == nil {
+		return
+	}
+	var raws []json.RawMessage
+	for _, e := range entries {
+		b, err := json.Marshal(e)
+		if err != nil {
+			r.cfg.Log.WarnContext(ctx, "encode the land batch's progress", "job_id", r.grant.JobID, "err", err)
+			return
+		}
+		raws = append(raws, b)
+	}
+	ans, err := r.client.LandProgress(ctx, r.grant.JobID, r.grant.LeaseID, raws)
+	if err != nil || ans != engine.AnsOK {
+		r.cfg.Log.WarnContext(ctx, "report the land batch's progress", "job_id", r.grant.JobID, "answer", ans, "err", err)
+	}
+}
+
 // landStackMember is one member's place in this attempt's stack: its
 // squash commit, checked and passing.
 type landStackMember struct {
@@ -392,6 +428,7 @@ func (r *jobRun) landBatchAttempt(ctx context.Context, dir string, settled map[i
 			// A dependent of a member that will not land waits (§7.1): left
 			// out of the push, nothing recorded, never parked.
 			settled[m.TaskID] = landMemberJSON{TaskID: m.TaskID, Outcome: landMemberDropped, BlockedBy: blocker}
+			r.reportLandProgress(ctx, settled[m.TaskID])
 			continue
 		}
 		commit, conflict, refusal, err := r.landSquashOnto(ctx, dir, last, landSquashSpec{
@@ -407,12 +444,14 @@ func (r *jobRun) landBatchAttempt(ctx context.Context, dir string, settled map[i
 		}
 		if refusal != "" {
 			settled[m.TaskID] = landMemberJSON{TaskID: m.TaskID, Outcome: landMemberParked, Reason: refusal}
+			r.reportLandProgress(ctx, settled[m.TaskID])
 			r.landResetTo(ctx, dir, last)
 			continue
 		}
 		if conflict != nil {
 			settled[m.TaskID] = landMemberJSON{TaskID: m.TaskID, Outcome: landMemberParked,
 				Record: &landRecordJSON{TargetBranch: target, Commit: last, ConflictFiles: conflict}}
+			r.reportLandProgress(ctx, settled[m.TaskID])
 			r.landResetTo(ctx, dir, last)
 			continue
 		}
@@ -427,6 +466,7 @@ func (r *jobRun) landBatchAttempt(ctx context.Context, dir string, settled map[i
 		if bad {
 			settled[m.TaskID] = landMemberJSON{TaskID: m.TaskID, Outcome: landMemberParked,
 				Record: &landRecordJSON{TargetBranch: target, Commit: commit, CheckLog: output}}
+			r.reportLandProgress(ctx, settled[m.TaskID])
 			r.landResetTo(ctx, dir, last)
 			continue
 		}
@@ -436,6 +476,21 @@ func (r *jobRun) landBatchAttempt(ctx context.Context, dir string, settled map[i
 	if len(res.survivors) == 0 {
 		return res, nil // every member dropped out: nothing pushes, nothing records
 	}
+	// Before the push the engine keeps each survivor's input, local check
+	// and publication intent (§7.1): a runner lost from here on leaves a
+	// next lease, or the job's terminal failure, to reconcile these members
+	// from the remote rather than park them over a push that may have
+	// published. A local commit is still no landing record.
+	intent := "target"
+	if stack {
+		intent = "waiting"
+	}
+	var intents []any
+	for i, s := range res.survivors {
+		intents = append(intents, landIntentJSON{TaskID: s.member.TaskID, ApprovedHead: s.member.ApprovedHead,
+			BaseRef: s.member.BaseRef, Commit: s.commit, CheckPassed: true, Intent: intent, Position: i + 1})
+	}
+	r.reportLandProgress(ctx, intents...)
 	// One fast-forward push publishes the stack (§7.1).
 	var pushErr error
 	if stack {
