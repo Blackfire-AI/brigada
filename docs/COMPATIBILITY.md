@@ -94,6 +94,8 @@ Within schema 1, new keys are added as optional keys. A file that worked before 
 
 **The engine's on-disk store.** The store is SQLite and is migrated forward only. A newer binary opens an older store and applies the missing migrations on start. An older binary refuses a store that a newer binary has migrated, with an error that says to upgrade.
 
+**Quota scope.** Migration 0085 adds `agents.quota_scope` and backfills it — `opencode/<provider>` for opencode agents (the model's first path segment; `opencode/default` for the CLI default) and the account label for every other harness — and clears inherited cooling on an opencode account whose providers split the old account-wide pool. An older runner's advertisement that carries no `quota_scope` keeps the agent's stored scope, so a mixed-version fleet does not flip an agent's cooling group; an agent with an empty scope cools with its account, as before.
+
 ## What is not covered
 
 These may change in any release, including a patch release:

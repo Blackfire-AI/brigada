@@ -10,9 +10,9 @@
 - stale land refs (project and target whose waiting ref `refs/brigada/land/<target>` the next landing deletes before it stacks)
 - land syncs (one row per project: the sync's state — current, waiting, conflict or behind_stack — the count of default-branch commits the target lacks, both heads, and the recorded merge with its push state, §7.1)
 - `runners`
-- `agents` (runner, adapter, harness, model, family, account, classes, permission, health, cooling until)
+- `agents` (runner, adapter, harness, model, family, account, quota_scope, classes, permission, health, cooling until)
 - `outcomes` (per project, agent, class and skill count: attempts and successes, the quality history of §8)
-- `class_cooldown` (per agent and class, added by migration 0082: the consecutive contract-failure streak, the cooldown expiry and the backoff step of the class-scoped reliability cooldown (§8); a substantive verdict resets the row, and `agents.cooling_until` stays the account-quota clock)
+- `class_cooldown` (per agent and class, added by migration 0082: the consecutive contract-failure streak, the cooldown expiry and the backoff step of the class-scoped reliability cooldown (§8); a substantive verdict resets the row, and `agents.cooling_until` stays the quota-scope clock)
 - `events` (append-only)
 - `messages`
 - `questions`

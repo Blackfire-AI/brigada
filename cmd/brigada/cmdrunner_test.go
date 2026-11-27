@@ -550,6 +550,42 @@ func TestAgentSpecAccount(t *testing.T) {
 	}
 }
 
+// TestAgentSpecQuotaScope: the --agent parser keeps the quota_scope= key
+// and round-trips it; an empty value is unset, so the derived default
+// applies — opencode/<provider> from the model, opencode/default for the
+// CLI's own, the account label for every other harness.
+func TestAgentSpecQuotaScope(t *testing.T) {
+	s := &agentSpecs{}
+	if err := s.Set("harness=opencode,model=zai-coding-plan/glm,quota_scope=team-a,classes=review"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	if got := s.specs[0].quotaScopeLabel(); got != "team-a" {
+		t.Errorf("quotaScopeLabel = %q, want team-a", got)
+	}
+	if got := s.specs[0].String(); !strings.Contains(got, "quota_scope=team-a") {
+		t.Errorf("String() = %q, want it to carry quota_scope=team-a", got)
+	}
+
+	if err := s.Set("harness=opencode,model=zai-coding-plan/glm,quota_scope="); err != nil {
+		t.Fatalf("Set with an empty scope: %v", err)
+	}
+	if got := s.specs[1].quotaScopeLabel(); got != "opencode/zai-coding-plan" {
+		t.Errorf("empty opencode quotaScopeLabel = %q, want opencode/zai-coding-plan", got)
+	}
+	if err := s.Set("harness=claude,quota_scope="); err != nil {
+		t.Fatalf("Set with an empty scope: %v", err)
+	}
+	if got := s.specs[2].quotaScopeLabel(); got != "claude" {
+		t.Errorf("empty claude quotaScopeLabel = %q, want claude", got)
+	}
+	if err := s.Set("harness=opencode"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	if got := s.specs[3].quotaScopeLabel(); got != "opencode/default" {
+		t.Errorf("default opencode quotaScopeLabel = %q, want opencode/default", got)
+	}
+}
+
 // TestAgentSpecTools: the tools= key parses +-separated patterns, none
 // as an explicit empty scope distinct from unset, and round-trips.
 func TestAgentSpecTools(t *testing.T) {

@@ -37,6 +37,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request, id ident
 			Adapter: a.Adapter, Harness: a.Harness, Model: a.Model,
 			Family: a.Family, Account: a.Account, Classes: a.Classes,
 			Effort: a.Effort, Tools: a.Tools, Permission: a.Permission,
+			QuotaScope: a.QuotaScope,
 		}
 	}
 	var startedAt time.Time
@@ -333,6 +334,9 @@ type agentAdvert struct {
 	Family  string   `json:"family"`
 	Account string   `json:"account"`
 	Classes []string `json:"classes"`
+	// QuotaScope is the quota pool the agent cools with (§8); empty for an
+	// older runner that does not advertise one.
+	QuotaScope string `json:"quota_scope,omitempty"`
 	// Effort is the agent's reasoning-effort level; empty when unset.
 	Effort string `json:"effort,omitempty"`
 	Tools  string `json:"tools,omitempty"`

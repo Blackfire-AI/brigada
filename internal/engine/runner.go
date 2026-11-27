@@ -19,16 +19,21 @@ var ErrInvalidAgent = errors.New("invalid agent advertisement")
 
 // AgentAdvert is one advertised (adapter, harness, model) combination a
 // runner offers (§5.1): what the dispatcher will choose between (§8).
-// The account label names the quota pool — cooling covers the whole
-// account, not one agent — and family is the model family a reviewer
-// must differ from (§7).
+// The account label names the concurrency cap the agent spends against,
+// and family is the model family a reviewer must differ from (§7). The
+// quota scope is the pool of agents that cool together when one hits a
+// quota limit; empty means the account.
 type AgentAdvert struct {
 	Adapter string
 	Harness string
 	Model   string
 	Family  string
 	Account string
-	Classes []string
+	// QuotaScope is the quota pool the agent cools with (§8); empty when
+	// the runner does not advertise one (an old runner), which keeps the
+	// stored scope on re-register.
+	QuotaScope string
+	Classes    []string
 	// Effort is the reasoning-effort level the agent runs at; empty when
 	// unset. It is not part of the agent's key: outcomes group by harness
 	// and model.
@@ -210,9 +215,9 @@ func advertiseTx(tx *sql.Tx, runner int64, adverts []AgentAdvert, nowStr string)
 		if err != nil {
 			return err
 		}
-		res, err := tx.Exec(`UPDATE agents SET harness = ?, family = ?, account = ?, classes = ?, effort = ?, tools = ?, permission = ?, updated_at = ?
+		res, err := tx.Exec(`UPDATE agents SET harness = ?, family = ?, account = ?, quota_scope = COALESCE(NULLIF(?, ''), quota_scope), classes = ?, effort = ?, tools = ?, permission = ?, updated_at = ?
 			WHERE runner_id = ? AND adapter = ? AND model = ?`,
-			a.Harness, a.Family, a.Account, classes, a.Effort, a.Tools, a.Permission, nowStr, runner, a.Adapter, a.Model)
+			a.Harness, a.Family, a.Account, a.QuotaScope, classes, a.Effort, a.Tools, a.Permission, nowStr, runner, a.Adapter, a.Model)
 		if err != nil {
 			return fmt.Errorf("update agent %s/%s: %w", a.Adapter, a.Model, err)
 		}
@@ -223,9 +228,9 @@ func advertiseTx(tx *sql.Tx, runner int64, adverts []AgentAdvert, nowStr string)
 		if n > 0 {
 			continue
 		}
-		if _, err := tx.Exec(`INSERT INTO agents (runner_id, adapter, harness, model, family, account, classes, effort, tools, permission, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			runner, a.Adapter, a.Harness, a.Model, a.Family, a.Account, classes, a.Effort, a.Tools, a.Permission, nowStr, nowStr); err != nil {
+		if _, err := tx.Exec(`INSERT INTO agents (runner_id, adapter, harness, model, family, account, quota_scope, classes, effort, tools, permission, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			runner, a.Adapter, a.Harness, a.Model, a.Family, a.Account, a.QuotaScope, classes, a.Effort, a.Tools, a.Permission, nowStr, nowStr); err != nil {
 			return fmt.Errorf("insert agent %s/%s: %w", a.Adapter, a.Model, err)
 		}
 	}

@@ -80,6 +80,10 @@ type Agent struct {
 	Family  string   `json:"family"`
 	Account string   `json:"account"`
 	Classes []string `json:"classes"`
+	// QuotaScope is the quota pool the agent cools with (§8): empty for an
+	// older runner that does not advertise one, which the engine treats as
+	// the account.
+	QuotaScope string `json:"quota_scope,omitempty"`
 	// Effort is the agent's reasoning-effort level; empty when unset.
 	Effort string `json:"effort,omitempty"`
 	// Tools is a claude worker's tool scope (§5.2), "+"-joined or
@@ -105,6 +109,7 @@ func (c *Client) Register(ctx context.Context, agents []Agent, maxParallel int) 
 			Adapter: a.Adapter, Harness: a.Harness, Model: a.Model,
 			Family: a.Family, Account: a.Account, Classes: a.Classes,
 			Effort: a.Effort, Tools: a.Tools, Permission: a.Permission,
+			QuotaScope: a.QuotaScope,
 		}
 	}
 	var out struct {
