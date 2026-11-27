@@ -407,6 +407,11 @@ type LandMember struct {
 	// already released its hold. A member without it is subject to the
 	// command, and only such members take the command's hold.
 	SkipLandReady bool `json:"skip_land_ready,omitempty"`
+	// RecordedHead is the approved head an earlier lease of this batch
+	// recorded for the member before its push (§7.1 "A lost runner resumes
+	// by remote evidence"), empty when none did: the runner recognizes the
+	// member's published landing by it as well as by ApprovedHead.
+	RecordedHead string `json:"recorded_head,omitempty"`
 }
 
 // The outcomes a batch completion reports per member (§12.3).
@@ -615,6 +620,12 @@ func (e *Engine) landBatchGrantMembersTx(tx *sql.Tx, j *jobRow, now time.Time) (
 		}
 		if m.ApprovedHead, err = approvedHeadTx(tx, id); err != nil {
 			return nil, err
+		}
+		// A member a lost lease attempted carries the input that attempt
+		// recorded (§7.1): the runner matches the remote's trailers to it,
+		// so a push that published it is recovered, not squashed again.
+		if p, ok := prog[id]; ok && p.intent != "" && p.approvedHead != "" {
+			m.RecordedHead = p.approvedHead
 		}
 		if m.Message, err = landMessageTx(tx, id); err != nil {
 			return nil, err

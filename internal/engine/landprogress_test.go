@@ -161,3 +161,50 @@ func TestLandBatchCompletionAccountsForEveryMember(t *testing.T) {
 		t.Errorf("landing records after the repeat = %d, want the three, none twice", n)
 	}
 }
+
+// TestLandBatchLostLeaseAcrossPublication (§7.1 acceptance): a lease lost
+// before publication leaves no landing records for its local commits and
+// the next lease of the same batch grants every remaining owned member,
+// each carrying the input the lost attempt recorded; that lease's
+// completion, recovering the published members from the remote, records
+// each once, and a repeated report records nothing twice.
+func TestLandBatchLostLeaseAcrossPublication(t *testing.T) {
+	e, tasks, g := leasedBatch(t)
+	var entries []any
+	for i, id := range tasks {
+		entries = append(entries, intentEntry(id, "c"+itoa(id), i+1))
+	}
+	if ans, err := e.eng.LandProgress(e.ctx, g.LeaseOwner, g.JobID, g.LeaseID, progressEntries(t, entries...)); err != nil || ans != AnsOK {
+		t.Fatalf("report the intents: %s, %v", ans, err)
+	}
+	e.expireLease()
+	if n := e.int("SELECT COUNT(*) FROM landings"); n != 0 {
+		t.Fatalf("landing records after the lost lease = %d, want none for local commits", n)
+	}
+	g2 := e.leaseGit(e.runner1)
+	if g2 == nil || g2.JobID != g.JobID || len(g2.LandMembers) != len(tasks) {
+		t.Fatalf("re-leased %+v, want batch %d with all %d members", g2, g.JobID, len(tasks))
+	}
+	for _, m := range g2.LandMembers {
+		if m.RecordedHead != "h" {
+			t.Errorf("task %d recorded head = %q, want the lost attempt's input", m.TaskID, m.RecordedHead)
+		}
+	}
+	if n := e.int("SELECT COUNT(*) FROM tasks WHERE land_batch_job = ?", g.JobID); n != int64(len(tasks)) {
+		t.Errorf("reserved members across the lost lease = %d, want all %d kept", n, len(tasks))
+	}
+	var landed []landMemberResult
+	for _, id := range tasks {
+		landed = append(landed, landedResult(id, "c"+itoa(id)))
+	}
+	c := batchResult(t, "", landed...)
+	if ans := e.complete(g2, c); ans != AnsOK {
+		t.Fatalf("complete the recovering lease: %s", ans)
+	}
+	e.complete(g2, c)
+	for _, id := range tasks {
+		if n := e.int("SELECT COUNT(*) FROM landings WHERE task_id = ?", id); n != 1 {
+			t.Errorf("task %d landing records = %d, want exactly one", id, n)
+		}
+	}
+}
