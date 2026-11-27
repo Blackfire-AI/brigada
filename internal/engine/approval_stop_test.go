@@ -13,7 +13,7 @@ import (
 func TestEveryHoldReasonHasASetting(t *testing.T) {
 	for _, kind := range []string{
 		holdGatePlan, holdGateLand, holdMaxTasks, holdBudget,
-		holdClass, holdPath, holdTier, holdRestart, holdExtras, holdCheck,
+		holdClass, holdPath, holdTier, holdRestart, holdExtras, holdGrants, holdCheck,
 	} {
 		key, ok := holdSettingOf[kind]
 		if !ok {
@@ -76,6 +76,12 @@ func TestStopAskingValues(t *testing.T) {
 	got = stopAskingValues(s, []holdAsk{{kind: holdExtras, extra: &ExtraRepo{Name: "web", Repo: "example.com/other/web"}}})
 	if got[SettingExtraRepos] != "docs example.com/other/docs+web example.com/other/web" {
 		t.Errorf("extra_repos = %q", got[SettingExtraRepos])
+	}
+
+	// A tool grant outside the setting joins approval_tool_grants.
+	got = stopAskingValues(s, []holdAsk{{kind: holdGrants, item: "Bash(git merge:*)"}, {kind: holdGrants, item: "Bash(git checkout:*)"}})
+	if got[SettingApprovalToolGrants] != "Bash(git merge:*)+Bash(git checkout:*)" {
+		t.Errorf("approval_tool_grants = %q", got[SettingApprovalToolGrants])
 	}
 }
 

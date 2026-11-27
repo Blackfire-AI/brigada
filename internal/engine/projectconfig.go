@@ -133,7 +133,7 @@ var yamlKeyRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 // list, never SettingKeys: a setting added for the local store (the wake
 // budget, for one) does not become shared-file policy by being editable.
 var configSettingKeys = []string{SettingApprovalMaxTasks, SettingApprovalBudget, SettingApprovalClasses, SettingApprovalProtectedPaths,
-	SettingGatePlan, SettingGateLand, SettingGatePush, SettingApprovalTiers, SettingApprovalRestarted, SettingLandTarget, SettingAfterLand, SettingLandReady,
+	SettingApprovalToolGrants, SettingGatePlan, SettingGateLand, SettingGatePush, SettingApprovalTiers, SettingApprovalRestarted, SettingLandTarget, SettingAfterLand, SettingLandReady,
 	SettingDefaultCheck, SettingWorkerTools, SettingSetup, SettingSetupCacheKeyFiles, SettingSetupTimeout,
 	SettingExtraRepos, SettingForemanRotateTokens, SettingPlanFiles, SettingPlanFileBranch, SettingBranchRetentionDays}
 

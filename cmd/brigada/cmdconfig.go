@@ -171,7 +171,7 @@ func printConfigProjectSettings(stdout io.Writer, settings engine.ProjectSetting
 // after a "+"; any other value wraps at spaces.
 func configValueWords(key, value string) []initWord {
 	var words []initWord
-	if key == engine.SettingWorkerTools || strings.HasPrefix(key, "tools.") {
+	if key == engine.SettingWorkerTools || key == engine.SettingApprovalToolGrants || strings.HasPrefix(key, "tools.") {
 		parts := strings.Split(value, "+")
 		for i, part := range parts {
 			if i < len(parts)-1 {

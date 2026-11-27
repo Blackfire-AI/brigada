@@ -17,15 +17,16 @@ import (
 
 // The hold reasons the gates give (§6.3).
 const (
-	holdGatePlan = "gate_plan" // gate_plan is ask: every plan waits
-	holdGateLand = "gate_land" // gate_land is ask: every landing waits
-	holdMaxTasks = "max_tasks" // the plan's task count is over approval_max_tasks
-	holdBudget   = "budget"    // the plan's spend passed approval_budget (planbudget.go)
-	holdClass    = "class"     // a class outside approval_classes
-	holdPath     = "path"      // a protected path of approval_protected_paths
-	holdTier     = "tier"      // a tier of approval_tiers
-	holdRestart  = "restart"   // a spent restart under approval_restarted
-	holdExtras   = "extras"    // an extra repository outside the project default
+	holdGatePlan = "gate_plan"   // gate_plan is ask: every plan waits
+	holdGateLand = "gate_land"   // gate_land is ask: every landing waits
+	holdMaxTasks = "max_tasks"   // the plan's task count is over approval_max_tasks
+	holdBudget   = "budget"      // the plan's spend passed approval_budget (planbudget.go)
+	holdClass    = "class"       // a class outside approval_classes
+	holdPath     = "path"        // a protected path of approval_protected_paths
+	holdTier     = "tier"        // a tier of approval_tiers
+	holdRestart  = "restart"     // a spent restart under approval_restarted
+	holdExtras   = "extras"      // an extra repository outside the project default
+	holdGrants   = "tool_grants" // a tool grant outside approval_tool_grants
 	// holdCheck: a task check other than default_check. No answer stops
 	// it asking: moving default_check to one task's command would change
 	// the check of every task after it, so stop-asking leaves it alone.
@@ -44,13 +45,14 @@ var holdSettingOf = map[string]string{
 	holdTier:     SettingApprovalTiers,
 	holdRestart:  SettingApprovalRestarted,
 	holdExtras:   SettingExtraRepos,
+	holdGrants:   SettingApprovalToolGrants,
 	holdCheck:    SettingDefaultCheck,
 }
 
 // holdAsk is one hold reason in the structured form the setting change
 // reads: the kind, the item it names (a class, a path pattern, a tier,
-// an extra repository), the task count a max_tasks hold frees, and the
-// spend a budget hold frees.
+// a tool grant, an extra repository), the task count a max_tasks hold
+// frees, and the spend a budget hold frees.
 type holdAsk struct {
 	kind  string
 	item  string
@@ -91,6 +93,7 @@ func stopAskingValues(s approvalSettings, asks []holdAsk) map[string]string {
 	classes := append([]string{}, s.Classes...)
 	paths := append([]string{}, s.ProtectedPaths...)
 	tiers := append([]string{}, s.ApprovalTiers...)
+	grants := append([]string{}, s.ApprovalToolGrants...)
 	extras := append([]ExtraRepo{}, s.ExtraRepos...)
 	limit := *s.MaxTasks
 	count, budget := false, false
@@ -115,6 +118,10 @@ func stopAskingValues(s approvalSettings, asks []holdAsk) map[string]string {
 		case holdClass:
 			if !slices.Contains(classes, a.item) {
 				classes = append(classes, a.item)
+			}
+		case holdGrants:
+			if !slices.Contains(grants, a.item) {
+				grants = append(grants, a.item)
 			}
 		case holdPath:
 			paths = drop(paths, a.item)
@@ -142,6 +149,9 @@ func stopAskingValues(s approvalSettings, asks []holdAsk) map[string]string {
 	join := func(list []string) string { return strings.Join(list, settingListSep) }
 	if !slices.Equal(classes, s.Classes) {
 		out[SettingApprovalClasses] = join(classes)
+	}
+	if !slices.Equal(grants, s.ApprovalToolGrants) {
+		out[SettingApprovalToolGrants] = join(grants)
 	}
 	if !slices.Equal(paths, s.ProtectedPaths) {
 		if len(paths) == 0 {
@@ -251,18 +261,18 @@ func holdAsksTx(tx *sql.Tx, project int64, where string, args []any, wholePlan b
 	if err != nil {
 		return approvalSettings{}, nil, err
 	}
-	rows, err := tx.Query("SELECT spec, COALESCE(check_cmd, ''), COALESCE(class, ''), COALESCE(extra_repos, '') FROM tasks WHERE "+where, args...)
+	rows, err := tx.Query("SELECT spec, COALESCE(check_cmd, ''), COALESCE(class, ''), COALESCE(extra_repos, ''), COALESCE(tool_grants, '') FROM tasks WHERE "+where, args...)
 	if err != nil {
 		return approvalSettings{}, nil, fmt.Errorf("read the held tasks: %w", err)
 	}
 	defer rows.Close()
 	var tasks []PlanTask
 	for rows.Next() {
-		var spec, check, class, extra string
-		if err := rows.Scan(&spec, &check, &class, &extra); err != nil {
+		var spec, check, class, extra, grants string
+		if err := rows.Scan(&spec, &check, &class, &extra, &grants); err != nil {
 			return approvalSettings{}, nil, fmt.Errorf("read the held tasks: %w", err)
 		}
-		t := PlanTask{Spec: spec, Check: check, Class: class}
+		t := PlanTask{Spec: spec, Check: check, Class: class, ToolGrants: parseTaskToolGrants(grants)}
 		if spec2 := parseExtraReposRecord(extra); spec2 != nil {
 			t.ExtraRepos = spec2.Repos
 		}
@@ -284,6 +294,9 @@ func holdAsksTx(tx *sql.Tx, project int64, where string, args []any, wholePlan b
 	}
 	for _, p := range v.Paths {
 		asks = append(asks, holdAsk{kind: holdPath, item: p})
+	}
+	for _, g := range v.Grants {
+		asks = append(asks, holdAsk{kind: holdGrants, item: g})
 	}
 	// The extra repositories, as entries the setting takes: the same
 	// comparison the evaluation makes, kept by repository.

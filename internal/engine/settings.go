@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -28,6 +29,10 @@ const (
 	SettingApprovalBudget         = "approval_budget"
 	SettingApprovalClasses        = "approval_classes"
 	SettingApprovalProtectedPaths = "approval_protected_paths"
+	// SettingApprovalToolGrants is the list of tool-grant patterns a task
+	// may carry without holding the plan (§6.1, §6.3): a grant outside it
+	// is an approval trigger, as a class outside approval_classes is.
+	SettingApprovalToolGrants = "approval_tool_grants"
 	// The gates and land rules (§6.3). gate_plan is enforced today: ask
 	// holds every plan at the plan-approval gate. The land rules and
 	// gates are read by the land job (§7.1).
@@ -105,7 +110,7 @@ const (
 
 // SettingKeys are the editable keys, in the order show prints them.
 var SettingKeys = []string{SettingApprovalMaxTasks, SettingApprovalBudget, SettingApprovalClasses, SettingApprovalProtectedPaths,
-	SettingGatePlan, SettingGateLand, SettingGatePush, SettingPlanReview, SettingPlanReviewTier, SettingPlanReviewEffort,
+	SettingApprovalToolGrants, SettingGatePlan, SettingGateLand, SettingGatePush, SettingPlanReview, SettingPlanReviewTier, SettingPlanReviewEffort,
 	SettingApprovalTiers, SettingApprovalRestarted, SettingLandTarget, SettingAfterLand, SettingLandReady,
 	SettingDefaultCheck, SettingWorkerTools, SettingSetup, SettingSetupCacheKeyFiles, SettingSetupTimeout,
 	SettingExtraRepos, SettingForemanRotateTokens, SettingForemanWakesPerDay, SettingPlanFiles, SettingPlanFileBranch,
@@ -218,7 +223,7 @@ var classWord = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
 func parseSettingValue(key, value string) (json.RawMessage, error) {
 	switch key {
 	case SettingApprovalMaxTasks, SettingApprovalBudget, SettingApprovalClasses, SettingApprovalProtectedPaths,
-		SettingGatePlan, SettingGateLand, SettingGatePush, SettingPlanReview, SettingPlanReviewTier, SettingPlanReviewEffort,
+		SettingApprovalToolGrants, SettingGatePlan, SettingGateLand, SettingGatePush, SettingPlanReview, SettingPlanReviewTier, SettingPlanReviewEffort,
 		SettingApprovalTiers, SettingApprovalRestarted, SettingLandTarget, SettingAfterLand, SettingLandReady,
 		SettingDefaultCheck, SettingWorkerTools,
 		SettingSetup, SettingSetupCacheKeyFiles, SettingSetupTimeout, SettingExtraRepos, SettingForemanRotateTokens, SettingForemanWakesPerDay, SettingPlanFiles, SettingPlanFileBranch,
@@ -386,6 +391,10 @@ func parseKnownValue(key, value string) (json.RawMessage, error) {
 			return nil, fmt.Errorf("%w: %s item %q is not a tier (light, standard, heavy)",
 				ErrInvalidSetting, key, item)
 		}
+		if key == SettingApprovalToolGrants && !slices.Contains(ToolGrantAllowlist, item) {
+			return nil, fmt.Errorf("%w: %s item %q is not in the tool grant allowlist (%s)",
+				ErrInvalidSetting, key, item, strings.Join(ToolGrantAllowlist, ", "))
+		}
 		if key == SettingSetupCacheKeyFiles {
 			if err := validateCacheKeyFile(item); err != nil {
 				return nil, fmt.Errorf("%w: %v", ErrInvalidSetting, err)
@@ -486,6 +495,8 @@ func settingsViewTx(tx *sql.Tx, project int64, repo string, wakeBudgetDefault in
 			sv.Value = list(eff.Classes)
 		case SettingApprovalProtectedPaths:
 			sv.Value = list(eff.ProtectedPaths)
+		case SettingApprovalToolGrants:
+			sv.Value = list(eff.ApprovalToolGrants)
 		case SettingGatePlan:
 			sv.Value = GateAuto
 			if s, ok := rawString(cur); ok && s != "" {
