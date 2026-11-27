@@ -40,19 +40,27 @@ func TestReadIssueFetchesOwnRepository(t *testing.T) {
 
 // TestReadIssueRefusals covers the reasons the engine answers instead
 // of an issue (§12.2): a repository not on GitHub with no tracker set —
-// the default fetch refuses it before any gh runs — a project that does not exist, and a
-// number that is not positive.
+// the default fetch refuses it before any gh runs — a project that does not exist, a
+// number that is not positive, and a project whose tracker setting is none.
 func TestReadIssueRefusals(t *testing.T) {
 	e := newEnv(t)
+	// Test tracker setting is none.
+	e.exec(`UPDATE projects SET settings = '{"tracker":"none"}' WHERE id = ?`, e.project)
 	_, err := e.eng.ReadIssue(e.ctx, e.project, 5, false)
-	if !errors.Is(err, ErrIssueRead) || !strings.Contains(err.Error(), "not on GitHub and the project sets no tracker") {
-		t.Errorf("ReadIssue of a project off GitHub = %v, want ErrIssueRead saying the repository is not on GitHub and no tracker is set", err)
+	if !errors.Is(err, ErrIssueRead) || !strings.Contains(err.Error(), "setting is none, so no forge is read") {
+		t.Errorf("ReadIssue of a project with tracker none = %v, want ErrIssueRead saying setting is none, so no forge is read", err)
 	}
+	// Reset settings so the remaining cases use the default ({}).
+	e.exec(`UPDATE projects SET settings = '{}' WHERE id = ?`, e.project)
 	_, err = e.eng.ReadIssue(e.ctx, e.project+100, 5, false)
 	if !errors.Is(err, ErrIssueRead) || !strings.Contains(err.Error(), "no such project") {
 		t.Errorf("ReadIssue of a missing project = %v, want ErrIssueRead saying no such project", err)
 	}
 	if _, err = e.eng.ReadIssue(e.ctx, e.project, 0, false); err == nil || strings.Contains(err.Error(), "issue unreadable") {
 		t.Errorf("ReadIssue of number 0 = %v, want the caller's own mistake, not a fetch refusal", err)
+	}
+	_, err = e.eng.ReadIssue(e.ctx, e.project, 5, false)
+	if !errors.Is(err, ErrIssueRead) || !strings.Contains(err.Error(), "not on GitHub and the project sets no tracker") {
+		t.Errorf("ReadIssue of a project off GitHub = %v, want ErrIssueRead saying the repository is not on GitHub and no tracker is set", err)
 	}
 }

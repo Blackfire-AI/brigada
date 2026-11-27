@@ -317,7 +317,7 @@ The sources:
 - `worker.md` is the former project instructions seed plus the worker's "work economically" paragraph (§5.3) and the lines that apply to every landed change (a changelog entry, docs follow the code, a changed package gets a test change), which belong here and never in a skill (the allocation rule, §5.10).
 - `reviewer.md` is new: it carries the reviewer's "work economically" paragraph (§5.3) and says what a convention check looks like and names the lab's misses as examples (the changelog, surface parity, docs of touched keys), not as universal checks.
 
-The shipped texts are versioned: each version's full set lives in an archive directory (`internal/defaults/versions/<ver>/`, the texts at their package-relative paths) that never changes once shipped, and the current version, 1.3.0, adds the anti-fragmentation guidance to `foreman.md` and `plan_review.md` (naming the `wait_landed` task field, §6.1) and the `early-verification` skill.
+The shipped texts are versioned: each version's full set lives in an archive directory (`internal/defaults/versions/<ver>/`, the texts at their package-relative paths) that never changes once shipped, and the current version, 1.4.0, adds the anti-fragmentation guidance to `foreman.md` and `plan_review.md` (naming the `wait_landed` task field, §6.1) and the `early-verification` skill.
 
 A rerun rewrites an unedited generated file and leaves an edited one, printing per role: unchanged, or edited since version X with the new default differing, and `brigada instructions diff <role>`, a three-way diff of the project's file, the default it was generated from and the new default; `brigada init --take-default <role>` resets the file. `brigada remove` deletes only unedited generated files.
 
