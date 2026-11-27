@@ -7,7 +7,7 @@ title: "Fix #123: per-task tool grants"
 repo: "github.com/Blackfire-AI/brigada"
 state: active
 created: 2026-11-26T20:46:37.109826591Z
-updated: 2026-11-27T16:20:37.816268681Z
+updated: 2026-11-27T17:50:56.802644591Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -81,9 +81,9 @@ tasks:
     continue: "grants-surfaces"
     tier: heavy
     effort: medium
-    caps: {restart: 7}
+    caps: {restart: 10}
     skills: ["config-setting", "surface-parity"]
-    state: needs_foreman
+    state: ready
     branch: "brigada/task-46-r1"
     rounds: 0
   - id: 47
