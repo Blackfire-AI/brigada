@@ -45,7 +45,7 @@ tasks:
     effort: medium
     review_tier: standard
     review_effort: medium
-    state: running
+    state: reviewing
     branch: "brigada/task-26"
     rounds: 1
   - id: 44
