@@ -5,9 +5,9 @@
 plan: 17
 title: "Bug: a hand-landed task parked by its reviews never settles"
 repo: "github.com/Blackfire-AI/brigada"
-state: needs_foreman
+state: active
 created: 2026-11-27T19:40:56.756096144Z
-updated: 2026-11-27T20:11:17.151363446Z
+updated: 2026-11-27T20:11:31.406998172Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -63,7 +63,7 @@ tasks:
     base: ""
     effort: medium
     skills: ["bugfix"]
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 83
