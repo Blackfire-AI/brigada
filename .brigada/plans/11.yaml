@@ -171,7 +171,7 @@ tasks:
     continue: "batch-holds"
     tier: heavy
     effort: medium
-    state: ready
+    state: running
     branch: ""
     rounds: 0
   - id: 67
