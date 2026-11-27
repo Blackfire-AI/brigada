@@ -80,6 +80,6 @@ tasks:
     effort: medium
     caps: {restart: 8}
     skills: ["surface-parity"]
-    state: needs_foreman
+    state: ready
     branch: "brigada/task-55-r4"
     rounds: 0
