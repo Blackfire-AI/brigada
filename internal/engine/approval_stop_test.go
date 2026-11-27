@@ -13,7 +13,7 @@ import (
 func TestEveryHoldReasonHasASetting(t *testing.T) {
 	for _, kind := range []string{
 		holdGatePlan, holdGateLand, holdMaxTasks, holdBudget,
-		holdClass, holdPath, holdTier, holdRestart, holdExtras, holdCheck,
+		holdClass, holdPath, holdTier, holdRestart, holdExtras, holdCheck, holdToolGrants,
 	} {
 		key, ok := holdSettingOf[kind]
 		if !ok {
@@ -37,6 +37,7 @@ func TestStopAskingValues(t *testing.T) {
 		ApprovalTiers:     []string{"light", "heavy"},
 		ApprovalRestarted: true,
 		ExtraRepos:        []ExtraRepo{{Name: "docs", Repo: "example.com/other/docs"}},
+		ToolGrants:        []string{"Bash(git add:*)"},
 	}
 	got := stopAskingValues(s, []holdAsk{
 		{kind: holdClass, item: "deploy"},
@@ -45,6 +46,10 @@ func TestStopAskingValues(t *testing.T) {
 		{kind: holdRestart},
 		{kind: holdMaxTasks, count: 4},
 		{kind: holdBudget, toks: 2_000_000, usd: 5},
+		// A multi-pattern grant repeats the ask, one per pattern.
+		{kind: holdToolGrants, item: "Bash(git merge:*)"},
+		{kind: holdToolGrants, item: "Bash(git restore:*)"},
+		{kind: holdToolGrants, item: "Bash(git add:*)"},
 	})
 	want := map[string]string{
 		SettingApprovalClasses:        "implement+review+answer+deploy",
@@ -53,6 +58,7 @@ func TestStopAskingValues(t *testing.T) {
 		SettingApprovalRestarted:      "false",
 		SettingApprovalMaxTasks:       "4",
 		SettingApprovalBudget:         "2000000+$5",
+		SettingApprovalToolGrants:     "Bash(git add:*)+Bash(git merge:*)+Bash(git restore:*)",
 	}
 	if len(got) != len(want) {
 		t.Fatalf("values = %v, want %v", got, want)
