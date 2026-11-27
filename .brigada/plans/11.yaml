@@ -73,8 +73,8 @@ tasks:
     review_tier: standard
     review_effort: medium
     caps: {restart: 4}
-    state: running
-    branch: "brigada/task-58-r2"
+    state: reviewing
+    branch: "brigada/task-58-r4"
     rounds: 0
   - id: 59
     name: "sync-waiting"
