@@ -29,7 +29,7 @@ tasks:
     base: ""
     effort: medium
     skills: ["bugfix"]
-    state: reviewing
+    state: done
     branch: "brigada/task-79"
     rounds: 1
   - id: 80
