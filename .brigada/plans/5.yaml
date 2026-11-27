@@ -5,9 +5,9 @@
 plan: 5
 title: "Issue #259 first slice (re-created): landing barrier, plan monitoring, amendment envelope, guidance"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: reviewing
 created: 2026-11-26T20:28:37.793635647Z
-updated: 2026-11-26T23:24:26.105624992Z
+updated: 2026-11-27T13:05:12.11023628Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -64,8 +64,8 @@ tasks:
     name: "guidance"
     title: "Anti-fragmentation guidance and early-verification skill"
     class: "implement"
-    deps: ["wl-release", "amend-envelope"]
-    base: "wl-release"
+    deps: ["amend-envelope", "wl-release-v2"]
+    base: ""
     effort: medium
     review_tier: standard
     review_effort: medium
@@ -93,7 +93,7 @@ tasks:
     continue: "wl-field"
     tier: heavy
     effort: high
-    state: needs_foreman
+    state: cancelled
     branch: ""
     rounds: 0
   - id: 52
@@ -116,5 +116,16 @@ tasks:
     effort: medium
     skills: ["config-setting"]
     state: ready
+    branch: ""
+    rounds: 0
+  - id: 69
+    name: "wl-release-v2"
+    title: "wait_landed release rule, re-evaluation wiring and frozen-head prompt (Refs #259)"
+    class: "implement"
+    deps: ["wl-field"]
+    base: "wl-field"
+    tier: heavy
+    effort: high
+    state: pending
     branch: ""
     rounds: 0
