@@ -53,8 +53,8 @@ tasks:
     tier: light
     effort: low
     skills: ["docs-change"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-40-r3"
     rounds: 0
   - id: 54
     name: "packages-94"
