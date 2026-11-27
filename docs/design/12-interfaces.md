@@ -42,7 +42,7 @@ Task jobs are keyed `task:<id>`: one live job per key makes duplicate job creati
 
 - `plan_create` · `plan_amend` (both take a task's `skills`, §5.10, and `tool_grants`, §6.1; each `cancel` entry is a task by name or id, or `{task, reason}`)
 - `plan_accept` (accept a plan its review parked, with a reason)
-- `task_restart`
+- `task_restart` (a parked task's fresh attempt; with `stop_running`, also a task whose job is live: stopped keeping its branch, the fresh attempt seeded from it, §5.6)
 - `task_cancel` (takes an optional `reason`; a reason is expected on every cancel, from either tool, and is recorded verbatim on the task's `task_cancelled_by_amend` event, a cancel without one recorded as "no reason given", §6.2)
 - `task_retire` (retire tasks that will not land, §6.2, with a reason recorded verbatim; it refuses a landed, cancelled or already retired task, and a dependent blocks unless it is retired in the same call or is already cancelled or retired — a failed dependent blocks too)
 - `land_retry` (queues again, through the land rule and every gate, the landing of a task parked by a rejected push, an environment failure or a failed land check the foreman judged unrelated to the task's diff from `check_log`; it refuses a task with a landing record, one not parked by such a failure, one whose check has failed 3 times on its approved head, or a finished plan, and a conflict, a real check failure, a moved approved head or a stale base wants `task_restart`)
@@ -140,7 +140,7 @@ Status keeps each task's landing state: a live member reads `landing in batch <j
 
 - `register`
 - `lease` (long-poll; a poll whose caller has gone away takes no grant, so a job is never left leased to a runner that is not listening)
-- `heartbeat` (progress, last activity)
+- `heartbeat` (progress, last activity). The answer is one of a fixed set: `ok` with the new expiry; `stop_running`, also with the new expiry, while the job's task carries a pending stop-running restart (§5.6) — the runner stops the worker as its stall policy would and completes the job `stalled` with the reason `stop_running`, its branch pushed, and the hold is not ended; and `lost`, `gone`, `cancelled` or `stale_epoch`, each of which ends the hold: the runner kills the run and drops its result.
 - `complete` (result or error; an outcome of `stalled`/`time_cap` when the runner stopped the run itself, §5.6; check result; artifacts)
 - `release`
 - `draining` (a restart drain pending, §5.1: the runner exits once its running jobs finish, and status renders the wait).

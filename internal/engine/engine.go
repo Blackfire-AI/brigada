@@ -118,7 +118,17 @@ const (
 	AnsLost       Answer = "lost"        // the lease belongs to someone else now
 	AnsStaleEpoch Answer = "stale_epoch" // fenced out by a recover (§6.4)
 	AnsExpired    Answer = "expired"     // attach release: the hold lapsed first; the session id was still written
+	// AnsStopRunning is a heartbeat's answer while the job's task carries
+	// a pending stop-running restart (§5.6, §12.3): the lease is extended
+	// as for ok, and the runner stops the worker as its own stall policy
+	// would, pushes the branch and completes the job stalled, the result
+	// block's reason StopRunningReason.
+	AnsStopRunning Answer = "stop_running"
 )
+
+// StopRunningReason is the reason a run stopped by AnsStopRunning names
+// in its stalled result block (§5.6).
+const StopRunningReason = "stop_running"
 
 // RoundCaps are the per-task caps on feedback rounds and restarts (§7,
 // §6.1). Fix caps

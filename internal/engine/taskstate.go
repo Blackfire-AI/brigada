@@ -123,6 +123,15 @@ func taskRunningTx(tx *sql.Tx, j *jobRow, now time.Time) error {
 // A classified transient work failure can instead spend the first restart
 // on another eligible agent, before any failure judgment is emitted (§3).
 func (e *Engine) taskAfterCompletionTx(tx *sql.Tx, job *jobRow, c Completion, now time.Time) error {
+	// A task waiting on a stop-running restart (§5.6) takes it now, the
+	// job settled: the stopped run's stalled completion — or any other
+	// ending — queues the fresh attempt, seeded from the branch the run
+	// pushed, instead of routing to the foreman.
+	if job.Key == fmt.Sprintf("task:%d", job.TaskID) {
+		if consumed, err := e.consumeStopPendingTx(tx, job.ProjectID, job.TaskID, stopSeed(job, c), now); err != nil || consumed {
+			return err
+		}
+	}
 	switch job.Kind {
 	case KindWork, KindFix:
 		var class string
@@ -1569,6 +1578,12 @@ func recordTaskOutcomeTx(tx *sql.Tx, job *jobRow, success bool, now time.Time) e
 // anything but an environmental land failure drops the task off any land
 // cause it held (issue #116): the cause's listing reads the column.
 func (e *Engine) needsForemanTx(tx *sql.Tx, job *jobRow, kind string, payload eventPayload, now time.Time) error {
+	// A job that ended with no completion — hard-capped, timed out in the
+	// queue after a lapsed lease — while its task waited on a stop-running
+	// restart (§5.6) consumes the restart, unseeded, instead of parking.
+	if consumed, err := e.consumeStopPendingTx(tx, job.ProjectID, job.TaskID, "", now); err != nil || consumed {
+		return err
+	}
 	if _, err := tx.Exec(`UPDATE tasks SET state = ?, land_env_cause = '', updated_at = ? WHERE id = ?`,
 		taskNeedsForeman, fmtTime(now), job.TaskID); err != nil {
 		return fmt.Errorf("park task %d at needs_foreman: %w", job.TaskID, err)

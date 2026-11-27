@@ -1464,3 +1464,57 @@ func TestTaskNoteMigrationKeepsTheRows(t *testing.T) {
 		t.Errorf("note = %q", got)
 	}
 }
+
+// TestTaskStopPendingMigrationKeepsTheRows builds the store of a binary
+// that predates 0090_task_stop_pending — the store carrying 0089 — and
+// opens it with this binary: both columns exist, every old task has no
+// pending stop-running restart and every old job no seed (NULL), the
+// rows keep their values, and the columns take values.
+func TestTaskStopPendingMigrationKeepsTheRows(t *testing.T) {
+	migs, err := allMigrations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := 0
+	for _, m := range migs {
+		if m.name == "task_stop_pending" {
+			before = m.version - 1
+			break
+		}
+	}
+	if before != 89 {
+		t.Fatalf("task_stop_pending applies after version %d, want 89 (0089_land_batch)", before)
+	}
+	path := filepath.Join(t.TempDir(), "store.db")
+	db, err := sql.Open("sqlite", dsn(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range migs[:before] {
+		exec(t, db, m.sql)
+	}
+	exec(t, db, "PRAGMA user_version = "+strconv.Itoa(before))
+	project := insertProject(t, db)
+	plan := insertPlan(t, db, project)
+	task := insertTask(t, db, plan)
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s := openStore(t, path)
+	if cols := queryStrings(t, s.db, "SELECT name FROM pragma_table_info('tasks')"); !slices.Contains(cols, "stop_pending") {
+		t.Errorf("tasks after upgrade has no stop_pending column: %v", cols)
+	}
+	if cols := queryStrings(t, s.db, "SELECT name FROM pragma_table_info('jobs')"); !slices.Contains(cols, "seed_branch") {
+		t.Errorf("jobs after upgrade has no seed_branch column: %v", cols)
+	}
+	if got := queryInt(t, s.db, "SELECT stop_pending IS NULL FROM tasks WHERE id = ?", task); got != 1 {
+		t.Errorf("old task stop_pending is not NULL: no old row has a pending restart")
+	}
+	if got := queryString(t, s.db, "SELECT state FROM tasks WHERE id = ?", task); got != "ready" {
+		t.Errorf("existing task state = %q, want ready untouched", got)
+	}
+	exec(t, s.db, "UPDATE tasks SET stop_pending = '' WHERE id = ?", task)
+	if got := queryInt(t, s.db, "SELECT stop_pending IS NOT NULL FROM tasks WHERE id = ?", task); got != 1 {
+		t.Errorf("an empty pending note did not read as pending")
+	}
+}

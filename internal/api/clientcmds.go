@@ -670,7 +670,9 @@ func (c *Client) Answer(ctx context.Context, task int64, text, idemKey string) (
 	}, nil
 }
 
-// TaskRestartResult names what a task_restart did: the fresh work job.
+// TaskRestartResult names what a task_restart did: the fresh work job,
+// or — Answer pending, under stop_running — the live job that is
+// stopping, whose end queues the fresh attempt.
 type TaskRestartResult struct {
 	Answer engine.Answer
 	JobID  int64
@@ -679,11 +681,13 @@ type TaskRestartResult struct {
 
 // RestartTask restarts a parked task (§3, §5.6, §12.1, §12.2): a fresh
 // work attempt from the task's base, the note handed to the worker
-// verbatim when there is one. idemKey as in Answer.
-func (c *Client) RestartTask(ctx context.Context, task int64, note, idemKey string) (TaskRestartResult, error) {
+// verbatim when there is one. stopRunning also restarts a task whose job
+// is live: a running job stops keeping its branch, and its end queues
+// the fresh attempt seeded from it. idemKey as in Answer.
+func (c *Client) RestartTask(ctx context.Context, task int64, note string, stopRunning bool, idemKey string) (TaskRestartResult, error) {
 	var out taskRestartResponse
 	path := "/v1/tasks/" + strconv.FormatInt(task, 10) + "/restart"
-	if err := c.callKeyed(ctx, http.MethodPost, path, idemKey, taskRestartRequest{Note: note}, &out); err != nil {
+	if err := c.callKeyed(ctx, http.MethodPost, path, idemKey, taskRestartRequest{Note: note, StopRunning: stopRunning}, &out); err != nil {
 		return TaskRestartResult{}, err
 	}
 	return TaskRestartResult{

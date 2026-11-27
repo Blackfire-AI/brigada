@@ -159,8 +159,9 @@ type answerArgs struct {
 // taskRestartArgs is the task_restart tool's arguments (§3, §5.6,
 // §12.2): the parked task and the note for its fresh attempt, optional.
 type taskRestartArgs struct {
-	Task int64  `json:"task"`
-	Note string `json:"note"`
+	Task        int64  `json:"task"`
+	Note        string `json:"note"`
+	StopRunning bool   `json:"stop_running,omitempty"`
 }
 
 // callAnswer runs the answer tool (§3, §12.2): the foreman's answer to
@@ -187,7 +188,8 @@ func callAnswer(ctx context.Context, c *api.Client, args json.RawMessage) (strin
 // callTaskRestart runs the task_restart tool (§3, §5.6, §12.2): a fresh
 // work attempt for a parked task through /v1/tasks/<id>/restart, the
 // note verbatim when there is one, rendered as text naming the new
-// work job. The idempotency key is minted as in answer.
+// work job — or, under stop_running on a running task, the job that is
+// stopping. The idempotency key is minted as in answer.
 func callTaskRestart(ctx context.Context, c *api.Client, args json.RawMessage) (string, error) {
 	var a taskRestartArgs
 	if len(args) > 0 {
@@ -195,9 +197,12 @@ func callTaskRestart(ctx context.Context, c *api.Client, args json.RawMessage) (
 			return "", fmt.Errorf("arguments: %w", err)
 		}
 	}
-	res, err := c.RestartTask(ctx, a.Task, a.Note, idemKey("task_restart", a))
+	res, err := c.RestartTask(ctx, a.Task, a.Note, a.StopRunning, idemKey("task_restart", a))
 	if err != nil {
 		return "", err
+	}
+	if res.Answer == engine.AnsPending {
+		return fmt.Sprintf("task %d stop requested: job %d stops and pushes its branch; the fresh attempt queues, seeded from it, once it completes", a.Task, res.JobID), nil
 	}
 	return fmt.Sprintf("task %d restarted: work job %d %s", a.Task, res.JobID, res.Answer), nil
 }

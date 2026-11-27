@@ -691,3 +691,90 @@ type manualTicker struct {
 
 func (t *manualTicker) Chan() <-chan time.Time { return t.ch }
 func (t *manualTicker) Stop()                  {}
+
+// stopThenSeededWorker commits work and goes quiet on a fresh worktree;
+// on a worktree that already holds the work — a seeded restart — it
+// reports done at once.
+const stopThenSeededWorker = `
+cat > /dev/null
+echo '{"type":"assistant","text":"starting"}'
+br=$(git rev-parse --abbrev-ref HEAD)
+if [ -f work.txt ]; then
+  : > "$BRIGADA_TEST_MARKERS/seeded"
+  echo carried on >> work.txt
+  git add -A
+  git commit -qm 'carried on'
+  printf '{"type":"result","text":"{\\"status\\":\\"done\\",\\"summary\\":\\"carried on\\",\\"branch\\":\\"%s\\"}"}\n' "$br"
+  exit 0
+fi
+echo stopped work > work.txt
+git add -A
+git commit -qm 'stopped work'
+: > "$BRIGADA_TEST_MARKERS/started"
+sleep 30
+: > "$BRIGADA_TEST_MARKERS/finished"
+`
+
+// TestRunnerStopRunningPushesAndSeedsTheRestart covers the stop-running
+// restart through the runner (§5.6, §12.3): the heartbeat's stop_running
+// answer kills the worker as the stall policy would, the run completes
+// stalled with the reason stop_running and its committed work pushed,
+// and the fresh attempt the completion queues starts its worktree from
+// that branch, its work carrying on from the stopped run's.
+func TestRunnerStopRunningPushesAndSeedsTheRestart(t *testing.T) {
+	remote := newRemote(t)
+	e := newTestEnv(t, engine.Config{})
+	e.seedProject(remote)
+	task := e.seedTask("", "true")
+	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Take your time.", "", ""))
+	markers := markerDir(t)
+
+	// No policy stop: the silence window outlasts the test.
+	p := e.startRunner(writeWorkerScript(t, stopThenSeededWorker), 100*time.Millisecond,
+		func(c *Config) { c.StallAfter = time.Hour })
+	defer p.stop(t)
+
+	e.waitUntil("the worker to commit and start", func() bool {
+		_, err := os.Stat(filepath.Join(markers, "started"))
+		return err == nil
+	})
+	res, err := e.eng.RestartTaskStopRunning(e.ctx, e.project, task, "carry on from the stopped work")
+	if err != nil {
+		t.Fatalf("restart with stop_running: %v", err)
+	}
+	if res.Answer != engine.AnsPending || res.JobID != job {
+		t.Fatalf("stop-running restart = %+v, want pending on job %d", res, job)
+	}
+	stopped := e.waitJob(job, func(j *engine.JobInfo) bool { return j.Status == statusStalled })
+	wr := e.workerResult(stopped)
+	if wr.Status != statusStalled || wr.Reason != engine.StopRunningReason {
+		t.Errorf("stopped result = %+v, want stalled with the reason %q", wr, engine.StopRunningReason)
+	}
+	if wr.Branch == "" || remoteBranchCommit(t, remote, wr.Branch) == "" {
+		t.Fatalf("the stopped run's work was not pushed: branch %q", wr.Branch)
+	}
+	if _, err := os.Stat(filepath.Join(markers, "finished")); err == nil {
+		t.Fatal("the stopped worker ran to the end; it was not killed")
+	}
+
+	fresh := e.int64Of("SELECT id FROM jobs WHERE task_id = ? AND restart = 1", task)
+	if fresh == 0 {
+		t.Fatal("the stopped run's completion queued no fresh attempt")
+	}
+	if seed := e.int64Of("SELECT COUNT(*) FROM jobs WHERE id = ? AND seed_branch = ?", fresh, wr.Branch); seed != 1 {
+		t.Errorf("the fresh attempt is not seeded from %s", wr.Branch)
+	}
+	finished := e.waitJob(fresh, func(j *engine.JobInfo) bool { return j.Status == "done" })
+	if _, err := os.Stat(filepath.Join(markers, "seeded")); err != nil {
+		t.Fatal("the fresh attempt's worktree did not hold the stopped run's work")
+	}
+	next := e.workerResult(finished)
+	if next.Branch == "" || next.Branch == wr.Branch {
+		t.Fatalf("fresh attempt branch = %q, want a new branch beside %s", next.Branch, wr.Branch)
+	}
+	clone := t.TempDir()
+	git(t, "", "clone", "-q", "--branch", next.Branch, remote, clone)
+	if data, err := os.ReadFile(filepath.Join(clone, "work.txt")); err != nil || string(data) != "stopped work\ncarried on\n" {
+		t.Errorf("the fresh attempt's branch = %q (%v), want the stopped work carried on", data, err)
+	}
+}

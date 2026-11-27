@@ -392,6 +392,8 @@ func (r *jobRun) runWorker(ctx context.Context, ad adapter.Adapter, model, workd
 // consults the stall policy: stalled, or past the class time cap, the
 // worker's tree is killed and the run completes with that outcome —
 // and the beats go on, because the completion still needs the lease.
+// The engine's stop_running answer stops the worker the same way, the
+// run completing stalled with the reason stop_running.
 // An engine answer that ends the hold — lost, gone, cancelled, fenced
 // out — aborts the run: the worker's (or the check's) process group is
 // killed and whatever the run produced is dropped, never completed
@@ -427,6 +429,18 @@ func (r *jobRun) heartbeats(ctx context.Context, abort context.CancelFunc, done 
 			}
 			switch ans {
 			case engine.AnsOK:
+			case engine.AnsStopRunning:
+				// The foreman's stop-running restart (§5.6): not an end
+				// of the hold but a stop, exactly as the policy's — the
+				// worker alone is killed and the run completes stalled
+				// through finishStopped, its branch pushed. A beat that
+				// finds no worker up does nothing: one not started yet
+				// is stopped by a later beat, which answers the same,
+				// and one that already exited completes as it ended.
+				if r.workerUp() {
+					r.markStopped(&stop{Outcome: statusStalled, Reason: engine.StopRunningReason})
+					r.killWorker()
+				}
 			case engine.AnsLost, engine.AnsGone, engine.AnsCancelled, engine.AnsStaleEpoch:
 				r.markDropped()
 				r.cfg.Log.WarnContext(ctx, "the engine ended our hold; killing the run's processes",

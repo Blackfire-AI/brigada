@@ -158,7 +158,7 @@ func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request, runnerI
 		return
 	}
 	var expiry *time.Time
-	if ans == engine.AnsOK {
+	if ans == engine.AnsOK || ans == engine.AnsStopRunning {
 		t := expires
 		expiry = &t
 	}
@@ -448,6 +448,11 @@ type jobGrant struct {
 	// the diff file then holds the branch's commits since it. Empty for
 	// every other job.
 	ReviewSince string `json:"review_since,omitempty"`
+	// SeedBranch is the branch a stop-running restart's fresh work job
+	// starts its worktree from (§5.6): the stopped run's pushed branch,
+	// whose head the worktree is built at instead of BaseRef's. Empty for
+	// every other job.
+	SeedBranch string `json:"seed_branch,omitempty"`
 	// Branch is the branch the engine names a work or fix job to work
 	// on (§5.1): the worktree is built on it and the run's work is
 	// pushed to it. Empty for a review and a foreman turn — and for an
@@ -549,6 +554,7 @@ func jobGrantOf(g *engine.LeaseGrant) *jobGrant {
 		ExtraRepos:      g.ExtraRepos,
 		ReviewBranch:    g.ReviewBranch,
 		ReviewSince:     g.ReviewSince,
+		SeedBranch:      g.SeedBranch,
 		Branch:          g.Branch,
 		ApprovedHead:    g.ApprovedHead,
 		LandTarget:      g.LandTarget,

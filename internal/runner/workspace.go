@@ -110,7 +110,7 @@ func prepareWorkspace(ctx context.Context, cfg *Config, grant *api.JobGrant) (*w
 	// is the task's, not the job's (§5.1), so a run whose predecessor on
 	// the path is still winding down — a lost lease re-taken, a follow-up
 	// leased before the last worktree came down — waits for it.
-	unlock, err := lockMirrorHolding(ctx, w.mirror, []string{w.branch, grant.Branch, brigadaRef(landTargetOf(grant.BaseRef))}, []string{w.dir})
+	unlock, err := lockMirrorHolding(ctx, w.mirror, []string{w.branch, grant.Branch, grant.SeedBranch, brigadaRef(landTargetOf(grant.BaseRef))}, []string{w.dir})
 	if err != nil {
 		return nil, err
 	}
@@ -140,6 +140,21 @@ func prepareWorkspace(ctx context.Context, cfg *Config, grant *api.JobGrant) (*w
 			}
 			start = grant.Branch
 		}
+	} else if grant.SeedBranch != "" {
+		// A stop-running restart's fresh attempt (§5.6) carries on the
+		// stopped run's work: the worktree starts at the head of the
+		// branch it pushed, fetched by name like a fix round's, while the
+		// base ref stays the task's base for the diff and the landing. A
+		// remote that holds no such branch leaves the attempt on the
+		// base; one that cannot be asked fails the job, as for a round.
+		if _, holds, err := w.remoteBranch(ctx, grant.SeedBranch); err != nil {
+			return nil, err
+		} else if holds {
+			if err := w.fetchBranch(ctx, grant.SeedBranch); err != nil {
+				return nil, err
+			}
+			start = grant.SeedBranch
+		}
 	}
 	// A worktree left behind by a crashed run of the same job would make
 	// the add below fail on the path; the path is the task's and one
@@ -167,7 +182,11 @@ func prepareWorkspace(ctx context.Context, cfg *Config, grant *api.JobGrant) (*w
 		return nil, fmt.Errorf("read the worktree's base commit: %w", trimCmdError(out, err))
 	}
 	w.base = strings.TrimSpace(string(out))
-	grant.Prompt = prompt.WithWorkerBase(grant.Prompt, baseRef, w.base)
+	named := baseRef
+	if grant.SeedBranch != "" && start == grant.SeedBranch {
+		named = start // the seeded attempt is told the branch it carries on
+	}
+	grant.Prompt = prompt.WithWorkerBase(grant.Prompt, named, w.base)
 	return w, nil
 }
 

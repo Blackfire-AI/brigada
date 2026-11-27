@@ -1131,6 +1131,11 @@ func loadAmendNodesTx(tx *sql.Tx, plan int64) ([]amendNode, error) {
 // retired task leaves no worker running or queued. reason names who
 // asked, recorded on each job_cancelled event.
 func (e *Engine) cancelTaskJobsTx(tx *sql.Tx, task int64, reason string, now time.Time) error {
+	// A cancelled or retired task restarts nothing: its pending
+	// stop-running restart (§5.6) goes with its jobs.
+	if err := clearStopPendingTx(tx, task, now); err != nil {
+		return err
+	}
 	rows, err := tx.Query(`SELECT id FROM jobs WHERE task_id = ? ORDER BY id`, task)
 	if err != nil {
 		return fmt.Errorf("read the jobs of task %d: %w", task, err)

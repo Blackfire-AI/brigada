@@ -148,6 +148,12 @@ func (e *Engine) heartbeatTx(tx *sql.Tx, owner, jobID int64, leaseID string, pro
 			if err := e.foremanFinishedTx(tx, job, statusFailed, now); err != nil {
 				return "", time.Time{}, err
 			}
+			// A capped job whose task waited on a stop-running restart
+			// ends without a stop completion: the restart is consumed
+			// here, unseeded (§5.6).
+			if _, err := e.consumeStopPendingTx(tx, job.ProjectID, job.TaskID, "", now); err != nil {
+				return "", time.Time{}, err
+			}
 			return AnsLost, time.Time{}, nil
 		}
 	}
@@ -187,6 +193,15 @@ func (e *Engine) heartbeatTx(tx *sql.Tx, owner, jobID int64, leaseID string, pro
 	// token to the same expiry (§12.1).
 	if err := extendLeaseTokensTx(tx, job.ID, expires); err != nil {
 		return "", time.Time{}, err
+	}
+	// A pending stop-running restart (§5.6) asks the runner to stop the
+	// worker, push and complete stalled; the lease is extended all the
+	// same, since that completion still needs it. Every beat repeats the
+	// answer until the job ends, a re-lease's included.
+	if stop, err := stopRunningTx(tx, job); err != nil {
+		return "", time.Time{}, err
+	} else if stop {
+		return AnsStopRunning, expires, nil
 	}
 	return AnsOK, expires, nil
 }
@@ -628,6 +643,13 @@ func (e *Engine) cancelTx(tx *sql.Tx, job *jobRow, reason string, now time.Time)
 	}
 	if err := revokeLeaseTokensTx(tx, job.ID); err != nil {
 		return "", err
+	}
+	// A cancelled task job leaves no stop-running restart to consume
+	// (§5.6): its stop never completes.
+	if job.TaskID != 0 && job.Key == fmt.Sprintf("task:%d", job.TaskID) {
+		if err := clearStopPendingTx(tx, job.TaskID, now); err != nil {
+			return "", err
+		}
 	}
 	if _, err := appendEventTx(tx, evJobCancelled, job.ProjectID, job.TaskID, job.ID,
 		eventPayload{Reason: reason}, now); err != nil {

@@ -84,6 +84,11 @@ type LeaseGrant struct {
 	// resumes judged: the runner's diff file holds the commits since it.
 	// Empty for every other job.
 	ReviewSince string
+	// SeedBranch is, for a restart's work job that a stop-running
+	// restart seeded (§5.6), the stopped run's pushed branch: the
+	// worktree starts at its head instead of BaseRef's, while BaseRef
+	// stays the task's base. Empty for every other job.
+	SeedBranch string
 	// LandTarget is, for a land job (§7.1), the branch the task's diff is
 	// squashed onto: land_target, or the project's default branch. Empty
 	// for every other kind.
@@ -944,6 +949,7 @@ func (e *Engine) leaseTx(tx *sql.Tx, owner int64, harnesses, labels []string, no
 			ExtraRepos:      extraRepos,
 			ReviewBranch:    reviewBranch,
 			ReviewSince:     reviewSince,
+			SeedBranch:      j.SeedBranch,
 			Branch:          jobBranch,
 			Attempt:         j.Attempts + 1,
 			ResumeSessionID: resume,

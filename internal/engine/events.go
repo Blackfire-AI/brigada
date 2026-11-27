@@ -63,6 +63,7 @@ const (
 	evTaskTierBumped          = "task_tier_bumped"           // rule escalation; TierAsked is the old tier, TierServed the new tier, Reason the trigger (§8)
 	evTaskEffortBumped        = "task_effort_bumped"         // rule escalation on the same tier; EffortFrom is the old effort, EffortTo the new, Reason the trigger (§8)
 	evTaskRestarted           = "task_restarted"             // a foreman or automatic restart queued a fresh work attempt (§3, §5.6)
+	evTaskStopRequested       = "task_stop_requested"        // a task_restart with stop_running on a task whose job is leased or running: the job is told to stop and push, and its end queues the fresh attempt (§5.6); Job names the stopping job, Reason the restart's note
 	evTaskFailed              = "task_failed"                // the run failed or said nothing usable; the foreman decides (§3)
 	evTaskRetired             = "task_retired"               // a task that will not land was retired (§6.2); Reason carries the caller's words verbatim, Caller who asked — foreman or user
 	evTaskCancelledByAmend    = "task_cancelled_by_amend"    // a plan_amend newly cancelled the task (§6.2); Plan names the plan, Reason carries the caller's words verbatim, "no reason given" when blank, Caller who asked — foreman or user

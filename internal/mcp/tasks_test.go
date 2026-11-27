@@ -165,6 +165,44 @@ func TestServeCallAnswerRefused(t *testing.T) {
 	}
 }
 
+// TestServeCallTaskRestartStopRunning covers task_restart's
+// stop_running (§5.6): a task whose job a runner holds keeps running,
+// the text naming the stopping job, and the restart is kept pending.
+func TestServeCallTaskRestartStopRunning(t *testing.T) {
+	e := newEnvToken(t, foremanTokenFile, "foreman-secret-9")
+	task := seedParked(t, e, "task_needs_help", `{"question":"x"}`)
+	if err := e.st.Update(t.Context(), func(tx *sql.Tx) error {
+		if _, err := tx.Exec(`UPDATE tasks SET state = 'running' WHERE id = ?`, task); err != nil {
+			return err
+		}
+		_, err := tx.Exec(`INSERT INTO jobs (project_id, task_id, kind, key, mode, prompt, status, lease_id, created_at, updated_at)
+			VALUES (1, ?, 'work', ?, 'fresh', 'prompt', 'running', 'lease-1', ?, ?)`, task, "task:"+strconv.FormatInt(task, 10), seedTS, seedTS)
+		return err
+	}); err != nil {
+		t.Fatalf("seed the running job: %v", err)
+	}
+	job := countOf(t, e, "SELECT id FROM jobs WHERE task_id = ?", task)
+	s := start(t, e)
+
+	a := s.call(1, "tools/call", map[string]any{
+		"name":      "task_restart",
+		"arguments": map[string]any{"task": task, "note": "carry on", "stop_running": true},
+	})
+	text, isError := toolText(t, a)
+	if isError {
+		t.Fatalf("task_restart errored: %s", text)
+	}
+	if want := "job " + strconv.FormatInt(job, 10) + " stops"; !strings.Contains(text, want) {
+		t.Errorf("task_restart text = %q, want it to name %q", text, want)
+	}
+	if got := strOf(t, e, "SELECT stop_pending FROM tasks WHERE id = ?", task); got != "carry on" {
+		t.Errorf("tasks.stop_pending = %q, want the note", got)
+	}
+	if state := strOf(t, e, "SELECT state FROM tasks WHERE id = ?", task); state != "running" {
+		t.Errorf("task state = %q, want running", state)
+	}
+}
+
 // TestServeCallTaskRestart covers the task_restart tool end to end
 // (§3, §5.6, §12.2): a fresh work job for the parked task — restart
 // flag, fresh mode, the note verbatim in the composed prompt — the task
