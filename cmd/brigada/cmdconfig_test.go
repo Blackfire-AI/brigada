@@ -191,6 +191,7 @@ func TestConfigProjectProvenance(t *testing.T) {
 		"default_check: uv run pytest from .brigada/project.yaml",
 		"approval_max_tasks: 7 set by hand", "setup: make setup set by hand",
 		"approval_classes: implement+review+answer default",
+		"approval_tool_grants: none default",
 		"change: edit .brigada/project.yaml, then brigada project import",
 		"set by hand/local only: brigada project set key=value",
 	} {
