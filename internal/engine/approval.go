@@ -65,6 +65,10 @@ var defaultApprovalClasses = []string{"implement", "review", "answer"}
 //	                            approval, and at the land gate a task
 //	                            whose recorded changed paths match holds
 //	                            the landing (§6.3, §7.1). Absent = none.
+//	approval_tool_grants        list of tool-grant patterns, a subset
+//	                            of ToolGrantAllowlist; a task granting
+//	                            a pattern outside it needs approval
+//	                            (§6.3). Absent = none: every grant asks.
 //	gate_plan                   auto or ask; ask holds every plan at the
 //	                            plan gate (§6.3). Absent = auto.
 //	plan_review                 bool; the plan review before a plan's (or
@@ -92,6 +96,7 @@ type approvalSettings struct {
 	Budget            string     `json:"approval_budget"`
 	Classes           stringList `json:"approval_classes"`
 	ProtectedPaths    stringList `json:"approval_protected_paths"`
+	ToolGrants        stringList `json:"approval_tool_grants"`
 	GatePlan          string     `json:"gate_plan"`
 	GateLand          string     `json:"gate_land"`
 	GatePush          string     `json:"gate_push"`
@@ -171,6 +176,9 @@ type approvalVerdict struct {
 	// Extras describes each extra repository a task names outside the
 	// project's default list (§5.8), with its ref.
 	Extras []string
+	// Grants are the tool-grant patterns a task names outside
+	// approval_tool_grants (§6.3), each once.
+	Grants []string
 }
 
 // reasons renders the verdict as short phrases, one per reason.
@@ -193,6 +201,27 @@ func (v approvalVerdict) reasons(allowed []string, defaultCheck string) []string
 	}
 	if len(v.Extras) > 0 {
 		out = append(out, "extra repositories outside the project default: "+strings.Join(v.Extras, ", "))
+	}
+	if len(v.Grants) > 0 {
+		out = append(out, toolGrantsHoldReason(v.Grants))
+	}
+	return out
+}
+
+// toolGrantsHoldReason words the tool-grant rule's hold (§6.3): the
+// patterns granted outside approval_tool_grants.
+func toolGrantsHoldReason(grants []string) string {
+	return fmt.Sprintf("%s %s outside %s", holdToolGrants, strings.Join(grants, ", "), SettingApprovalToolGrants)
+}
+
+// grantsOutside returns the task's tool grants the project has not
+// pre-approved in approval_tool_grants (§6.3), in the task's order.
+func (s approvalSettings) grantsOutside(grants []string) []string {
+	var out []string
+	for _, g := range grants {
+		if !slicesContains(s.ToolGrants, g) && !slicesContains(out, g) {
+			out = append(out, g)
+		}
 	}
 	return out
 }
@@ -274,7 +303,7 @@ func (s approvalSettings) evaluate(tasks []PlanTask) approvalVerdict {
 	for _, c := range s.Classes {
 		allowed[c] = true
 	}
-	seenClass, seenPath, seenExtra, seenCheck := map[string]bool{}, map[string]bool{}, map[string]bool{}, map[string]bool{}
+	seenClass, seenPath, seenExtra, seenCheck, seenGrant := map[string]bool{}, map[string]bool{}, map[string]bool{}, map[string]bool{}, map[string]bool{}
 	inDefault := map[string]bool{}
 	for _, x := range s.ExtraRepos {
 		inDefault[x.Repo] = true
@@ -313,6 +342,15 @@ func (s approvalSettings) evaluate(tasks []PlanTask) approvalVerdict {
 			seenCheck[c] = true
 			v.Checks = append(v.Checks, c)
 			v.Needed = true
+		}
+		// A task's tool grants (§6.1) widen what its worker may run; a
+		// pattern the project has not pre-approved needs the user's yes.
+		for _, g := range s.grantsOutside(t.ToolGrants) {
+			if !seenGrant[g] {
+				seenGrant[g] = true
+				v.Grants = append(v.Grants, g)
+				v.Needed = true
+			}
 		}
 	}
 	return v
@@ -364,8 +402,8 @@ func boundCheck(check string) string {
 // taskHoldReasons names the plan rules one added task trips (§6.3),
 // empty when it trips none: a class outside approval_classes, a
 // protected path its spec or check mentions, a check other than the
-// project's default_check, or an extra repository outside the
-// project's default. The whole-plan triggers — the task
+// project's default_check, an extra repository outside the
+// project's default, or a tool grant outside approval_tool_grants. The whole-plan triggers — the task
 // count and gate_plan — are the plan's, not one task's, and never hold
 // an amendment of an active plan; the plan budget is not per task but
 // holds any task about to start, an added one included (planbudget.go).
@@ -401,6 +439,9 @@ func (s approvalSettings) taskHoldReasons(t PlanTask) []string {
 	}
 	if len(extras) > 0 {
 		out = append(out, "extra repositories outside the project default: "+strings.Join(extras, ", "))
+	}
+	if grants := s.grantsOutside(t.ToolGrants); len(grants) > 0 {
+		out = append(out, toolGrantsHoldReason(grants))
 	}
 	return out
 }

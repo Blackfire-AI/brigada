@@ -204,6 +204,9 @@ type amendNode struct {
 	// the project default; extraRec is the record an added task carries.
 	extra    []ExtraRepo
 	extraRec string
+	// grants are the task's tool grants (§6.1), which the approval rules
+	// judge (§6.3).
+	grants []string
 }
 
 func (n amendNode) label() string {
@@ -326,7 +329,7 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 			title = taskTitleOf(t.Spec)
 		}
 		nodes = append(nodes, amendNode{base: -1, cont: -1, name: t.Name, state: taskPending, spec: t.Spec, check: t.Check, class: class, title: title,
-			extra: t.ExtraRepos, extraRec: addExtraRecs[i]})
+			extra: t.ExtraRepos, extraRec: addExtraRecs[i], grants: t.ToolGrants})
 	}
 	resolve := func(ref string) (int, error) {
 		if i, ok := byName[ref]; ok {
@@ -511,6 +514,9 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 		respecText[i] = rs.Spec
 		respecSkills[i] = rs.Skills
 		respecGrants[i] = rs.ToolGrants
+		if rs.ToolGrants != nil {
+			nodes[i].grants = rs.ToolGrants
+		}
 		respecced = append(respecced, i)
 	}
 	// A note (§6.2) rides a task that has not settled: pending, ready,
@@ -689,7 +695,7 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 	var kept []PlanTask
 	for _, n := range nodes {
 		if n.state != taskCancelled {
-			kept = append(kept, PlanTask{Spec: n.spec, Check: n.check, Class: n.class, ExtraRepos: n.extra})
+			kept = append(kept, PlanTask{Spec: n.spec, Check: n.check, Class: n.class, ExtraRepos: n.extra, ToolGrants: n.grants})
 		}
 	}
 	newState := state
@@ -708,13 +714,15 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 		newState = planReviewing
 	case state == "active":
 		for _, i := range respecced {
-			if reasons := settings.taskHoldReasons(PlanTask{Spec: respecText[i], Check: nodes[i].check, Class: nodes[i].class}); len(reasons) > 0 {
+			// A respec's grants (§6.1) are judged as it names them; one
+			// that keeps the task's grants adds none to judge.
+			if reasons := settings.taskHoldReasons(PlanTask{Spec: respecText[i], Check: nodes[i].check, Class: nodes[i].class, ToolGrants: respecGrants[i]}); len(reasons) > 0 {
 				respecHold[i] = strings.Join(reasons, "; ")
 			}
 		}
 		for k := range am.Add {
 			n := nodes[existing+k]
-			if reasons := settings.taskHoldReasons(PlanTask{Spec: n.spec, Check: n.check, Class: n.class, ExtraRepos: n.extra}); len(reasons) > 0 {
+			if reasons := settings.taskHoldReasons(PlanTask{Spec: n.spec, Check: n.check, Class: n.class, ExtraRepos: n.extra, ToolGrants: n.grants}); len(reasons) > 0 {
 				addedHold[k] = strings.Join(reasons, "; ")
 			}
 		}
@@ -1072,7 +1080,7 @@ func joinIDs(ids []int64) string {
 // loadAmendNodesTx reads a plan's tasks, by id, with their dependencies
 // as indexes into the same list.
 func loadAmendNodesTx(tx *sql.Tx, plan int64) ([]amendNode, error) {
-	rows, err := tx.Query(`SELECT id, name, state, title, spec, COALESCE(check_cmd, ''), class, skip_approved, COALESCE(extra_repos, ''), wait_landed
+	rows, err := tx.Query(`SELECT id, name, state, title, spec, COALESCE(check_cmd, ''), class, skip_approved, COALESCE(extra_repos, ''), wait_landed, tool_grants
 		FROM tasks WHERE plan_id = ? ORDER BY id`, plan)
 	if err != nil {
 		return nil, fmt.Errorf("read the tasks of plan %d: %w", plan, err)
@@ -1080,8 +1088,8 @@ func loadAmendNodesTx(tx *sql.Tx, plan int64) ([]amendNode, error) {
 	var nodes []amendNode
 	for rows.Next() {
 		n := amendNode{base: -1, cont: -1}
-		var extraRec string
-		if err := rows.Scan(&n.id, &n.name, &n.state, &n.title, &n.spec, &n.check, &n.class, &n.skipApproved, &extraRec, &n.waitLanded); err != nil {
+		var extraRec, grants string
+		if err := rows.Scan(&n.id, &n.name, &n.state, &n.title, &n.spec, &n.check, &n.class, &n.skipApproved, &extraRec, &n.waitLanded, &grants); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("read the tasks of plan %d: %w", plan, err)
 		}
@@ -1090,6 +1098,7 @@ func loadAmendNodesTx(tx *sql.Tx, plan int64) ([]amendNode, error) {
 		if spec := parseExtraReposRecord(extraRec); spec != nil && spec.Source == ExtraSourceTask {
 			n.extra = spec.Repos
 		}
+		n.grants = parseTaskToolGrants(grants)
 		nodes = append(nodes, n)
 	}
 	if err := rows.Err(); err != nil {
