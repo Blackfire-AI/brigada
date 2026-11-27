@@ -114,7 +114,7 @@ tasks:
     tier: heavy
     effort: medium
     skills: ["surface-parity"]
-    state: reviewing
+    state: done
     branch: "brigada/task-33"
     rounds: 0
   - id: 35
@@ -126,6 +126,6 @@ tasks:
     tier: light
     effort: low
     skills: ["docs-change"]
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
