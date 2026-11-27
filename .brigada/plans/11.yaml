@@ -7,7 +7,7 @@ title: "Landing machinery: land-target sync (#127) then batch landing (#134)"
 repo: "github.com/Blackfire-AI/brigada"
 state: active
 created: 2026-11-26T20:46:37.060237154Z
-updated: 2026-11-27T13:00:41.597215623Z
+updated: 2026-11-27T13:02:03.655621795Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -69,9 +69,10 @@ tasks:
     deps: ["sync-engine"]
     base: "sync-engine"
     continue: "sync-engine"
-    tier: heavy
     effort: medium
     review_tier: standard
+    review_effort: medium
+    caps: {restart: 4}
     state: needs_foreman
     branch: "brigada/task-58-r2"
     rounds: 0
