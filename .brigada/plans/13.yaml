@@ -94,7 +94,7 @@ tasks:
     tier: light
     effort: low
     skills: ["docs-change"]
-    state: running
+    state: ready
     branch: ""
     rounds: 0
   - id: 56
