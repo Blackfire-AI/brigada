@@ -369,3 +369,65 @@ func jobSection(t *testing.T, wf, start, end string) string {
 	}
 	return rest
 }
+
+// TestInstallJobChecksPackagesInContainers pins the container install check:
+// it needs the release, runs in the three distro images, installs git and curl
+// before using them, verifies checksums before installing, and runs
+// brigada version last.
+func TestInstallJobChecksPackagesInContainers(t *testing.T) {
+	raw, err := os.ReadFile(releaseWorkflow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job := jobSection(t, string(raw), "\n  install:\n", "\n  \x00")
+	for _, want := range []string{
+		"needs: release",
+		"contents: read",
+		"runs-on: ubuntu-latest",
+		"image: ${{ matrix.image }}",
+		"image: debian:stable-slim",
+		"image: ubuntu:latest",
+		"image: fedora:latest",
+	} {
+		if !strings.Contains(job, want) {
+			t.Errorf("install job lacks %q", want)
+		}
+	}
+	if strings.Contains(job, "actions/checkout") {
+		t.Error("install job must not use actions/checkout")
+	}
+	for _, line := range strings.Split(job, "\n") {
+		if i := strings.Index(line, "uses:"); i >= 0 && !strings.Contains(line, "@") {
+			t.Errorf("unpinned action: %s", line)
+		}
+	}
+	// Each image's bootstrap installs git and curl with its own package manager.
+	for _, want := range []string{
+		"bootstrap: apt-get update && apt-get install -y git curl",
+		"bootstrap: dnf install -y git curl",
+	} {
+		if !strings.Contains(job, want) {
+			t.Errorf("install job lacks bootstrap %q", want)
+		}
+	}
+	if n := strings.Count(job, "bootstrap: "); n != 3 {
+		t.Errorf("want one bootstrap per image (3), found %d", n)
+	}
+	for _, want := range []string{"install: apt-get install -y", "install: dnf install -y"} {
+		if !strings.Contains(job, want) {
+			t.Errorf("install job lacks %q", want)
+		}
+	}
+	idx := func(s string) int {
+		i := strings.Index(job, s)
+		if i < 0 {
+			t.Fatalf("install job lacks %q", s)
+		}
+		return i
+	}
+	boot, curl := idx("- name: bootstrap"), idx("curl --fail")
+	sums, inst, ver := idx("sha256sum -c"), idx("${{ matrix.install }}"), idx("run: brigada version")
+	if !(boot < curl && curl < sums && sums < inst && inst < ver) {
+		t.Errorf("order must be bootstrap < download < checksum < install < version: %d %d %d %d %d", boot, curl, sums, inst, ver)
+	}
+}
