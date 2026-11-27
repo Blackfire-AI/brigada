@@ -45,7 +45,7 @@ tasks:
     effort: medium
     review_tier: standard
     review_effort: medium
-    state: reviewing
+    state: done
     branch: "brigada/task-26"
     rounds: 1
   - id: 44
@@ -94,7 +94,7 @@ tasks:
     tier: light
     effort: low
     skills: ["docs-change"]
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 56
