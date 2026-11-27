@@ -221,6 +221,11 @@ func TestInitRegistrationTransportStored(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			root := initAliasRepo(t, tc.origin)
 			t.Chdir(root)
+			wireGit(t, ".", "config", "user.name", "init test")
+			wireGit(t, ".", "config", "user.email", "init-test@example.invalid")
+			pushRemote := t.TempDir()
+			wireGit(t, pushRemote, "init", "--bare", "-q")
+			wireGit(t, ".", "remote", "set-url", "--push", "origin", pushRemote)
 			old := initSSHConfig
 			initSSHConfig = func(context.Context, string) ([]byte, error) { return []byte("hostname example.com\nport 22\n"), nil }
 			t.Cleanup(func() { initSSHConfig = old })

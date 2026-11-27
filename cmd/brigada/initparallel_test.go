@@ -172,6 +172,7 @@ func TestInitTasksAtOnceApply(t *testing.T) {
 	oldBinary := initBinary
 	t.Cleanup(func() { initBinary = oldBinary })
 	importRepo(t)
+	initPushURL(t)
 	fakeInitPATH(t, "claude", "codex")
 	// Record argv at the process boundary, then run the real detached roles.
 	calls := filepath.Join(t.TempDir(), "runner-args")

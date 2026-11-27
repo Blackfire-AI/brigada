@@ -22,6 +22,13 @@ func importRepo(t *testing.T) (writeFile func(body string)) {
 			t.Skipf("git %v: %v: %s", args, err, out)
 		}
 	}
+	// A git identity, so an applied init's push probe can build its scratch
+	// commit.
+	for _, args := range [][]string{{"config", "user.name", "init test"}, {"config", "user.email", "init-test@example.invalid"}} {
+		if out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput(); err != nil {
+			t.Skipf("git %v: %v: %s", args, err, out)
+		}
+	}
 	t.Chdir(dir)
 	return func(body string) {
 		t.Helper()
@@ -33,6 +40,18 @@ func importRepo(t *testing.T) (writeFile func(body string)) {
 			t.Fatal(err)
 		}
 	}
+}
+
+// initPushURL points the current repo's origin at a local bare repo for
+// pushes, so an applied init's push probe succeeds without reaching the
+// network; the fetch URL stays put, so canonical identities and registration
+// assertions keep working. It returns the bare repo's path.
+func initPushURL(t *testing.T) string {
+	t.Helper()
+	remote := t.TempDir()
+	wireGit(t, remote, "init", "--bare", "-q")
+	wireGit(t, ".", "remote", "set-url", "--push", "origin", remote)
+	return remote
 }
 
 func projectFile(body string) string {

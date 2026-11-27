@@ -1024,6 +1024,9 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 	if *noWiring {
 		printInitWrapped(stdout, "", "  ", initDim(stdout, "--no-wiring: init in a repository no longer wires or unwires the harness; the flag matters only in a parent folder"))
 	}
+	// The push probe is named in the plan as its own step, outside the file
+	// list: it is a network side effect, not a file edit.
+	printInitWrapped(stdout, "  "+style.Bold("Push probe:")+" ", "    ", fmt.Sprintf("push a scratch ref to %s and delete it, to verify the push path before anything is written", selectedRemote))
 	printInitWrapped(stdout, "  "+style.Bold("In the background:")+" ", "    ", "a runner starts now and keeps going (log: "+initHomePath(filepath.Join(rt.stateDir, "runner.log"))+"; stop it with: "+style.Accent("brigada stop")+"). The engine starts when needed and stops after 30 idle minutes.")
 	fmt.Fprintln(stdout)
 	if *probe {
@@ -1045,14 +1048,14 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 		if err != nil {
 			return fail(stderr, err)
 		}
-		prompt := initApplyPrompt(files, running)
+		prompt := initApplyPrompt(files, running, true)
 		if running && initAgentsDiffer(rec, runnerAdverts, runnerAgents, *parallel) {
 			noun := "files"
 			if files == 1 {
 				noun = "file"
 			}
 			prompt = fmt.Sprintf(
-				"Write %d %s and restart the runner with the new agents?",
+				"Write %d %s, push and delete a scratch commit, and restart the runner with the new agents?",
 				files, noun)
 		}
 		answer, err := ask(prompt+" [y/N]: ", "--yes to apply the displayed plan")
@@ -1063,6 +1066,30 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) (code
 			fmt.Fprintln(stdout, "Declined; nothing written or started.")
 			return 1
 		}
+	}
+	// The push probe runs after confirmation and before the first write: a
+	// refused push fails init before anything is written or the runner
+	// started; an unreachable remote warns and setup continues.
+	pushProbe, probeErr := runInitPushProbe(ctx, root, selectedRemote)
+	if probeErr != nil {
+		return fail(stderr, probeErr)
+	}
+	switch pushProbe.outcome {
+	case probeOutcomeRefused:
+		msg := "push probe failed: " + selectedRemote + " refused the push; nothing written or started"
+		if fix := initProbeFix(pushProbe.words); fix != "" {
+			msg += ". Fix: " + fix
+		}
+		return fail(stderr, fmt.Errorf("%s\n%s", msg, pushProbe.words))
+	case probeOutcomeUnreachable:
+		printInitWrapped(stdout, "WARNING: ", "  ", fmt.Sprintf("the push path could not be verified (%s); init continues, and the push path stays unverified", pushProbe.words))
+	}
+	if pushProbe.deleteErr != nil {
+		// A failed delete is a warning, not a failure: setup continues, and
+		// nothing later reconciles probe refs, so the command is printed on
+		// its own unwrapped line to copy and run as it stands.
+		printInitWrapped(stdout, "WARNING: ", "  ", fmt.Sprintf("the push probe could not delete its scratch ref %s from %s (%v); init continues. Delete it with:", pushProbe.ref, selectedRemote, pushProbe.deleteErr))
+		fmt.Fprintf(stdout, "  git push %s --delete %s\n", selectedRemote, pushProbe.ref)
 	}
 	engineRunning := lifecycle.EngineRunning(ctx, rt.paths.Socket)
 	// Recheck before the first write, in case the path changed during prompts.
@@ -1543,20 +1570,27 @@ func initPad(text string, width int) string {
 	return text + strings.Repeat(" ", max(0, width-term.VisibleWidth(text)))
 }
 
-func initApplyPrompt(files int, running bool) string {
+// initApplyPrompt builds the final confirmation prompt. probe is true when
+// applying also runs the push probe, so the prompt names it: a user answering
+// yes is told a scratch commit is pushed to and deleted from their remote.
+func initApplyPrompt(files int, running, probe bool) string {
 	noun := "files"
 	if files == 1 {
 		noun = "file"
 	}
+	probeText := ""
+	if probe {
+		probeText = ", push and delete a scratch commit"
+	}
 	switch {
 	case files > 0 && !running:
-		return fmt.Sprintf("Write %d %s and start the runner?", files, noun)
+		return fmt.Sprintf("Write %d %s%s and start the runner?", files, noun, probeText)
 	case files > 0:
-		return fmt.Sprintf("Write %d %s?", files, noun)
+		return fmt.Sprintf("Write %d %s%s?", files, noun, probeText)
 	case !running:
-		return "Start the runner?"
+		return fmt.Sprintf("Start the runner%s?", probeText)
 	default:
-		return "Register the project?"
+		return fmt.Sprintf("Register the project%s?", probeText)
 	}
 }
 

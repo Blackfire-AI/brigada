@@ -317,6 +317,7 @@ func runInitParent(ctx context.Context, dir string, opts parentOptions, common *
 		fmt.Fprintln(stdout, "No project selected; nothing is registered (select with --all or at the prompt).")
 	}
 	fmt.Fprintln(stdout, "Nothing is written into the child repositories.")
+	fmt.Fprintln(stdout, "Init does not push to any child remote here; a future `brigada doctor` will verify each repository's push path.")
 
 	var wiring []wireFile
 	if !opts.noWiring {

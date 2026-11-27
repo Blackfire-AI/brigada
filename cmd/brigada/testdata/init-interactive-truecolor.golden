@@ -193,9 +193,11 @@ dsh (experimental): init can't check sign-in.
     brigada-operator skill, which init does not install. Add -g to install it
     globally; npx skills update advances it. Install it with:
     [38;2;108;198;224mnpx skills add Blackfire-AI/brigada --skill brigada-operator[0m
+  [1mPush probe:[0m push a scratch ref to origin and delete it, to verify the push
+    path before anything is written
   [1mIn the background:[0m a runner starts now and keeps going (log:
     ~/.local/state/brigada/runner.log; stop it with: [38;2;108;198;224mbrigada stop[0m). The engine
     starts when needed and stops after 30 idle minutes.
 
-[1mWrite 14 files and start the runner? [0m[38;2;108;198;224m[y/N][0m[1m:[0m
+[1mWrite 14 files, push and delete a scratch commit and start the runner? [0m[38;2;108;198;224m[y/N][0m[1m:[0m
 Declined; nothing written or started.

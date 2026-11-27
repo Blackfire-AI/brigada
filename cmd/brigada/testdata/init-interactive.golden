@@ -194,9 +194,11 @@ Plan
     brigada-operator skill, which init does not install. Add -g to install it
     globally; npx skills update advances it. Install it with:
     npx skills add Blackfire-AI/brigada --skill brigada-operator
+  Push probe: push a scratch ref to origin and delete it, to verify the push
+    path before anything is written
   In the background: a runner starts now and keeps going (log:
     ~/.local/state/brigada/runner.log; stop it with: brigada stop). The engine
     starts when needed and stops after 30 idle minutes.
 
-Write 14 files and start the runner? [y/N]:
+Write 14 files, push and delete a scratch commit and start the runner? [y/N]:
 Declined; nothing written or started.

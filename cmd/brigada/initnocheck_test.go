@@ -107,6 +107,7 @@ func TestInitNoCheckApply(t *testing.T) {
 	initBinary = binary
 	t.Cleanup(func() { initBinary = old })
 	importRepo(t) // No build files: --yes must pick no check.
+	initPushURL(t)
 	fakeInitPATH(t, "claude", "codex")
 	state := testsupport.ShortStateDir(t)
 	t.Cleanup(func() {
