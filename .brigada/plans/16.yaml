@@ -59,9 +59,9 @@ tasks:
     review_tier: standard
     review_effort: medium
     skills: ["schema-migration", "surface-parity"]
-    state: running
+    state: needs_foreman
     branch: "brigada/task-37-r2"
-    rounds: 1
+    rounds: 0
   - id: 38
     name: "changelog-53"
     title: "CHANGELOG entry for the #53 redirect work"
@@ -86,4 +86,4 @@ tasks:
     skills: ["schema-migration", "surface-parity"]
     state: reviewing
     branch: "brigada/task-49-r9"
-    rounds: 0
+    rounds: 1
