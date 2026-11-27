@@ -69,8 +69,8 @@ tasks:
     effort: medium
     review_tier: standard
     review_effort: medium
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-12"
     rounds: 0
   - id: 50
     name: "wl-field"
