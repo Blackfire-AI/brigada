@@ -128,5 +128,5 @@ tasks:
     effort: medium
     caps: {restart: 5}
     state: running
-    branch: ""
-    rounds: 0
+    branch: "brigada/task-69-r4"
+    rounds: 1
