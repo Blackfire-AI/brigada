@@ -43,8 +43,8 @@ tasks:
     tier: heavy
     effort: medium
     skills: ["config-setting"]
-    state: running
-    branch: "brigada/task-71"
+    state: reviewing
+    branch: "brigada/task-71-r1"
     rounds: 0
   - id: 72
     name: "gitea-fetcher"
