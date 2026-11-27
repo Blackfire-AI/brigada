@@ -45,9 +45,9 @@ tasks:
     effort: medium
     review_tier: standard
     review_effort: medium
-    state: needs_foreman
+    state: ready
     branch: "brigada/task-26"
-    rounds: 1
+    rounds: 0
   - id: 44
     name: "grants-core"
     title: "Per-task tool grants: the field, the allowlist, validation (Refs #123)"
