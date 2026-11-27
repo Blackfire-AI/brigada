@@ -133,9 +133,9 @@ tasks:
     base: "grants-approval-v4"
     continue: "grants-approval-v4"
     effort: medium
-    state: reviewing
+    state: running
     branch: "brigada/task-85"
-    rounds: 0
+    rounds: 1
   - id: 86
     name: "grants-changelog-v2"
     title: "CHANGELOG entry for per-task tool grants, rebuilt on grants-lease-v2 (#123)"
