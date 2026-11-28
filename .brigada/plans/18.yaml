@@ -70,8 +70,8 @@ tasks:
     continue: "restart-continue"
     effort: medium
     skills: ["surface-parity", "cli-flag"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-93"
     rounds: 0
   - id: 95
     name: "guard-salvage"
