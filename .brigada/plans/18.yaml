@@ -33,7 +33,7 @@ tasks:
     tier: heavy
     effort: medium
     skills: ["bugfix"]
-    state: reviewing
+    state: done
     branch: "brigada/task-90"
     rounds: 0
   - id: 91
@@ -46,7 +46,7 @@ tasks:
     tier: heavy
     effort: medium
     skills: ["bugfix"]
-    state: pending
+    state: ready
     branch: ""
     rounds: 0
   - id: 92
