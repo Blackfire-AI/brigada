@@ -688,10 +688,11 @@ func (e *branchGuardError) Error() string { return "branch guard: " + e.what }
 // descending from the base's head: a dependent whose base is its
 // dependency's branch may be rebuilt on the land target that dependency
 // landed on as a squash (§7.1), and a fix round's base may have moved on
-// since its branch left it. With noWorkerCommits, for a task whose lease carries tool
-// grants, the worker made no commit of its own since the job's start
-// head either: committing is the runner's, and its commit of the
-// leftovers comes after this check. Without it the worker may commit,
+// since its branch left it. With noWorkerCommits, for a task whose
+// lease carries tool grants, HEAD also descends from the job's start
+// head, and the worker made no commit of its own since it: committing
+// is the runner's, and its commit of the leftovers comes after this
+// check. Without it the worker may commit,
 // amend or rebase its own branch (§5.4). A violation is a
 // *branchGuardError naming what was wrong; a git that cannot be asked is
 // an error of its own.
@@ -726,6 +727,18 @@ func (w *workspace) guardBranch(ctx context.Context, noWorkerCommits bool) error
 	}
 	if !noWorkerCommits {
 		return nil
+	}
+	// A granted task's history only grows: the job's start head stays
+	// under HEAD. The shared-history check above passes for almost any
+	// two commits of a repository — a branch reset to an older commit
+	// included — so this one holds a granted task to its start.
+	if out, err := w.git(ctx, "-C", w.dir, "merge-base", "--is-ancestor", w.base, head); err != nil {
+		var exit *exec.ExitError
+		if errors.As(err, &exit) && exit.ExitCode() == 1 {
+			return &branchGuardError{fmt.Sprintf("HEAD %s does not descend from the job's start head %s, which a task with tool grants keeps under its branch",
+				head, w.base)}
+		}
+		return fmt.Errorf("check HEAD descends from the job's start head: %w", trimCmdError(out, err))
 	}
 	out, err = w.git(ctx, "-C", w.dir, "rev-list", "--reverse", w.base+"..HEAD")
 	if err != nil {

@@ -721,7 +721,7 @@ func (r *jobRun) finishStopped(ctx context.Context, ws *workspace, why *stop) {
 	}
 	if !isReviewJob(r.grant) && ws.holdsWork(ctx) {
 		if err := r.guardBranch(ctx, ws); err != nil {
-			r.finishWithBranchGuardError(ctx, fmt.Errorf("%w; the run was stopped: %s", err, why.Reason))
+			r.finishWithBranchGuardError(ctx, ws, fmt.Errorf("%w; the run was stopped: %s", err, why.Reason))
 			return
 		}
 		if err := ws.ensurePushed(ctx); err != nil {
@@ -802,7 +802,7 @@ func (r *jobRun) finish(ctx context.Context, ad adapter.Adapter, ws *workspace, 
 	result.ChangedPaths = nil
 	if result.Status == statusDone {
 		if err := r.guardBranch(ctx, ws); err != nil {
-			r.finishWithBranchGuardError(ctx, err)
+			r.finishWithBranchGuardError(ctx, ws, err)
 			return
 		}
 		if err := ws.ensurePushed(ctx); err != nil {
@@ -857,18 +857,9 @@ func (r *jobRun) finish(ctx context.Context, ad adapter.Adapter, ws *workspace, 
 			}
 		}
 	} else if result.Status == statusFailed {
-		branch := fmt.Sprintf("%s-salvage-%d", ws.branch, r.grant.JobID)
-		saved, err := ws.salvage(ctx, branch)
-		if r.gone(ctx, "saving the failed run's edits") {
+		note, gone := r.salvageRun(ctx, ws)
+		if gone {
 			return
-		}
-		var note string
-		if err != nil {
-			r.cfg.Log.WarnContext(ctx, "salvage the failed run's edits",
-				"job_id", r.grant.JobID, "branch", branch, "err", err)
-			note = "edits could not be saved on branch " + branch + ": " + err.Error()
-		} else if saved {
-			note = "edits saved on branch " + branch
 		}
 		if note != "" {
 			if result.Summary != "" {
@@ -1003,11 +994,46 @@ func (r *jobRun) guardBranch(ctx context.Context, ws *workspace) error {
 	return ws.guardBranch(ctx, len(r.grant.ToolGrants) > 0)
 }
 
+// salvageRun saves the run's work — the edits it left and the commits
+// HEAD holds — on the job's salvage branch, <branch>-salvage-<job>,
+// leaving the task's remote branch alone, and words what happened for
+// the completion: the branch named when something was saved, the
+// failure when the save failed (logged too), "" when there was nothing
+// to save. gone reports that the run stopped being ours meanwhile, and
+// then nothing is to be delivered.
+func (r *jobRun) salvageRun(ctx context.Context, ws *workspace) (note string, gone bool) {
+	branch := fmt.Sprintf("%s-salvage-%d", ws.branch, r.grant.JobID)
+	saved, err := ws.salvage(ctx, branch)
+	if r.gone(ctx, "saving the run's edits") {
+		return "", true
+	}
+	if err != nil {
+		r.cfg.Log.WarnContext(ctx, "salvage the run's edits",
+			"job_id", r.grant.JobID, "branch", branch, "err", err)
+		return "edits could not be saved on branch " + branch + ": " + err.Error(), false
+	}
+	if saved {
+		return "edits saved on branch " + branch, false
+	}
+	return "", false
+}
+
 // finishWithBranchGuardError completes the job with the branch guard's
 // refusal (§5.2): the kind is engine.ErrorKindBranchGuard, and the text
 // names the branch the worktree is on, the base it left, or the
-// worker's commits. Nothing was committed or pushed.
-func (r *jobRun) finishWithBranchGuardError(ctx context.Context, err error) {
+// worker's commits. Nothing goes to the task branch; the run's work —
+// its edits and its own commits — is salvaged first to the salvage
+// branch the text names, so a refused run, a time-capped one above all,
+// loses nothing and the foreman can inspect it and restart from it. A
+// salvage that fails is logged and named, and the refusal still goes.
+func (r *jobRun) finishWithBranchGuardError(ctx context.Context, ws *workspace, err error) {
+	note, gone := r.salvageRun(ctx, ws)
+	if gone {
+		return
+	}
+	if note != "" {
+		err = fmt.Errorf("%w; %s", err, note)
+	}
 	r.deliverError(ctx, branchGuardCompletion(err, r.sessionIDOf()))
 }
 

@@ -3,6 +3,7 @@ package runner
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -177,12 +178,19 @@ func TestBranchGuardPassesAnUngrantedAmendedFixRound(t *testing.T) {
 	}
 }
 
-// branchSwitchingWorker leaves the task branch and reports done.
-const branchSwitchingWorker = `
+// switchAndWork leaves the task branch, commits there and leaves an
+// edit uncommitted: the work a refused run's salvage must keep.
+const switchAndWork = `
 cat > /dev/null
 git checkout -q -b elsewhere
+echo committed > committed.txt
+git add committed.txt
+git commit -qm 'the worker commits on its own branch'
 echo hello > work.txt
-` + "echo '{\"type\":\"result\",\"text\":\"{\\\"status\\\":\\\"done\\\",\\\"summary\\\":\\\"did it\\\"}\"}'\n"
+`
+
+// branchSwitchingWorker leaves the task branch and reports done.
+const branchSwitchingWorker = switchAndWork + "echo '{\"type\":\"result\",\"text\":\"{\\\"status\\\":\\\"done\\\",\\\"summary\\\":\\\"did it\\\"}\"}'\n"
 
 // TestRunnerBranchGuardFailsASwitchedBranch: a worker that switches
 // branch fails the job with the branch_guard kind naming the branch,
@@ -216,5 +224,98 @@ func TestRunnerBranchGuardFailsASwitchedBranch(t *testing.T) {
 	}
 	if n := e.int64Of("SELECT COUNT(*) FROM jobs WHERE task_id = ? AND kind = 'work' AND status = 'queued'", task); n != 0 {
 		t.Errorf("queued work jobs = %d, want no retry", n)
+	}
+	assertSalvaged(t, e, remote, job, e.errorResult(failed))
+}
+
+// assertSalvaged checks a refused run's work went to the job's salvage
+// branch, and the refusal names it: the worker's own commit and the edit
+// it left uncommitted are both there, and the task branch got nothing.
+func assertSalvaged(t *testing.T, e *testEnv, remote string, job int64, msg string) {
+	t.Helper()
+	branch := e.strOf("SELECT branch FROM jobs WHERE id = ?", job)
+	salvage := fmt.Sprintf("%s-salvage-%d", branch, job)
+	if !strings.Contains(msg, "edits saved on branch "+salvage) {
+		t.Errorf("error = %q, want the salvage branch %s named", msg, salvage)
+	}
+	if remoteBranchCommit(t, remote, salvage) == "" {
+		t.Fatalf("no salvage branch %s on the remote", salvage)
+	}
+	if got := remoteBranchCommit(t, remote, branch); got != "" {
+		t.Errorf("task branch %s = %s on the remote, want nothing pushed", branch, got)
+	}
+	clone := t.TempDir()
+	git(t, "", "clone", "-q", "--branch", salvage, remote, clone)
+	for file, want := range map[string]string{"committed.txt": "committed\n", "work.txt": "hello\n"} {
+		if data, err := os.ReadFile(filepath.Join(clone, file)); err != nil || string(data) != want {
+			t.Errorf("salvage %s = %q (%v), want %q", file, data, err, want)
+		}
+	}
+	if out := git(t, clone, "log", "--format=%s"); !strings.Contains(out, "the worker commits on its own branch") {
+		t.Errorf("salvage history = %q, want the worker's own commit", out)
+	}
+}
+
+// TestRunnerBranchGuardSalvagesAStoppedRun: a time-capped run whose
+// worktree the guard refuses loses nothing (#51): its commits and edits
+// go to the salvage branch, and the branch_guard error names it and the
+// stop.
+func TestRunnerBranchGuardSalvagesAStoppedRun(t *testing.T) {
+	t.Parallel()
+	remote := newRemote(t)
+	e := newTestEnv(t, engine.Config{})
+	e.seedProject(remote)
+	task := e.seedTask("", "true")
+	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Take your time.", "", ""))
+	markers := markerDir(t)
+
+	clk := newManualClock()
+	worker := switchAndWork + `: > "$BRIGADA_TEST_MARKERS/started"
+sleep 30
+: > "$BRIGADA_TEST_MARKERS/finished"
+`
+	p := e.startRunner(writeWorkerScript(t, worker), 100*time.Millisecond,
+		func(c *Config) {
+			c.Clock = clk.Clock()
+			c.StallAfter = time.Hour // the cap, not the silence, stops this run
+			c.ClassCaps = map[string]ClassCaps{"work": {TimeCap: 2 * time.Minute}}
+		})
+	defer p.stop(t)
+
+	e.waitUntil("the worker to work and start", func() bool {
+		_, err := os.Stat(filepath.Join(markers, "started"))
+		return err == nil
+	})
+	failed := e.waitJob(job, func(j *engine.JobInfo) bool {
+		if j.Status == "failed" || j.Status == statusStalled {
+			return true
+		}
+		clk.Advance(time.Minute)
+		return false
+	})
+	msg := e.errorResult(failed)
+	if !strings.Contains(msg, "on branch elsewhere") || !strings.Contains(msg, "the run was stopped") {
+		t.Errorf("error = %q, want the guard's refusal and the stop named", msg)
+	}
+	if got := e.strOf("SELECT COALESCE(error_kind, '') FROM jobs WHERE id = ?", job); got != engine.ErrorKindBranchGuard {
+		t.Errorf("error kind = %q, want %q", got, engine.ErrorKindBranchGuard)
+	}
+	assertSalvaged(t, e, remote, job, msg)
+}
+
+// TestBranchGuardRefusesAGrantedBranchResetBelowItsStart: on a task with
+// tool grants, a task branch reset to a commit under the job's start
+// head — history the base still shares — is refused, naming the start
+// head; without grants a fix round may rewrite its branch so.
+func TestBranchGuardRefusesAGrantedBranchResetBelowItsStart(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	fix, branch := publishFixRound(t, newRemote(t), 15)
+	start := fix.base
+	git(t, fix.dir, "checkout", "-q", "-B", branch, start+"~1")
+	head := strings.TrimSpace(git(t, fix.dir, "rev-parse", "HEAD"))
+	wantGuardRefusal(t, fix.guardBranch(ctx, true), "start head "+start, head)
+	if err := fix.guardBranch(ctx, false); err != nil {
+		t.Errorf("guard without grants = %v, want the rewrite allowed", err)
 	}
 }
