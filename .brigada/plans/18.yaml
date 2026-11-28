@@ -46,7 +46,7 @@ tasks:
     tier: heavy
     effort: medium
     skills: ["bugfix"]
-    state: needs_foreman
+    state: done
     branch: "brigada/task-91"
     rounds: 0
   - id: 92
