@@ -130,6 +130,24 @@ func TestRenderLanding(t *testing.T) {
 	}
 }
 
+// TestRenderStoppedRunFailure: a time-capped or stalled run's task_failed
+// names the branch its work sits on and its size against the base
+// (§5.6); a failure without them renders as before.
+func TestRenderStoppedRunFailure(t *testing.T) {
+	for _, tc := range []struct{ payload, want string }{
+		{`{"status":"needs_foreman","reason":"time cap","branch":"brigada/task-7","files_changed":3,"lines_added":120,"lines_removed":8}`,
+			"status=needs_foreman reason=time cap branch=brigada/task-7 files_changed=3 lines_added=120 lines_removed=8"},
+		{`{"status":"needs_foreman","reason":"stalled","branch":"brigada/task-7-salvage-9"}`,
+			"status=needs_foreman reason=stalled branch=brigada/task-7-salvage-9"},
+		{`{"status":"needs_foreman","reason":"boom"}`, "status=needs_foreman reason=boom"},
+	} {
+		it := Item{Type: TypeEvent, Kind: "task_failed", Payload: []byte(tc.payload)}
+		if got := summary(it); got != tc.want {
+			t.Errorf("task_failed summary = %q, want %q", got, tc.want)
+		}
+	}
+}
+
 // TestRenderLeasedToolGrants: a lease event names the task's tool grants (§6.1).
 func TestRenderLeasedToolGrants(t *testing.T) {
 	it := Item{Type: TypeEvent, Kind: "job_leased", Payload: []byte(`{"lease":"abc","tool_grants":["Bash(git merge:*)","Bash(git add:*)"]}`)}

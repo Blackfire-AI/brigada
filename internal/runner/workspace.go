@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -1011,6 +1012,34 @@ func (w *workspace) changedPaths(ctx context.Context, base string) ([]string, er
 		}
 	}
 	return paths, nil
+}
+
+// diffstat is the size of the worktree's HEAD against base, base...HEAD
+// (§5.6): the files git's numstat lists and the lines they add and
+// remove, a binary file counted as changed with no lines.
+func (w *workspace) diffstat(ctx context.Context, base string) (Diffstat, error) {
+	if base == "" {
+		return Diffstat{}, fmt.Errorf("no base ref to measure the branch against")
+	}
+	out, err := w.git(ctx, "-C", w.dir, "diff", "--numstat", base+"...HEAD")
+	if err != nil {
+		return Diffstat{}, trimCmdError(out, err)
+	}
+	var ds Diffstat
+	for _, l := range strings.Split(string(out), "\n") {
+		f := strings.SplitN(l, "\t", 3)
+		if len(f) < 3 {
+			continue
+		}
+		ds.Files++
+		if n, err := strconv.Atoi(f[0]); err == nil {
+			ds.Added += n
+		}
+		if n, err := strconv.Atoi(f[1]); err == nil {
+			ds.Removed += n
+		}
+	}
+	return ds, nil
 }
 
 // remoteBranch is the commit the remote holds for one branch: false

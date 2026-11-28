@@ -283,7 +283,14 @@ func (e *Engine) workCompletedTx(tx *sql.Tx, job *jobRow, c Completion, class st
 				return err
 			}
 		}
-		return e.needsForemanTx(tx, job, evTaskFailed, eventPayload{Reason: boundNote(reason)}, now)
+		// A time-capped or stalled run names where its work sits and
+		// how big it is (§5.6), so the foreman can choose a restart that
+		// continues from it.
+		p := eventPayload{Reason: boundNote(reason)}
+		if branch, ds := stoppedRunWork(job, c); branch != "" {
+			p.Branch, p.FilesChanged, p.LinesAdded, p.LinesRemoved = branch, ds.Files, ds.Added, ds.Removed
+		}
+		return e.needsForemanTx(tx, job, evTaskFailed, p, now)
 	case wr.Status == workerNeedsHelp:
 		// §3: the question is the foreman's to answer, verbatim.
 		return e.needsForemanTx(tx, job, evTaskNeedsHelp, eventPayload{Question: boundNote(wr.Question)}, now)

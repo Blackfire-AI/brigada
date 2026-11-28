@@ -710,7 +710,8 @@ const stoppedRunEventsKept = 20
 // events, so the record names what the worker was doing when it
 // stopped; and the worker's work is not lost — whatever it committed,
 // or left uncommitted, goes to the result branch before the worktree
-// comes down, exactly as a done run's would. A review is the exception
+// comes down, exactly as a done run's would, and the block names the
+// pushed branch and its size against the task's base. A review is the exception
 // (§7): it holds nothing of its own to save, and its branch is the
 // work round's, so nothing is pushed for one.
 func (r *jobRun) finishStopped(ctx context.Context, ws *workspace, why *stop) {
@@ -721,7 +722,7 @@ func (r *jobRun) finishStopped(ctx context.Context, ws *workspace, why *stop) {
 	}
 	if !isReviewJob(r.grant) && ws.holdsWork(ctx) {
 		if err := r.guardBranch(ctx, ws); err != nil {
-			r.finishWithBranchGuardError(ctx, ws, fmt.Errorf("%w; the run was stopped: %s", err, why.Reason))
+			r.finishWithBranchGuardError(ctx, ws, fmt.Errorf("%w; "+engine.StoppedRunText+"%s", err, why.Reason))
 			return
 		}
 		if err := ws.ensurePushed(ctx); err != nil {
@@ -733,6 +734,13 @@ func (r *jobRun) finishStopped(ctx context.Context, ws *workspace, why *stop) {
 			res.Summary = "the branch could not be pushed: " + err.Error()
 		} else {
 			res.Branch = ws.branch
+			// The size is a note for the foreman, never the job's: a
+			// failure to read it is logged and the block goes without.
+			if ds, err := ws.diffstat(ctx, r.grant.BaseRef); err != nil {
+				r.cfg.Log.WarnContext(ctx, "read the stopped run's diffstat", "job_id", r.grant.JobID, "err", err)
+			} else {
+				res.Diffstat = &ds
+			}
 		}
 	}
 	comp := api.Completion{SessionID: r.sessionIDOf(), Outcome: why.Outcome}
@@ -857,7 +865,7 @@ func (r *jobRun) finish(ctx context.Context, ad adapter.Adapter, ws *workspace, 
 			}
 		}
 	} else if result.Status == statusFailed {
-		note, gone := r.salvageRun(ctx, ws)
+		note, gone := r.salvageRun(ctx, ws, false)
 		if gone {
 			return
 		}
@@ -999,10 +1007,11 @@ func (r *jobRun) guardBranch(ctx context.Context, ws *workspace) error {
 // leaving the task's remote branch alone, and words what happened for
 // the completion: the branch named when something was saved, the
 // failure when the save failed (logged too), "" when there was nothing
-// to save. gone reports that the run stopped being ours meanwhile, and
-// then nothing is to be delivered.
-func (r *jobRun) salvageRun(ctx context.Context, ws *workspace) (note string, gone bool) {
-	branch := fmt.Sprintf("%s-salvage-%d", ws.branch, r.grant.JobID)
+// to save. With measure, a saved branch is named with its size against
+// the task's base (§5.6). gone reports that the run stopped being ours
+// meanwhile, and then nothing is to be delivered.
+func (r *jobRun) salvageRun(ctx context.Context, ws *workspace, measure bool) (note string, gone bool) {
+	branch := engine.SalvageBranch(ws.branch, r.grant.JobID)
 	saved, err := ws.salvage(ctx, branch)
 	if r.gone(ctx, "saving the run's edits") {
 		return "", true
@@ -1013,7 +1022,16 @@ func (r *jobRun) salvageRun(ctx context.Context, ws *workspace) (note string, go
 		return "edits could not be saved on branch " + branch + ": " + err.Error(), false
 	}
 	if saved {
-		return "edits saved on branch " + branch, false
+		note := engine.SalvagedText(branch)
+		if !measure {
+			return note, false
+		}
+		if ds, err := ws.diffstat(ctx, r.grant.BaseRef); err == nil {
+			note += " (" + ds.String() + " against " + r.grant.BaseRef + ")"
+		} else {
+			r.cfg.Log.WarnContext(ctx, "read the salvaged run's diffstat", "job_id", r.grant.JobID, "err", err)
+		}
+		return note, false
 	}
 	return "", false
 }
@@ -1023,11 +1041,11 @@ func (r *jobRun) salvageRun(ctx context.Context, ws *workspace) (note string, go
 // names the branch the worktree is on, the base it left, or the
 // worker's commits. Nothing goes to the task branch; the run's work —
 // its edits and its own commits — is salvaged first to the salvage
-// branch the text names, so a refused run, a time-capped one above all,
-// loses nothing and the foreman can inspect it and restart from it. A
+// branch the text names, with its size against the task's base, so a
+// refused run, a time-capped one above all, loses nothing and the foreman can inspect it and restart from it. A
 // salvage that fails is logged and named, and the refusal still goes.
 func (r *jobRun) finishWithBranchGuardError(ctx context.Context, ws *workspace, err error) {
-	note, gone := r.salvageRun(ctx, ws)
+	note, gone := r.salvageRun(ctx, ws, true)
 	if gone {
 		return
 	}

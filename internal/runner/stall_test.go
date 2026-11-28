@@ -484,6 +484,15 @@ func TestRunnerStoppedRunPushesCommittedWork(t *testing.T) {
 	if res.Branch != taskBranch(task, 1) {
 		t.Errorf("result branch = %q, want %s named in the outcome", res.Branch, taskBranch(task, 1))
 	}
+	if res.Diffstat == nil || *res.Diffstat != (Diffstat{Files: 1, Added: 1}) {
+		t.Errorf("result diffstat = %+v, want 1 file, +1/-0 against the base", res.Diffstat)
+	}
+	// The task_failed the foreman reads names the branch and its size.
+	payload := e.strOf("SELECT payload FROM events WHERE kind = 'task_failed' AND task_id = ?", task)
+	if !strings.Contains(payload, `"branch":"`+taskBranch(task, 1)+`"`) || !strings.Contains(payload, `"files_changed":1`) ||
+		!strings.Contains(payload, `"lines_added":1`) {
+		t.Errorf("task_failed payload = %s, want the branch and its size", payload)
+	}
 	if remoteBranchCommit(t, remote, taskBranch(task, 1)) == "" {
 		t.Fatalf("the stalled run's committed work was never pushed")
 	}

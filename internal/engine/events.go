@@ -142,10 +142,16 @@ type eventPayload struct {
 	ExitCode    int    `json:"exit_code,omitempty"`
 	TimedOut    bool   `json:"timed_out,omitempty"`
 	CheckOutput string `json:"check_output,omitempty"`
-	Branch      string `json:"branch,omitempty"`   // the task's result branch (§6.4)
-	Commit      string `json:"commit,omitempty"`   // a landing's resulting commit (§7.1)
-	Pushed      string `json:"pushed,omitempty"`   // a landing's push state: pushed, waiting or local (§7.1)
-	PushCmd     string `json:"push_cmd,omitempty"` // the exact push command for gate_push never (§7.1)
+	Branch      string `json:"branch,omitempty"` // the task's result branch (§6.4); a stopped run's pushed or salvage branch on task_failed (§5.6)
+	// The size of a time-capped or stalled run's pushed branch against
+	// the task's base, on its task_failed (§5.6): files changed, lines
+	// added and removed.
+	FilesChanged int64  `json:"files_changed,omitempty"`
+	LinesAdded   int64  `json:"lines_added,omitempty"`
+	LinesRemoved int64  `json:"lines_removed,omitempty"`
+	Commit       string `json:"commit,omitempty"`   // a landing's resulting commit (§7.1)
+	Pushed       string `json:"pushed,omitempty"`   // a landing's push state: pushed, waiting or local (§7.1)
+	PushCmd      string `json:"push_cmd,omitempty"` // the exact push command for gate_push never (§7.1)
 	// AfterLandError is an after_land command's failure, reported in the
 	// record and the history, never undone (§6.3).
 	AfterLandError string `json:"after_land_error,omitempty"`

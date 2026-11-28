@@ -2,6 +2,7 @@ package runner
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"unicode/utf8"
 
@@ -72,6 +73,25 @@ type WorkerResult struct {
 	// recorded with the work job's result. The runner sets it; a
 	// worker's own block never carries it.
 	ChangedPaths []string `json:"changed_paths,omitempty"`
+	// Diffstat is the size of a stalled or time-capped run's pushed
+	// branch against the task's base (§5.6), so the foreman can weigh
+	// continuing from it. The runner sets it; a worker's own block never
+	// carries it.
+	Diffstat *Diffstat `json:"diffstat,omitempty"`
+}
+
+// Diffstat is a branch's size against a base: files changed, lines
+// added and lines removed (§5.6). A binary file counts as changed and
+// adds no lines.
+type Diffstat struct {
+	Files   int `json:"files"`
+	Added   int `json:"added"`
+	Removed int `json:"removed"`
+}
+
+// String renders the size as the stopped run's words carry it.
+func (d Diffstat) String() string {
+	return fmt.Sprintf("%d files changed, +%d/-%d", d.Files, d.Added, d.Removed)
 }
 
 // parseResult reads the result block out of a worker's final message

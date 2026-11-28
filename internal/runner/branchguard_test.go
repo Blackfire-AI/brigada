@@ -300,7 +300,89 @@ sleep 30
 	if got := e.strOf("SELECT COALESCE(error_kind, '') FROM jobs WHERE id = ?", job); got != engine.ErrorKindBranchGuard {
 		t.Errorf("error kind = %q, want %q", got, engine.ErrorKindBranchGuard)
 	}
+	if !strings.Contains(msg, "(2 files changed, +2/-0 against main)") {
+		t.Errorf("error = %q, want the salvage branch's size against the base", msg)
+	}
 	assertSalvaged(t, e, remote, job, msg)
+}
+
+// salvageThenSeededWorker leaves the task branch and works until the
+// time cap stops it; seeded from the salvage branch, it finds that work
+// and carries on to done.
+const salvageThenSeededWorker = `
+if [ -f committed.txt ]; then
+  cat > /dev/null
+  : > "$BRIGADA_TEST_MARKERS/seeded"
+  echo carried on >> work.txt
+  git add -A
+  git commit -qm 'carried on'
+  echo '{"type":"result","text":"{\"status\":\"done\",\"summary\":\"carried on\"}"}'
+  exit 0
+fi
+` + switchAndWork + `: > "$BRIGADA_TEST_MARKERS/started"
+sleep 30
+`
+
+// TestRunnerContinueRestartSeedsFromTheSalvageBranch: a time-capped run
+// the guard refused pushed nothing to the task branch; its work is on the
+// salvage branch, which task_failed names. A restart with the continue
+// option confirms it on the remote and starts the fresh attempt at its
+// head, so the attempt carries on from the refused run's work.
+func TestRunnerContinueRestartSeedsFromTheSalvageBranch(t *testing.T) {
+	t.Parallel()
+	remote := newRemote(t)
+	e := newTestEnv(t, engine.Config{})
+	e.seedProject(remote)
+	task := e.seedTask("", "true")
+	job := e.submitWork(task, prompt.ComposeWorkerPrompt("Take your time.", "", ""))
+	markers := markerDir(t)
+
+	clk := newManualClock()
+	p := e.startRunner(writeWorkerScript(t, salvageThenSeededWorker), 100*time.Millisecond,
+		func(c *Config) {
+			c.Clock = clk.Clock()
+			c.StallAfter = time.Hour
+			c.ClassCaps = map[string]ClassCaps{"work": {TimeCap: 2 * time.Minute}}
+		})
+	defer p.stop(t)
+
+	e.waitUntil("the worker to work and start", func() bool {
+		_, err := os.Stat(filepath.Join(markers, "started"))
+		return err == nil
+	})
+	e.waitJob(job, func(j *engine.JobInfo) bool {
+		if j.Status == "failed" || j.Status == statusStalled {
+			return true
+		}
+		clk.Advance(time.Minute)
+		return false
+	})
+	salvage := engine.SalvageBranch(e.strOf("SELECT branch FROM jobs WHERE id = ?", job), job)
+	head := remoteBranchCommit(t, remote, salvage)
+	if head == "" {
+		t.Fatalf("no salvage branch %s on the remote", salvage)
+	}
+	if payload := e.strOf("SELECT payload FROM events WHERE kind = 'task_failed' AND task_id = ?", task); !strings.Contains(payload, `"branch":"`+salvage+`"`) {
+		t.Errorf("task_failed payload = %s, want the salvage branch named", payload)
+	}
+
+	res, err := e.eng.RestartTaskWith(e.ctx, e.project, task, "carry on", engine.RestartOptions{Continue: true})
+	if err != nil {
+		t.Fatalf("continue restart: %v", err)
+	}
+	finished := e.waitJob(res.JobID, func(j *engine.JobInfo) bool { return j.Status == "done" || j.Status == "failed" })
+	if _, err := os.Stat(filepath.Join(markers, "seeded")); err != nil {
+		t.Fatalf("the fresh attempt's worktree did not hold the salvaged work; job ended %s", finished.Status)
+	}
+	next := e.workerResult(finished)
+	clone := t.TempDir()
+	git(t, "", "clone", "-q", "--branch", next.Branch, remote, clone)
+	if out := git(t, clone, "merge-base", "--is-ancestor", head, "HEAD"); out != "" {
+		t.Errorf("merge-base output = %q", out)
+	}
+	if data, err := os.ReadFile(filepath.Join(clone, "work.txt")); err != nil || string(data) != "hello\ncarried on\n" {
+		t.Errorf("the fresh attempt's work.txt = %q (%v), want the salvaged work carried on", data, err)
+	}
 }
 
 // TestBranchGuardRefusesAGrantedBranchResetBelowItsStart: on a task with
