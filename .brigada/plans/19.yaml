@@ -33,6 +33,6 @@ tasks:
     tier: light
     effort: medium
     skills: ["cli-flag"]
-    state: running
+    state: ready
     branch: ""
     rounds: 0
