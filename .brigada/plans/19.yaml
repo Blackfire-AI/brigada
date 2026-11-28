@@ -5,9 +5,9 @@
 plan: 19
 title: "Fix #274: CLI help text drift"
 repo: "github.com/Blackfire-AI/brigada"
-state: needs_foreman
+state: reviewing
 created: 2026-11-28T06:04:40.630438701Z
-updated: 2026-11-28T06:05:13.621232579Z
+updated: 2026-11-28T06:06:03.404201495Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -31,7 +31,7 @@ tasks:
     deps: []
     base: ""
     tier: light
-    effort: low
+    effort: medium
     skills: ["cli-flag"]
     state: pending
     branch: ""
