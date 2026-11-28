@@ -70,7 +70,7 @@ tasks:
     continue: "restart-continue"
     effort: medium
     skills: ["surface-parity", "cli-flag"]
-    state: running
+    state: reviewing
     branch: "brigada/task-93"
     rounds: 1
   - id: 95
