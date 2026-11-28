@@ -3,11 +3,11 @@
 # here are overwritten. It holds the graph, the task states, the branches
 # and the open questions — never transcripts.
 plan: 19
-title: "Land init unwiring and the mode A docs on current main (tasks 54 and 55 conflict with 46/53/58)"
+title: "Fix #274: CLI help text drift"
 repo: "github.com/Blackfire-AI/brigada"
-state: done
-created: 2026-10-20T19:00:28.477475Z
-updated: 2026-10-20T19:25:14.265125Z
+state: reviewing
+created: 2026-11-28T06:04:40.630438701Z
+updated: 2026-11-28T06:04:40.630438701Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -19,27 +19,20 @@ updated: 2026-10-20T19:25:14.265125Z
 # describe the model needed and how hard it should think (§6.1);
 # review_tier and review_effort do the same for its reviews (§7, §8); caps
 # override the task's fix_rounds, review_rounds and restart budgets (§6.1);
-# skills name the project's skills the task carries, in order (§5.10).
+# skills name the project's skills the task carries, in order (§5.10);
+# tool_grants name the permission patterns its worker is granted (§6.1);
+# wait_landed holds a dependent pending until its implement deps have
+# actually landed on the target, not merely been done (§6.1).
 tasks:
-  - id: 59
-    name: "init-unwire-port"
-    title: "brigada init writes no harness wiring: port task 54's approved work onto current main"
+  - id: 94
+    name: "help-drift"
+    title: "Fix the 16 CLI help-text drifts of #274 (Closes #274)"
     class: "implement"
     deps: []
     base: ""
-    effort: medium
-    state: done
-    branch: "brigada/task-59"
+    tier: light
+    effort: low
+    skills: ["cli-flag"]
+    state: pending
+    branch: ""
     rounds: 0
-    extra_repos: [["prior", "github.com/Blackfire-AI/brigada", "c7faa2e4766493d3e55debb6ca4b2c552943b19c"]]
-  - id: 60
-    name: "docs-port"
-    title: "Docs for attach as the interactive foreman: port task 55's approved work onto current main"
-    class: "implement"
-    deps: ["init-unwire-port"]
-    base: "init-unwire-port"
-    effort: medium
-    state: done
-    branch: "brigada/task-60"
-    rounds: 0
-    extra_repos: [["prior", "github.com/Blackfire-AI/brigada", "46c2c5713eee6979dbcd46f86c32e8e95f2ec2ee"]]
