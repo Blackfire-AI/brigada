@@ -70,9 +70,9 @@ tasks:
     continue: "restart-continue"
     effort: medium
     skills: ["surface-parity", "cli-flag"]
-    state: reviewing
+    state: running
     branch: "brigada/task-93"
-    rounds: 1
+    rounds: 2
   - id: 95
     name: "guard-salvage"
     title: "Branch guard: salvage a refused run's work; require the start head as ancestor on granted tasks (Refs #277)"
