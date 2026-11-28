@@ -720,6 +720,10 @@ func (r *jobRun) finishStopped(ctx context.Context, ws *workspace, why *stop) {
 		Progress: r.recentProgress(stoppedRunEventsKept),
 	}
 	if !isReviewJob(r.grant) && ws.holdsWork(ctx) {
+		if err := r.guardBranch(ctx, ws); err != nil {
+			r.finishWithBranchGuardError(ctx, fmt.Errorf("%w; the run was stopped: %s", err, why.Reason))
+			return
+		}
 		if err := ws.ensurePushed(ctx); err != nil {
 			if r.gone(ctx, "pushing the stopped run's branch") {
 				return
@@ -797,6 +801,10 @@ func (r *jobRun) finish(ctx context.Context, ad adapter.Adapter, ws *workspace, 
 	result.Head = "" // the runner's to say, as the extra repositories' commits are
 	result.ChangedPaths = nil
 	if result.Status == statusDone {
+		if err := r.guardBranch(ctx, ws); err != nil {
+			r.finishWithBranchGuardError(ctx, err)
+			return
+		}
 		if err := ws.ensurePushed(ctx); err != nil {
 			if r.gone(ctx, "pushing the branch") {
 				return
@@ -986,6 +994,31 @@ func (r *jobRun) finishWithPublishError(ctx context.Context, err error) {
 	comp := publishCompletion(err)
 	comp.SessionID = r.sessionIDOf()
 	r.deliverError(ctx, comp)
+}
+
+// guardBranch runs the branch guard (§5.2) on the job's worktree before
+// the runner commits its result: the worker's own commits are refused
+// only for a task whose lease carries tool grants.
+func (r *jobRun) guardBranch(ctx context.Context, ws *workspace) error {
+	return ws.guardBranch(ctx, len(r.grant.ToolGrants) > 0)
+}
+
+// finishWithBranchGuardError completes the job with the branch guard's
+// refusal (§5.2): the kind is engine.ErrorKindBranchGuard, and the text
+// names the branch the worktree is on, the base it left, or the
+// worker's commits. Nothing was committed or pushed.
+func (r *jobRun) finishWithBranchGuardError(ctx context.Context, err error) {
+	r.deliverError(ctx, branchGuardCompletion(err, r.sessionIDOf()))
+}
+
+// branchGuardCompletion is the completion of a refused worktree.
+func branchGuardCompletion(err error, sessionID string) api.Completion {
+	msg := err.Error()
+	var bg *branchGuardError
+	if !errors.As(err, &bg) {
+		msg = "branch guard: could not check the worktree: " + msg
+	}
+	return api.Completion{Error: msg, SessionID: sessionID, ErrorKind: engine.ErrorKindBranchGuard}
 }
 
 // publishCompletion is the completion of a failed publish: the publish

@@ -83,6 +83,16 @@ const ErrorKindInfra = "infra"
 // once (retryPublishFailureTx), then parks it for the foreman.
 const ErrorKindPublish = "publish"
 
+// ErrorKindBranchGuard sorts a completion's Error as the runner's branch
+// guard refusing the worktree before it committed the result (§5.2):
+// the worker left the task branch — another branch, a detached HEAD —
+// or left the job's base, or, on a task whose lease carries tool
+// grants, made commits of its own. It is a verdict on the run, not on
+// the agent's health, so like a publish failure it never counts toward
+// the failure streak; unlike one it is not retried, since a re-run
+// would most likely do the same: the task parks for the foreman.
+const ErrorKindBranchGuard = "branch_guard"
+
 // taskRunningTx moves a task off ready when one of its jobs is leased
 // (§6.1): running while the work happens. A fix round's lease also takes
 // the task back out of reviewing (§3): the review asked for changes, the
@@ -179,6 +189,10 @@ func (e *Engine) workCompletedTx(tx *sql.Tx, job *jobRow, c Completion, class st
 			if retried, err := e.retryPublishFailureTx(tx, job, c, now); err != nil || retried {
 				return err
 			}
+		case c.ErrorKind == ErrorKindBranchGuard:
+			// The branch guard refused the worktree (§5.2): never
+			// retried — a re-run would most likely do the same — so the
+			// task parks for the foreman below, with the guard's words.
 		case transientCLIError(c.ErrorKind):
 			if retried, err := e.autoRestartTaskTx(tx, job, c.ErrorKind, c.Error, now); err != nil || retried {
 				return err

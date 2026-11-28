@@ -79,6 +79,13 @@ type workspace struct {
 	// push.
 	leased   bool
 	leaseSHA string
+	// baseRef is the job's base as resolved in the worktree, and
+	// baseCommit the commit it named when the worktree was prepared,
+	// pinned: the mirror's refs move under later jobs' fetches. The
+	// branch guard (§5.2) holds HEAD to the base's history; "" when the
+	// base could not be read, and the guard does not ask.
+	baseRef    string
+	baseCommit string
 }
 
 // prepareWorkspace materializes the workspace for a leased job (§5.1):
@@ -198,6 +205,10 @@ func prepareWorkspace(ctx context.Context, cfg *Config, grant *api.JobGrant) (*w
 		return nil, fmt.Errorf("read the worktree's base commit: %w", trimCmdError(out, err))
 	}
 	w.base = strings.TrimSpace(string(out))
+	w.baseRef = baseRef
+	if out, err := w.git(ctx, "-C", w.dir, "rev-parse", "--verify", "--quiet", baseRef+"^{commit}"); err == nil {
+		w.baseCommit = strings.TrimSpace(string(out))
+	}
 	if leaseFromStart {
 		w.leaseSHA = w.base // the head the worktree really started from
 	}
@@ -659,6 +670,71 @@ func (w *workspace) ensurePushed(ctx context.Context) error {
 			w.branch, redactURL(w.repoURL))
 	}
 	w.leaseSHA = head // a later push of this workspace leases on what this one published
+	return nil
+}
+
+// branchGuardError is a worktree the branch guard refused (§5.2): the
+// worker left the task branch, left the job's base, or — on a task whose
+// lease carries tool grants — committed on its own. The runner commits
+// and publishes nothing for it.
+type branchGuardError struct{ what string }
+
+func (e *branchGuardError) Error() string { return "branch guard: " + e.what }
+
+// guardBranch checks the worktree before the runner commits a work or
+// fix job's result (§5.2): HEAD is still the task branch — not detached,
+// not another branch — and descends from the job's base's history: it
+// shares a commit with the base as the job started. Sharing, not
+// descending from the base's head: a dependent whose base is its
+// dependency's branch may be rebuilt on the land target that dependency
+// landed on as a squash (§7.1), and a fix round's base may have moved on
+// since its branch left it. With noWorkerCommits, for a task whose lease carries tool
+// grants, the worker made no commit of its own since the job's start
+// head either: committing is the runner's, and its commit of the
+// leftovers comes after this check. Without it the worker may commit,
+// amend or rebase its own branch (§5.4). A violation is a
+// *branchGuardError naming what was wrong; a git that cannot be asked is
+// an error of its own.
+func (w *workspace) guardBranch(ctx context.Context, noWorkerCommits bool) error {
+	head, err := w.worktreeHead(ctx)
+	if err != nil {
+		return err
+	}
+	out, err := w.git(ctx, "-C", w.dir, "symbolic-ref", "--quiet", "HEAD")
+	if err != nil {
+		var exit *exec.ExitError
+		if errors.As(err, &exit) && exit.ExitCode() == 1 {
+			return &branchGuardError{fmt.Sprintf("the worktree's HEAD is detached at %s, not on the task branch %s", head, w.branch)}
+		}
+		return fmt.Errorf("read the worktree's branch: %w", trimCmdError(out, err))
+	}
+	if ref := strings.TrimSpace(string(out)); ref != "refs/heads/"+w.branch {
+		return &branchGuardError{fmt.Sprintf("the worktree is on branch %s, not the task branch %s",
+			strings.TrimPrefix(ref, "refs/heads/"), w.branch)}
+	}
+	if w.baseCommit != "" {
+		// merge-base exits 1, printing nothing, for two histories that
+		// share no commit.
+		if out, err := w.git(ctx, "-C", w.dir, "merge-base", w.baseCommit, head); err != nil {
+			var exit *exec.ExitError
+			if errors.As(err, &exit) && exit.ExitCode() == 1 {
+				return &branchGuardError{fmt.Sprintf("HEAD %s no longer descends from the job's base %s (%s): the two share no history",
+					head, w.baseRef, w.baseCommit)}
+			}
+			return fmt.Errorf("check HEAD descends from the job's base: %w", trimCmdError(out, err))
+		}
+	}
+	if !noWorkerCommits {
+		return nil
+	}
+	out, err = w.git(ctx, "-C", w.dir, "rev-list", "--reverse", w.base+"..HEAD")
+	if err != nil {
+		return fmt.Errorf("read the worker's commits: %w", trimCmdError(out, err))
+	}
+	if shas := strings.Fields(string(out)); len(shas) > 0 {
+		return &branchGuardError{fmt.Sprintf("the worker made commits of its own, which a task with tool grants leaves to the runner: %s",
+			listPaths(shas, maxListedPaths))}
+	}
 	return nil
 }
 
