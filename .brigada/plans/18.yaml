@@ -58,8 +58,8 @@ tasks:
     tier: heavy
     effort: medium
     wait_landed: true
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-92"
     rounds: 0
   - id: 93
     name: "restart-surfaces"
