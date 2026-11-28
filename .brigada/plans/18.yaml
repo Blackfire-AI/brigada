@@ -5,9 +5,9 @@
 plan: 18
 title: "Fix #277 tool-grant guard, then #51 part 2 restart from a capped run"
 repo: "github.com/Blackfire-AI/brigada"
-state: active
+state: reviewing
 created: 2026-11-28T06:04:33.069542811Z
-updated: 2026-11-28T06:06:22.782695172Z
+updated: 2026-11-28T06:20:38.710409156Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -53,8 +53,8 @@ tasks:
     name: "restart-continue"
     title: "task_restart may continue from a time_capped or stalled run's pushed branch; task_failed names it and its size (Refs #51)"
     class: "implement"
-    deps: ["grant-patterns"]
-    base: "grant-patterns"
+    deps: ["guard-salvage"]
+    base: "guard-salvage"
     tier: heavy
     effort: medium
     wait_landed: true
@@ -70,6 +70,19 @@ tasks:
     continue: "restart-continue"
     effort: medium
     skills: ["surface-parity", "cli-flag"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 95
+    name: "guard-salvage"
+    title: "Branch guard: salvage a refused run's work; require the start head as ancestor on granted tasks (Refs #277)"
+    class: "implement"
+    deps: ["grant-patterns"]
+    base: "grant-patterns"
+    continue: "grant-patterns"
+    tier: heavy
+    effort: medium
+    skills: ["bugfix"]
     state: pending
     branch: ""
     rounds: 0
