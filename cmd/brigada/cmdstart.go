@@ -18,7 +18,7 @@ var connectStart = connect
 
 func runStart(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := newFlagSet("start",
-		"brigada start [--state-dir DIR] [--config PATH]",
+		"brigada start",
 		"Start the engine and detached runner with the agents saved by brigada init.")
 	stderr = commandStderr(stderr, fs.Name())
 	common := addCommon(fs)

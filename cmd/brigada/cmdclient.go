@@ -160,7 +160,7 @@ type taskRetirer interface {
 	RetireTasks(ctx context.Context, tasks []int64, reason, idemKey string) (engine.RetireResult, error)
 }
 
-// runTaskRetire is `brigada task retire [--reason TEXT] [--no-start]
+// runTaskRetire is `brigada task retire --reason TEXT [--no-start]
 // <task-id>...` (§6.2): the user settles tasks that will not land —
 // their live jobs stop, their land holds drop, their branches stay
 // untouched, and they never land by any path — with the reason recorded
@@ -168,8 +168,8 @@ type taskRetirer interface {
 // ids and flags may interleave, as `land`'s do.
 func runTaskRetire(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := newFlagSet("task retire",
-		"brigada task retire [--reason TEXT] [--no-start] <task-id>...",
-		"Retire tasks that will not land; their branches stay and their plans close.")
+		"brigada task retire --reason TEXT [--no-start] <task-id>...",
+		"Retire tasks that will not land; their branches stay, and a plan closes once nothing else holds it open.")
 	stderr = commandStderr(stderr, fs.Name())
 	common := addCommon(fs)
 	reason := fs.String("reason", "", "why the tasks are retired, recorded verbatim with each")

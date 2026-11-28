@@ -326,7 +326,7 @@ func runAgents(ctx context.Context, args []string, stdout, stderr io.Writer) int
 func runAgentsList(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := newFlagSet("agents",
 		"brigada agents",
-		"Show the models your harnesses offer that no agent registers, and registered models a CLI no longer lists; read-only. brigada agents add <harness>/<model> registers one.")
+		"Show every model the harnesses offer, marked registered, not registered or superseded, and registered models a CLI no longer lists; read-only. brigada agents add, remove and update change the agents file.")
 	stderr = commandStderr(stderr, fs.Name())
 	common := addCommon(fs)
 	if code, stop := common.parse(stdout, stderr, args); stop {
