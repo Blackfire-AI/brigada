@@ -402,7 +402,7 @@ func TestCommandAppendsToolGrants(t *testing.T) {
 		}
 		return cmd.Args
 	}
-	grants := []string{"Bash(git merge:*)", "Bash(git checkout:*)"}
+	grants := []string{"Bash(git merge --no-commit:*)", "Bash(git checkout:*)"}
 
 	pattern := flags(adapter.Job{Prompt: "p", Permission: "Bash(go test:*)", ToolGrants: grants})
 	i := slices.Index(pattern, "--allowedTools")
@@ -420,7 +420,7 @@ func TestCommandAppendsToolGrants(t *testing.T) {
 
 	for _, perm := range []string{"", "acceptEdits", "plan", "none"} {
 		got := flags(adapter.Job{Prompt: "p", Permission: perm, ToolGrants: grants})
-		if slices.Contains(got, "Bash(git merge:*)") || slices.Contains(got, "Bash(git checkout:*)") {
+		if slices.Contains(got, "Bash(git merge --no-commit:*)") || slices.Contains(got, "Bash(git checkout:*)") {
 			t.Errorf("permission %q gained a grant: %v", perm, got)
 		}
 	}

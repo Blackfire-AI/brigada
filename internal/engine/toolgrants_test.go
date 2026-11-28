@@ -13,8 +13,8 @@ import (
 // them, and [] clears them.
 func TestToolGrantsRoundTrip(t *testing.T) {
 	e := newEnv(t)
-	grants := []string{"Bash(git merge:*)", "Bash(git cherry-pick:*)"}
-	grantsJSON := `["Bash(git merge:*)","Bash(git cherry-pick:*)"]`
+	grants := []string{"Bash(git merge --no-commit:*)", "Bash(git cherry-pick -n:*)"}
+	grantsJSON := `["Bash(git merge --no-commit:*)","Bash(git cherry-pick -n:*)"]`
 	res := e.createPlan([]PlanTask{
 		{Name: "build", Spec: "build it", Class: "answer", ToolGrants: grants},
 		{Name: "ship", Spec: "ship it", Class: "answer", Deps: []string{"build"}},
@@ -78,7 +78,7 @@ func TestToolGrantsRoundTrip(t *testing.T) {
 // debug submit — the refusal naming the pattern, and nothing written.
 func TestToolGrantsRefused(t *testing.T) {
 	e := newEnv(t)
-	bad := []string{"Bash(git merge:*)", "Bash(git push:*)"}
+	bad := []string{"Bash(git merge --no-commit:*)", "Bash(git push:*)"}
 	const want = "Bash(git push:*)"
 
 	_, err := e.eng.CreatePlan(e.ctx, e.project, "bad grants", []PlanTask{{Name: "a", Spec: "s", ToolGrants: bad}})
@@ -123,19 +123,19 @@ func TestToolGrantsRefused(t *testing.T) {
 // grant in an active plan holds that task alone.
 func TestToolGrantsApprovalTrigger(t *testing.T) {
 	e := newEnv(t)
-	grants := []string{"Bash(git merge:*)", "Bash(git add:*)"}
+	grants := []string{"Bash(git merge --no-commit:*)", "Bash(git add:*)"}
 	tasks := []PlanTask{{Name: "merge", Spec: "merge the branches", ToolGrants: grants}}
 	res := e.createPlan(tasks)
-	e.assertAwaits(res, "tool_grants Bash(git merge:*), Bash(git add:*) outside approval_tool_grants")
+	e.assertAwaits(res, "tool_grants Bash(git merge --no-commit:*), Bash(git add:*) outside approval_tool_grants")
 
 	dec, err := e.eng.ApprovePlanVersion(e.ctx, 0, res.PlanID, 0, true)
 	if err != nil {
 		t.Fatalf("approve: %v", err)
 	}
-	if want := []string{"approval_tool_grants=Bash(git merge:*)+Bash(git add:*)"}; !slices.Equal(dec.Settings, want) {
+	if want := []string{"approval_tool_grants=Bash(git merge --no-commit:*)+Bash(git add:*)"}; !slices.Equal(dec.Settings, want) {
 		t.Fatalf("settings changed = %v, want %v", dec.Settings, want)
 	}
-	if settings := e.str("SELECT settings FROM projects WHERE id = ?", e.project); !strings.Contains(settings, `"approval_tool_grants":["Bash(git merge:*)","Bash(git add:*)"]`) {
+	if settings := e.str("SELECT settings FROM projects WHERE id = ?", e.project); !strings.Contains(settings, `"approval_tool_grants":["Bash(git merge --no-commit:*)","Bash(git add:*)"]`) {
 		t.Errorf("settings %s lack the granted patterns", settings)
 	}
 	next := e.createPlan(tasks)
@@ -144,14 +144,14 @@ func TestToolGrantsApprovalTrigger(t *testing.T) {
 	}
 
 	// A pattern the setting does not list still asks, naming that one.
-	other := e.createPlan([]PlanTask{{Spec: "restore a file", ToolGrants: []string{"Bash(git merge:*)", "Bash(git restore:*)"}}})
+	other := e.createPlan([]PlanTask{{Spec: "restore a file", ToolGrants: []string{"Bash(git merge --no-commit:*)", "Bash(git restore:*)"}}})
 	if reasons := strings.Join(other.Reasons, "; "); other.State != planAwaitingApproval || !strings.Contains(reasons, "tool_grants Bash(git restore:*) outside approval_tool_grants") || strings.Contains(reasons, "git merge") {
 		t.Errorf("a plan with an unlisted pattern = %s %v, want it awaiting on that pattern alone", other.State, other.Reasons)
 	}
 
 	// An added task's grant in an active plan holds that task alone.
-	am := e.amend(next.PlanID, PlanAmendment{Add: []PlanTask{{Name: "pick", Spec: "pick a commit", ToolGrants: []string{"Bash(git cherry-pick:*)"}}}})
-	if am.State != "active" || len(am.Held) != 1 || !strings.Contains(am.Held[0].Reason, "tool_grants Bash(git cherry-pick:*)") {
+	am := e.amend(next.PlanID, PlanAmendment{Add: []PlanTask{{Name: "pick", Spec: "pick a commit", ToolGrants: []string{"Bash(git cherry-pick -n:*)"}}}})
+	if am.State != "active" || len(am.Held) != 1 || !strings.Contains(am.Held[0].Reason, "tool_grants Bash(git cherry-pick -n:*)") {
 		t.Errorf("amendment = %s, held %+v; want the plan active and the added task held for its grant", am.State, am.Held)
 	}
 
@@ -176,7 +176,7 @@ func TestApprovalToolGrantsSetting(t *testing.T) {
 			t.Errorf("approval_tool_grants=%s reads %+v", g, s)
 		}
 	}
-	_, err := e.eng.SetProjectSettings(e.ctx, envRepo, map[string]string{SettingApprovalToolGrants: "Bash(git merge:*)+Bash(git push:*)"})
+	_, err := e.eng.SetProjectSettings(e.ctx, envRepo, map[string]string{SettingApprovalToolGrants: "Bash(git merge --no-commit:*)+Bash(git push:*)"})
 	if !errors.Is(err, ErrInvalidSetting) || !strings.Contains(err.Error(), `"Bash(git push:*)" is not in the tool-grant allowlist`) {
 		t.Errorf("a pattern outside the allowlist: err = %v, want the refusal naming it", err)
 	}
@@ -190,11 +190,11 @@ func TestPlanReviewShowsToolGrants(t *testing.T) {
 	e.offerForeman(e.runner1)
 	e.offerReviewer()
 	res := e.createPlan([]PlanTask{
-		{Name: "merge", Spec: "merge the release branch: its conflicts need git merge", ToolGrants: []string{"Bash(git merge:*)", "Bash(git add:*)"}},
+		{Name: "merge", Spec: "merge the release branch: its conflicts need git merge", ToolGrants: []string{"Bash(git merge --no-commit:*)", "Bash(git add:*)"}},
 		{Name: "plain", Spec: "no grants here"},
 	})
 	reviewPrompt := e.str("SELECT prompt FROM jobs WHERE key = ?", planReviewKey(res.PlanID))
-	if !strings.Contains(reviewPrompt, "tool grants: Bash(git merge:*), Bash(git add:*)\nspec, verbatim:\nmerge the release branch") {
+	if !strings.Contains(reviewPrompt, "tool grants: Bash(git merge --no-commit:*), Bash(git add:*)\nspec, verbatim:\nmerge the release branch") {
 		t.Errorf("the plan review input lacks the task's tool grants:\n%s", reviewPrompt)
 	}
 	if strings.Count(reviewPrompt, "tool grants:") != 1 {
@@ -223,5 +223,75 @@ func TestLeaseGrantCarriesToolGrants(t *testing.T) {
 	}
 	if len(pg.ToolGrants) != 0 {
 		t.Errorf("grantless lease tool_grants = %v, want none", pg.ToolGrants)
+	}
+}
+
+// TestLegacyToolGrantsLoadAsTheirNarrowForms (issue #277): a task row
+// stored with the prefix patterns the allowlist held before loads, reads
+// and leases as their narrow forms, so the adapter receives those; a new
+// plan_create, amend or submit naming a legacy pattern is accepted and
+// stores the narrow form; an approval_tool_grants value recorded with a
+// legacy pattern still matches its narrow form.
+func TestLegacyToolGrantsLoadAsTheirNarrowForms(t *testing.T) {
+	e := newEnv(t)
+	legacy := []string{"Bash(git merge:*)", "Bash(git cherry-pick:*)", "Bash(git add:*)"}
+	narrow := []string{"Bash(git merge --no-commit:*)", "Bash(git cherry-pick -n:*)", "Bash(git add:*)"}
+
+	// A stored row with the old patterns.
+	sr := e.submitTask(TaskParams{RepoURL: envRepo, BaseRef: "main", Spec: "an old task"})
+	e.exec(`UPDATE tasks SET tool_grants = ? WHERE id = ?`,
+		`["Bash(git merge:*)","Bash(git cherry-pick:*)","Bash(git add:*)"]`, sr.TaskID)
+	info, err := e.eng.Task(e.ctx, sr.TaskID)
+	if err != nil {
+		t.Fatalf("read the old task: %v", err)
+	}
+	if !slices.Equal(info.ToolGrants, narrow) {
+		t.Errorf("old task read tool_grants = %v, want %v", info.ToolGrants, narrow)
+	}
+	g := e.leaseAny(e.runner1)
+	if g == nil || g.JobID != sr.JobID {
+		t.Fatalf("lease = %+v, want job %d", g, sr.JobID)
+	}
+	if !slices.Equal(g.ToolGrants, narrow) {
+		t.Errorf("old task's lease tool_grants = %v, want the narrow forms %v", g.ToolGrants, narrow)
+	}
+
+	// A new call naming the old patterns stores the narrow forms, each once.
+	sub := e.submitTask(TaskParams{RepoURL: envRepo, BaseRef: "main", Spec: "old submit", ToolGrants: []string{"Bash(git cherry-pick:*)"}})
+	if got := e.str("SELECT tool_grants FROM tasks WHERE id = ?", sub.TaskID); got != `["Bash(git cherry-pick -n:*)"]` {
+		t.Errorf("submitted tool_grants = %q, want the narrow cherry-pick", got)
+	}
+	p := newEnv(t)
+	res := p.createPlan([]PlanTask{{Name: "old", Spec: "old words", ToolGrants: append(legacy, "Bash(git merge --no-commit:*)")}})
+	if got := p.str("SELECT tool_grants FROM tasks WHERE id = ?", res.Tasks[0].TaskID); got != `["Bash(git merge --no-commit:*)","Bash(git cherry-pick -n:*)","Bash(git add:*)"]` {
+		t.Errorf("created tool_grants = %q, want the narrow forms once each", got)
+	}
+	p.assertAwaits(res, "tool_grants Bash(git merge --no-commit:*), Bash(git cherry-pick -n:*), Bash(git add:*) outside approval_tool_grants")
+
+	// approval_tool_grants recorded with the old patterns pre-approves
+	// their narrow forms, whichever spelling the task names.
+	for _, spelled := range [][]string{narrow, legacy} {
+		f := newEnv(t)
+		f.set(map[string]string{SettingApprovalToolGrants: strings.Join(legacy, "+")})
+		f.assertRuns(f.createPlan([]PlanTask{{Name: "granted", Spec: "granted words", ToolGrants: spelled}}), 1)
+	}
+}
+
+// TestToolGrantsRefusalNamesTheNarrowAllowlist: a refusal lists the
+// allowlist's narrow forms, never a legacy prefix pattern.
+func TestToolGrantsRefusalNamesTheNarrowAllowlist(t *testing.T) {
+	_, err := validateToolGrants([]string{"Bash(git push:*)"})
+	if err == nil {
+		t.Fatal("a pattern outside the allowlist was accepted")
+	}
+	for _, want := range []string{"Bash(git push:*)", "Bash(git merge --no-commit:*)", "Bash(git cherry-pick -n:*)", "Bash(git checkout:*)", "Bash(git restore:*)", "Bash(git add:*)"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("refusal %q does not name %s", err, want)
+		}
+	}
+	for _, old := range []string{"Bash(git merge:*)", "Bash(git cherry-pick:*)"} {
+		if strings.Contains(err.Error(), old) {
+			t.Errorf("refusal %q names the legacy pattern %s", err, old)
+		}
 	}
 }

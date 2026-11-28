@@ -417,7 +417,7 @@ func parseKnownValue(key, value string) (json.RawMessage, error) {
 			return nil, fmt.Errorf("%w: %s item %q is not a class name (letters, digits, _ . -)",
 				ErrInvalidSetting, key, item)
 		}
-		if key == SettingApprovalToolGrants && !slicesContains(ToolGrantAllowlist, item) {
+		if key == SettingApprovalToolGrants && !slicesContains(ToolGrantAllowlist, NarrowToolGrant(item)) {
 			return nil, fmt.Errorf("%w: %s item %q is not in the tool-grant allowlist (%s)",
 				ErrInvalidSetting, key, item, strings.Join(ToolGrantAllowlist, ", "))
 		}

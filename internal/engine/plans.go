@@ -281,9 +281,11 @@ func (e *Engine) createPlanTx(tx *sql.Tx, project int64, title string, tasks []P
 		if err := validateTaskCaps(t.Caps); err != nil {
 			return CreatePlanResult{}, fmt.Errorf("task %d %q: %w", i+1, t.Name, err)
 		}
-		if err := validateToolGrants(t.ToolGrants); err != nil {
+		grants, err := validateToolGrants(t.ToolGrants)
+		if err != nil {
 			return CreatePlanResult{}, fmt.Errorf("task %d %q: %w", i+1, t.Name, err)
 		}
+		tasks[i].ToolGrants = grants // stored, held and leased in the narrow form
 		if t.Spec == "" {
 			return CreatePlanResult{}, fmt.Errorf("task %d: spec is required: the worker's task, verbatim (§1.4)", i+1)
 		}

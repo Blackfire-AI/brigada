@@ -24,7 +24,7 @@ func TestToolGrantsRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.exec(`UPDATE projects SET settings = ? WHERE id = ?`, string(allow), e.project1)
-	grants := []string{"Bash(git merge:*)", "Bash(git restore:*)"}
+	grants := []string{"Bash(git merge --no-commit:*)", "Bash(git restore:*)"}
 	read := func(task int64) []string {
 		t.Helper()
 		code, _, data := e.do(http.MethodGet, "/v1/tasks/"+strconv.FormatInt(task, 10), "alice", "", nil)
@@ -34,7 +34,7 @@ func TestToolGrantsRoundTrip(t *testing.T) {
 		return decode[engine.TaskInfo](t, data).ToolGrants
 	}
 
-	body := `{"title":"grants","tasks":[{"name":"build","spec":"the spec","tool_grants":["Bash(git merge:*)","Bash(git restore:*)"]},{"name":"ship","spec":"ship it","deps":["build"]}]}`
+	body := `{"title":"grants","tasks":[{"name":"build","spec":"the spec","tool_grants":["Bash(git merge --no-commit:*)","Bash(git restore:*)"]},{"name":"ship","spec":"ship it","deps":["build"]}]}`
 	code, _, data := e.do(http.MethodPost, "/v1/plans", "foreman1", "grants-1", []byte(body))
 	if code != http.StatusOK {
 		t.Fatalf("create with grants: %d %s", code, data)
@@ -71,16 +71,16 @@ func TestToolGrantsRoundTrip(t *testing.T) {
 		t.Errorf("added tool_grants = %v, want the checkout grant", got)
 	}
 	// amend-respec replaces the grants; absent keeps them; [] clears.
-	if code, data := amend("grants-3", `{"respec":[{"task":"ship","spec":"ship more","tool_grants":["Bash(git cherry-pick:*)"]}]}`); code != http.StatusOK {
+	if code, data := amend("grants-3", `{"respec":[{"task":"ship","spec":"ship more","tool_grants":["Bash(git cherry-pick -n:*)"]}]}`); code != http.StatusOK {
 		t.Fatalf("respec with grants: %d %s", code, data)
 	}
-	if got := read(ship); !slices.Equal(got, []string{"Bash(git cherry-pick:*)"}) {
+	if got := read(ship); !slices.Equal(got, []string{"Bash(git cherry-pick -n:*)"}) {
 		t.Errorf("respecced tool_grants = %v, want the cherry-pick grant", got)
 	}
 	if code, data := amend("grants-4", `{"respec":[{"task":"ship","spec":"ship more still"}]}`); code != http.StatusOK {
 		t.Fatalf("respec without grants: %d %s", code, data)
 	}
-	if got := read(ship); !slices.Equal(got, []string{"Bash(git cherry-pick:*)"}) {
+	if got := read(ship); !slices.Equal(got, []string{"Bash(git cherry-pick -n:*)"}) {
 		t.Errorf("respec without tool_grants = %v, want the recorded grants kept", got)
 	}
 	if code, data := amend("grants-5", `{"respec":[{"task":"ship","spec":"ship grantless","tool_grants":[]}]}`); code != http.StatusOK {
@@ -91,7 +91,7 @@ func TestToolGrantsRoundTrip(t *testing.T) {
 	}
 
 	// The debug submit carries its grants.
-	sub := `{"repo_url":"https://example.invalid/grants.git","base_ref":"main","spec":"direct","tool_grants":["Bash(git merge:*)"]}`
+	sub := `{"repo_url":"https://example.invalid/grants.git","base_ref":"main","spec":"direct","tool_grants":["Bash(git merge --no-commit:*)"]}`
 	code, _, data = e.do(http.MethodPost, "/v1/tasks", "root", "grants-6", []byte(sub))
 	if code != http.StatusOK {
 		t.Fatalf("submit with grants: %d %s", code, data)
@@ -99,7 +99,7 @@ func TestToolGrantsRoundTrip(t *testing.T) {
 	direct := decode[struct {
 		TaskID int64 `json:"task_id"`
 	}](t, data).TaskID
-	if got := read(direct); !slices.Equal(got, []string{"Bash(git merge:*)"}) {
+	if got := read(direct); !slices.Equal(got, []string{"Bash(git merge --no-commit:*)"}) {
 		t.Errorf("submitted tool_grants = %v, want the merge grant", got)
 	}
 

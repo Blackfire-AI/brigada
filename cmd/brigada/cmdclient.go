@@ -260,7 +260,7 @@ func runTaskSubmit(ctx context.Context, args []string, stdout, stderr io.Writer)
 	fs.StringVar(&check, "check", "", "the check command the runner runs after the worker reports done; empty = none")
 	fs.StringVar(&title, "title", "", "the task's title; default is the spec's first line")
 	fs.StringVar(&harness, "harness", "", "the harness that must run the job (default: any)")
-	fs.Func("tool-grant", "a Claude Code permission pattern the worker is granted, from the allowlist (PATTERN, e.g. 'Bash(git merge:*)'); repeatable", func(v string) error {
+	fs.Func("tool-grant", "a Claude Code permission pattern the worker is granted, from the allowlist (PATTERN, e.g. 'Bash(git merge --no-commit:*)'); repeatable", func(v string) error {
 		if v == "" {
 			return errors.New("needs a pattern")
 		}

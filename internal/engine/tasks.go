@@ -83,9 +83,11 @@ func (e *Engine) submitTaskTx(tx *sql.Tx, p TaskParams, now time.Time) (TaskResu
 	case p.Spec == "":
 		return TaskResult{}, fmt.Errorf("spec is required: the worker's task, verbatim (§1.4)")
 	}
-	if err := validateToolGrants(p.ToolGrants); err != nil {
+	grants, err := validateToolGrants(p.ToolGrants)
+	if err != nil {
 		return TaskResult{}, err
 	}
+	p.ToolGrants = grants
 	class := p.Class
 	if class == "" {
 		class = "implement"

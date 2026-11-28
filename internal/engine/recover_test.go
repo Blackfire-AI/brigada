@@ -186,14 +186,17 @@ func TestRecoverRebuildsPlanNewerThanSnapshotAndKeepsOlder(t *testing.T) {
 	}
 }
 
-// TestRecoverCarriesToolGrants: a recovered task keeps its grants
-// verbatim and one with none keeps the empty default; a file naming a
-// pattern outside the allowlist is refused as plan creation refuses it.
+// TestRecoverCarriesToolGrants: a recovered task keeps its grants — a
+// legacy prefix pattern a file written before issue #277 holds loads and
+// is recorded as its narrow form — and one with none keeps the empty
+// default; a file naming a pattern outside the allowlist is refused as
+// plan creation refuses it.
 func TestRecoverCarriesToolGrants(t *testing.T) {
 	t.Parallel()
 	r := newRecoverEnv(t)
 	stored := time.Date(2026, 10, 12, 12, 0, 0, 0, time.UTC)
 	grants := []string{"Bash(git merge:*)", "Bash(git add:*)"}
+	narrow := []string{"Bash(git merge --no-commit:*)", "Bash(git add:*)"}
 	r.pushFile(planfile.Plan{
 		ID: 60, Title: "grants", State: "active",
 		Created: stored.Add(time.Hour), Updated: stored.Add(2 * time.Hour),
@@ -203,16 +206,16 @@ func TestRecoverCarriesToolGrants(t *testing.T) {
 		},
 	})
 	r.recoverPlans()
-	if got := r.str("SELECT tool_grants FROM tasks WHERE id = 601"); got != `["Bash(git merge:*)","Bash(git add:*)"]` {
-		t.Errorf("recovered grants = %q", got)
+	if got := r.str("SELECT tool_grants FROM tasks WHERE id = 601"); got != `["Bash(git merge --no-commit:*)","Bash(git add:*)"]` {
+		t.Errorf("recovered grants = %q, want the narrow forms", got)
 	}
 	if got := r.str("SELECT tool_grants FROM tasks WHERE id = 602"); got != "" {
 		t.Errorf("a task with no grants recovered %q, want the empty default", got)
 	}
-	// The mirror reads them back out: the round trip is lossless.
+	// The mirror reads them back out, in the narrow forms.
 	snap := r.planSnapshot(60)
-	if got := taskByName(t, snap, "a").ToolGrants; !slices.Equal(got, grants) {
-		t.Errorf("mirrored grants = %v, want %v", got, grants)
+	if got := taskByName(t, snap, "a").ToolGrants; !slices.Equal(got, narrow) {
+		t.Errorf("mirrored grants = %v, want %v", got, narrow)
 	}
 	if got := taskByName(t, snap, "b").ToolGrants; len(got) != 0 {
 		t.Errorf("mirrored grants of a plain task = %v", got)
