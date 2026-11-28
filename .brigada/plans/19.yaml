@@ -33,6 +33,6 @@ tasks:
     tier: light
     effort: medium
     skills: ["cli-flag"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-94-r2"
     rounds: 0
