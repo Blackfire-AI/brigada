@@ -5,9 +5,9 @@
 plan: 18
 title: "Fix #277 tool-grant guard, then #51 part 2 restart from a capped run"
 repo: "github.com/Blackfire-AI/brigada"
-state: needs_foreman
+state: reviewing
 created: 2026-11-28T06:04:33.069542811Z
-updated: 2026-11-28T06:39:45.201995812Z
+updated: 2026-11-28T06:40:09.778399236Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
