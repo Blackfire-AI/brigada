@@ -205,3 +205,24 @@ func TestTaskSubmitHelpNamesToolGrant(t *testing.T) {
 		t.Errorf("help lacks the flag:\n%s", help)
 	}
 }
+
+// TestHelpSynopsesMatchCode: task retire shows --reason as required, and
+// plan and land approve show --and-stop-asking; reject takes none.
+func TestHelpSynopsesMatchCode(t *testing.T) {
+	for _, c := range []struct {
+		args []string
+		want string
+		not  string
+	}{
+		{[]string{"task", "retire", "--help"}, "brigada task retire --reason TEXT", "[--reason TEXT]"},
+		{[]string{"plan", "approve", "--help"}, "brigada plan approve [--and-stop-asking]", ""},
+		{[]string{"land", "approve", "--help"}, "brigada land approve [--and-stop-asking]", ""},
+		{[]string{"plan", "reject", "--help"}, "brigada plan reject [--no-start]", "[--and-stop-asking] [--no-start] <id>\n"},
+		{[]string{"init", "--help"}, "deprecated: worker scope", ""},
+		{[]string{"logs", "--help"}, "refused with --check", ""},
+	} {
+		if out := helpOutput(t, c.args...); !strings.Contains(out, c.want) || (c.not != "" && strings.Contains(out, c.not)) {
+			t.Errorf("%v help lacks %q or has %q:\n%s", c.args, c.want, c.not, out)
+		}
+	}
+}

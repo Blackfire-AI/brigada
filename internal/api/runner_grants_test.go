@@ -21,12 +21,12 @@ func TestJobGrantToolGrants(t *testing.T) {
 		t.Errorf("a grantless job grant carries tool_grants: %s", b)
 	}
 
-	granted := jobGrantOf(&engine.LeaseGrant{JobID: 2, Kind: engine.KindWork, ToolGrants: []string{"Bash(git merge:*)"}})
+	granted := jobGrantOf(&engine.LeaseGrant{JobID: 2, Kind: engine.KindWork, ToolGrants: []string{"Bash(git merge --no-commit:*)"}})
 	b, err = json.Marshal(granted)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(b), `"tool_grants":["Bash(git merge:*)"]`) {
+	if !strings.Contains(string(b), `"tool_grants":["Bash(git merge --no-commit:*)"]`) {
 		t.Errorf("a granted job grant lacks tool_grants: %s", b)
 	}
 }

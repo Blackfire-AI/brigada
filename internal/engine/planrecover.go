@@ -206,7 +206,7 @@ func (e *Engine) applyPlanFileTx(tx *sql.Tx, project int64, repo, defaultBranch 
 		}
 	}
 	for _, t := range p.Tasks {
-		if err := validateToolGrants(t.ToolGrants); err != nil {
+		if _, err := validateToolGrants(t.ToolGrants); err != nil {
 			return skip("task %d: %v", t.ID, err)
 		}
 		for _, d := range t.Deps {

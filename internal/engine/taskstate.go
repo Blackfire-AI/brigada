@@ -83,6 +83,16 @@ const ErrorKindInfra = "infra"
 // once (retryPublishFailureTx), then parks it for the foreman.
 const ErrorKindPublish = "publish"
 
+// ErrorKindBranchGuard sorts a completion's Error as the runner's branch
+// guard refusing the worktree before it committed the result (§5.2):
+// the worker left the task branch — another branch, a detached HEAD —
+// or left the job's base, or, on a task whose lease carries tool
+// grants, made commits of its own. It is a verdict on the run, not on
+// the agent's health, so like a publish failure it never counts toward
+// the failure streak; unlike one it is not retried, since a re-run
+// would most likely do the same: the task parks for the foreman.
+const ErrorKindBranchGuard = "branch_guard"
+
 // taskRunningTx moves a task off ready when one of its jobs is leased
 // (§6.1): running while the work happens. A fix round's lease also takes
 // the task back out of reviewing (§3): the review asked for changes, the
@@ -179,6 +189,10 @@ func (e *Engine) workCompletedTx(tx *sql.Tx, job *jobRow, c Completion, class st
 			if retried, err := e.retryPublishFailureTx(tx, job, c, now); err != nil || retried {
 				return err
 			}
+		case c.ErrorKind == ErrorKindBranchGuard:
+			// The branch guard refused the worktree (§5.2): never
+			// retried — a re-run would most likely do the same — so the
+			// task parks for the foreman below, with the guard's words.
 		case transientCLIError(c.ErrorKind):
 			if retried, err := e.autoRestartTaskTx(tx, job, c.ErrorKind, c.Error, now); err != nil || retried {
 				return err
@@ -269,7 +283,14 @@ func (e *Engine) workCompletedTx(tx *sql.Tx, job *jobRow, c Completion, class st
 				return err
 			}
 		}
-		return e.needsForemanTx(tx, job, evTaskFailed, eventPayload{Reason: boundNote(reason)}, now)
+		// A time-capped or stalled run names where its work sits and
+		// how big it is (§5.6), so the foreman can choose a restart that
+		// continues from it.
+		p := eventPayload{Reason: boundNote(reason)}
+		if branch, ds := stoppedRunWork(job, c); branch != "" {
+			p.Branch, p.FilesChanged, p.LinesAdded, p.LinesRemoved = branch, ds.Files, ds.Added, ds.Removed
+		}
+		return e.needsForemanTx(tx, job, evTaskFailed, p, now)
 	case wr.Status == workerNeedsHelp:
 		// §3: the question is the foreman's to answer, verbatim.
 		return e.needsForemanTx(tx, job, evTaskNeedsHelp, eventPayload{Question: boundNote(wr.Question)}, now)

@@ -26,6 +26,14 @@ func runPlan(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	return dispatch(ctx, args, stdout, stderr, "plan", planUsage, "approve or reject", planCommands)
 }
 
+// stopFlag is the synopsis part for --and-stop-asking, which only approve takes.
+func stopFlag(verb string) string {
+	if verb == "approve" {
+		return " [--and-stop-asking]"
+	}
+	return ""
+}
+
 // runPlanDecision is the user's yes or no on a plan over the approval
 // limit (§6.3). Only the client token can say it: the foreman has no
 // way to confirm its own plans. --and-stop-asking (approve only) also
@@ -34,9 +42,9 @@ func runPlan(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 func runPlanDecision(ctx context.Context, verb string, args []string, stdout, stderr io.Writer) int {
 	description := "Approve a plan waiting at the plan gate and queue its tasks, or release the tasks a plan rule holds alone in a running plan."
 	if verb == "reject" {
-		description = "Reject a plan waiting over the approval limit and cancel its tasks."
+		description = "Reject a plan waiting at the plan gate, or the tasks a plan rule holds alone in a running plan, and cancel its tasks."
 	}
-	fs := newFlagSet("plan "+verb, "brigada plan "+verb+" [--no-start] <id>", description)
+	fs := newFlagSet("plan "+verb, "brigada plan "+verb+stopFlag(verb)+" [--no-start] <id>", description)
 	stderr = commandStderr(stderr, fs.Name())
 	common := addCommon(fs)
 	noStart := fs.Bool("no-start", false, "do not start the engine on demand; fail when none is running")

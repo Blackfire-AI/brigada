@@ -79,7 +79,7 @@ func readableText(it Item) string {
 		}
 		return it.Content
 	}
-	text := summary(it)
+	text := summaryOf(it, false)
 	var p struct {
 		Question string `json:"question"`
 		Findings string `json:"findings"`

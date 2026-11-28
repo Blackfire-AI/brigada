@@ -65,9 +65,14 @@ Commands:
 	                needs you (--line: one short line).
 	task submit     Submit one task directly, without the foreman (a
 	                debugging path).
+	task restart <task-id> [--note TEXT] [--continue-stopped]
+	                Restart a parked task as a fresh attempt; with
+	                --continue-stopped from its time-capped or stalled
+	                run's pushed branch instead of the base.
 	task retire <task-id>... --reason TEXT
 	                Retire tasks that will not land: their jobs stop,
-	                their branches stay, their plans close over them.
+	                their branches stay, a plan closes once nothing
+	                else holds it open.
 	project foreman Show or set a repo's foreman harness, model and effort
 	                (--repo defaults to this repo's origin).
 	project list    List the projects: repo, foreman, active plans,
@@ -104,9 +109,9 @@ Commands:
 	                plans and events (--interval, --project URL).
 	agent reset <harness>/<model>
 	                Clear a broken or cooling agent.
-	agents          Show the models your harnesses offer that no agent
-	                registers, and registered models a CLI no longer
-	                lists; read-only.
+	agents          Show every model the harnesses offer, marked registered,
+	                not registered or superseded, and registered models a
+	                CLI no longer lists; read-only.
 	agents add <harness>/<model>
 	                Register one such model as an agent (--classes,
 	                --effort); restart the runner to serve it.
@@ -115,7 +120,7 @@ Commands:
 	                from the agents file; restart the runner to stop
 	                serving it (--now).
 	agents update   Move registered agents to the newer model of their
-	                line the CLIs list (--yes, --dry-run, --now);
+	                line the CLIs list (--yes, --dry-run, --foremen, --now);
 	                restart the runner to serve the new models.
 	plan approve <id>
 	                Approve a plan waiting at the plan gate, or release
@@ -129,7 +134,8 @@ Commands:
 	cancel <job-id> Cancel a live job.
 	recover         Rebuild a lost store from the newest snapshot and the
 	                plan files; the engine must be stopped.
-	hold yield|confirm  Kept for old hooks; does nothing, exits 0.
+	hold yield|confirm
+	                Kept for old hooks; does nothing, exits 0.
 	version         Print the brigada version and exit.
 	help [command [subcommand]]
 	                Print top-level or command usage and exit.

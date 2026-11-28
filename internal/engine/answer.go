@@ -155,15 +155,52 @@ func (e *Engine) answerTx(tx *sql.Tx, project, taskID int64, text string, now ti
 // when there is not. With the restart budget spent the call refuses and
 // the task stays parked. Otherwise the task returns to ready and the
 // task_restarted event lands, in the one transaction that queued the
-// job.
+// job. It is RestartTaskWith with no options.
 func (e *Engine) RestartTask(ctx context.Context, project, taskID int64, note string) (RestartResult, error) {
+	return e.RestartTaskWith(ctx, project, taskID, note, RestartOptions{})
+}
+
+// RestartTaskWith is RestartTask with its options (§5.6). With Continue
+// the fresh attempt's worktree starts from the stopped run's pushed work
+// (continueSeedTx), confirmed on the remote first when it is a salvage
+// branch — a lookup made outside any transaction, the seed read again
+// inside the one that queues the job. The task's base_ref is the rebuild
+// base either way, so the review's diff and the landing read the
+// attempt against the task's real base.
+func (e *Engine) RestartTaskWith(ctx context.Context, project, taskID int64, note string, opts RestartOptions) (RestartResult, error) {
+	var seed string
+	if opts.Continue {
+		var cs continueSeed
+		if err := e.store.View(ctx, func(tx *sql.Tx) error {
+			var err error
+			cs, err = continueSeedTx(tx, project, taskID)
+			return err
+		}); err != nil {
+			return RestartResult{}, fmt.Errorf("restart task %d: %w", taskID, err)
+		}
+		if cs.Salvage {
+			if err := e.confirmSalvage(ctx, cs); err != nil {
+				return RestartResult{}, fmt.Errorf("restart task %d: %w", taskID, err)
+			}
+		}
+		seed = cs.Branch
+	}
 	var res RestartResult
 	err := e.store.Update(ctx, func(tx *sql.Tx) error {
 		now := e.cfg.Now()
 		if _, err := e.sweepTx(tx, now); err != nil {
 			return err
 		}
-		r, err := e.restartTaskTx(tx, project, taskID, note, now)
+		if opts.Continue {
+			cs, err := continueSeedTx(tx, project, taskID)
+			if err != nil {
+				return fmt.Errorf("restart task %d: %w", taskID, err)
+			}
+			if cs.Branch != seed {
+				return fmt.Errorf("restart task %d: the run it would continue changed while the restart was prepared; ask again", taskID)
+			}
+		}
+		r, err := e.restartTaskTx(tx, project, taskID, note, seed, now)
 		if err != nil {
 			return fmt.Errorf("restart task %d: %w", taskID, err)
 		}
@@ -173,7 +210,9 @@ func (e *Engine) RestartTask(ctx context.Context, project, taskID int64, note st
 	return res, err
 }
 
-func (e *Engine) restartTaskTx(tx *sql.Tx, project, taskID int64, note string, now time.Time) (RestartResult, error) {
+// restartTaskTx restarts a parked task; a non-empty seed is the branch
+// the fresh attempt continues from (§5.6), named on task_restarted.
+func (e *Engine) restartTaskTx(tx *sql.Tx, project, taskID int64, note, seed string, now time.Time) (RestartResult, error) {
 	if err := refuseStopPendingTx(tx, taskID); err != nil {
 		return RestartResult{}, err
 	}
@@ -192,12 +231,12 @@ func (e *Engine) restartTaskTx(tx *sql.Tx, project, taskID int64, note string, n
 		return RestartResult{}, fmt.Errorf(
 			"the task's restart budget is spent; the task stays parked at needs_foreman")
 	}
-	r, err := e.queueTaskRestartTx(tx, project, taskID, note, 0, false, time.Time{}, now)
+	r, err := e.queueSeededRestartTx(tx, project, taskID, note, 0, false, time.Time{}, seed, now)
 	if err != nil {
 		return RestartResult{}, err
 	}
 	if _, err := appendEventTx(tx, evTaskRestarted, project, taskID, r.JobID,
-		eventPayload{Run: int64(r.Run), Reason: boundNote(note)}, now); err != nil {
+		eventPayload{Run: int64(r.Run), Reason: boundNote(note), Branch: seed}, now); err != nil {
 		return RestartResult{}, err
 	}
 	return r, nil
@@ -225,7 +264,7 @@ func (e *Engine) queueTaskRestartTx(tx *sql.Tx, project, taskID int64, note stri
 // queueSeededRestartTx is queueTaskRestartTx with a seed: a non-empty seed
 // names the branch the fresh work job's worktree starts from instead of
 // the task's base (§5.6) — the stopped run's pushed branch a stop-running
-// restart carries on. The task's base_ref is the rebuild base all the
+// restart, or a restart with the continue option, carries on. The task's base_ref is the rebuild base all the
 // same, so the review's diff and the landing read the attempt against the
 // task's real base.
 func (e *Engine) queueSeededRestartTx(tx *sql.Tx, project, taskID int64, note string, agent int64, retry bool, notBefore time.Time, seed string, now time.Time) (RestartResult, error) {

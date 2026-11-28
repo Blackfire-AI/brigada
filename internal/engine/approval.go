@@ -218,8 +218,9 @@ func toolGrantsHoldReason(grants []string) string {
 // pre-approved in approval_tool_grants (§6.3), in the task's order.
 func (s approvalSettings) grantsOutside(grants []string) []string {
 	var out []string
-	for _, g := range grants {
-		if !slicesContains(s.ToolGrants, g) && !slicesContains(out, g) {
+	approved := narrowToolGrants(s.ToolGrants)
+	for _, g := range narrowToolGrants(grants) {
+		if !slicesContains(approved, g) && !slicesContains(out, g) {
 			out = append(out, g)
 		}
 	}

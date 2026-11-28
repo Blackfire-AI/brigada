@@ -313,7 +313,7 @@ func (s *agentSpecs) Set(v string) error {
 		}
 		key, value, ok := strings.Cut(field, "=")
 		if !ok {
-			return fmt.Errorf("--agent %q: want harness=<h>[,model=<m>][,classes=<c1>+<c2>|none][,account=<label>][,quota_scope=<scope>][,agent-file=<path>][,effort=<level>][,tools=<p1>+<p2>|none]", v)
+			return fmt.Errorf("--agent %q: want harness=<h>[,model=<m>][,classes=<c1>+<c2>|none][,account=<label>][,quota_scope=<scope>][,agent-file=<path>][,effort=<level>][,tools=<p1>+<p2>|none][,permission=<rule>][,read-scope=<scope>]", v)
 		}
 		switch key {
 		case "harness":

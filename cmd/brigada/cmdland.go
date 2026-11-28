@@ -64,7 +64,7 @@ func runLand(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 func runLandByHand(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := newFlagSet("land",
 		"brigada land [--onto BRANCH] [--repo URL] [--landed ID]... [--no-check] [--no-start] <task-id>...",
-		"Squash approved tasks onto the checked-out branch, rerun the check and print the push command.")
+		"Squash approved tasks onto the checked-out branch, rerun the check and print the push command. A task held at the land gate is released or cancelled with brigada land approve or land reject.")
 	stderr = commandStderr(stderr, fs.Name())
 	common := addCommon(fs)
 	var opts landOptions
@@ -604,7 +604,7 @@ func runLandDecision(ctx context.Context, verb string, args []string, stdout, st
 	if verb == "reject" {
 		description = "Cancel a task's landing; its branch is left as it is."
 	}
-	fs := newFlagSet("land "+verb, "brigada land "+verb+" [--no-start] <task>", description)
+	fs := newFlagSet("land "+verb, "brigada land "+verb+stopFlag(verb)+" [--no-start] <task>", description)
 	stderr = commandStderr(stderr, fs.Name())
 	common := addCommon(fs)
 	noStart := fs.Bool("no-start", false, "do not start the engine on demand; fail when none is running")

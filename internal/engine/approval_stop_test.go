@@ -47,7 +47,7 @@ func TestStopAskingValues(t *testing.T) {
 		{kind: holdMaxTasks, count: 4},
 		{kind: holdBudget, toks: 2_000_000, usd: 5},
 		// A multi-pattern grant repeats the ask, one per pattern.
-		{kind: holdToolGrants, item: "Bash(git merge:*)"},
+		{kind: holdToolGrants, item: "Bash(git merge --no-commit:*)"},
 		{kind: holdToolGrants, item: "Bash(git restore:*)"},
 		{kind: holdToolGrants, item: "Bash(git add:*)"},
 	})
@@ -58,7 +58,7 @@ func TestStopAskingValues(t *testing.T) {
 		SettingApprovalRestarted:      "false",
 		SettingApprovalMaxTasks:       "4",
 		SettingApprovalBudget:         "2000000+$5",
-		SettingApprovalToolGrants:     "Bash(git add:*)+Bash(git merge:*)+Bash(git restore:*)",
+		SettingApprovalToolGrants:     "Bash(git add:*)+Bash(git merge --no-commit:*)+Bash(git restore:*)",
 	}
 	if len(got) != len(want) {
 		t.Fatalf("values = %v, want %v", got, want)

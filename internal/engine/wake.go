@@ -497,7 +497,21 @@ func wakeEventText(kind, payload string) string {
 	if kind == evReviewChanges || kind == evReviewNoVerdict {
 		text += placementNote(p.Placement)
 	}
+	if kind == evTaskFailed && p.Branch != "" {
+		text += stoppedWorkNote(p)
+	}
 	return text
+}
+
+// stoppedWorkNote names a stopped run's pushed work on its task_failed
+// line (§5.6): the branch, and its size against the base when the
+// payload carries it — what the foreman weighs a continue restart by.
+func stoppedWorkNote(p eventPayload) string {
+	note := "; the stopped run's work is on branch " + p.Branch
+	if p.FilesChanged != 0 || p.LinesAdded != 0 || p.LinesRemoved != 0 {
+		note += fmt.Sprintf(" (%d files changed, +%d/-%d against the base)", p.FilesChanged, p.LinesAdded, p.LinesRemoved)
+	}
+	return note + "; a restart may continue from it"
 }
 
 // foremanReportTx appends a done foreman turn's report to the user

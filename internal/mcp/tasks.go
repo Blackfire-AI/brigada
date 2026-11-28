@@ -162,6 +162,7 @@ type taskRestartArgs struct {
 	Task        int64  `json:"task"`
 	Note        string `json:"note"`
 	StopRunning bool   `json:"stop_running,omitempty"`
+	Continue    bool   `json:"continue_stopped,omitempty"`
 }
 
 // callAnswer runs the answer tool (§3, §12.2): the foreman's answer to
@@ -197,7 +198,7 @@ func callTaskRestart(ctx context.Context, c *api.Client, args json.RawMessage) (
 			return "", fmt.Errorf("arguments: %w", err)
 		}
 	}
-	res, err := c.RestartTask(ctx, a.Task, a.Note, a.StopRunning, idemKey("task_restart", a))
+	res, err := c.RestartTask(ctx, a.Task, a.Note, a.StopRunning, a.Continue, idemKey("task_restart", a))
 	if err != nil {
 		return "", err
 	}

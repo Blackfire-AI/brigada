@@ -683,11 +683,14 @@ type TaskRestartResult struct {
 // work attempt from the task's base, the note handed to the worker
 // verbatim when there is one. stopRunning also restarts a task whose job
 // is live: a running job stops keeping its branch, and its end queues
-// the fresh attempt seeded from it. idemKey as in Answer.
-func (c *Client) RestartTask(ctx context.Context, task int64, note string, stopRunning bool, idemKey string) (TaskRestartResult, error) {
+// the fresh attempt seeded from it. continueStopped starts the fresh
+// attempt from the pushed branch of the time-capped or stalled run that
+// parked the task, and is refused for a task not parked by such a run.
+// idemKey as in Answer.
+func (c *Client) RestartTask(ctx context.Context, task int64, note string, stopRunning, continueStopped bool, idemKey string) (TaskRestartResult, error) {
 	var out taskRestartResponse
 	path := "/v1/tasks/" + strconv.FormatInt(task, 10) + "/restart"
-	if err := c.callKeyed(ctx, http.MethodPost, path, idemKey, taskRestartRequest{Note: note, StopRunning: stopRunning}, &out); err != nil {
+	if err := c.callKeyed(ctx, http.MethodPost, path, idemKey, taskRestartRequest{Note: note, StopRunning: stopRunning, Continue: continueStopped}, &out); err != nil {
 		return TaskRestartResult{}, err
 	}
 	return TaskRestartResult{

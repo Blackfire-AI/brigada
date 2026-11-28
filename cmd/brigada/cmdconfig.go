@@ -18,7 +18,7 @@ import (
 // the engine; machine values describe the file, not a daemon's flag overrides.
 func runConfig(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := newFlagSet("config",
-		"brigada config [--state-dir DIR] [--config PATH]",
+		"brigada config",
 		"Show agents, foreman, project and machine settings, and how to change them.")
 	stderr = commandStderr(stderr, fs.Name())
 	common := addCommon(fs)

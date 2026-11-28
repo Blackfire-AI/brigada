@@ -637,3 +637,38 @@ func TestServeCallLandRetryRefusalNotReplayed(t *testing.T) {
 		t.Errorf("second land_retry = %q (error %v), want queued", text, isError)
 	}
 }
+
+// TestServeCallTaskRestartContinueStopped covers task_restart's
+// continue_stopped (§5.6): the schema names the parameter, and a task
+// not parked by a time-capped or stalled run is refused with the
+// engine's reason, queuing nothing.
+func TestServeCallTaskRestartContinueStopped(t *testing.T) {
+	e := newEnvToken(t, foremanTokenFile, "foreman-secret-9")
+	task := seedParked(t, e, "task_needs_help", `{"question":"x"}`)
+	s := start(t, e)
+
+	var found bool
+	for _, tool := range tools {
+		if tool.Name != "task_restart" {
+			continue
+		}
+		props := tool.InputSchema.(map[string]any)["properties"].(map[string]any)
+		p, ok := props["continue_stopped"].(map[string]any)
+		found = ok && p["type"] == "boolean" && strings.Contains(p["description"].(string), "refused when the task was not parked by such a run")
+	}
+	if !found {
+		t.Error("task_restart schema lacks a documented boolean continue_stopped")
+	}
+
+	a := s.call(1, "tools/call", map[string]any{
+		"name":      "task_restart",
+		"arguments": map[string]any{"task": task, "continue_stopped": true},
+	})
+	text, isError := toolText(t, a)
+	if !isError || !strings.Contains(text, "not by a time-capped or stalled run") {
+		t.Errorf("task_restart continue_stopped = %q (error %t), want the refusal", text, isError)
+	}
+	if n := countOf(t, e, "SELECT COUNT(*) FROM jobs WHERE task_id = ?", task); n != 0 {
+		t.Errorf("jobs after the refusal = %d, want none", n)
+	}
+}

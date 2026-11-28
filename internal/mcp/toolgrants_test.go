@@ -30,14 +30,14 @@ func TestServeCallPlanToolGrants(t *testing.T) {
 		"tasks": []any{
 			map[string]any{"name": "build", "spec": "build it", "check": "go test ./..."},
 			map[string]any{"name": "ship", "spec": "ship it", "check": "go test ./...", "deps": []any{"build"},
-				"tool_grants": []any{"Bash(git merge:*)"}},
+				"tool_grants": []any{"Bash(git merge --no-commit:*)"}},
 		},
 	}
 	a := s.call(1, "tools/call", map[string]any{"name": "plan_create", "arguments": call})
 	if text, isError := toolText(t, a); isError {
 		t.Fatalf("plan_create with grants errored: %s", text)
 	}
-	if got := grantsOf("ship"); got != `["Bash(git merge:*)"]` {
+	if got := grantsOf("ship"); got != `["Bash(git merge --no-commit:*)"]` {
 		t.Errorf("created tool_grants = %q, want the merge grant", got)
 	}
 	if got := grantsOf("build"); got != "" {
@@ -49,7 +49,7 @@ func TestServeCallPlanToolGrants(t *testing.T) {
 		"plan": 1,
 		"add": []any{map[string]any{"name": "extra", "spec": "extra work", "check": "go test ./...", "deps": []any{"build"},
 			"tool_grants": []any{"Bash(git restore:*)"}}},
-		"respec": []any{map[string]any{"task": "ship", "spec": "ship it again", "tool_grants": []any{"Bash(git cherry-pick:*)"}}},
+		"respec": []any{map[string]any{"task": "ship", "spec": "ship it again", "tool_grants": []any{"Bash(git cherry-pick -n:*)"}}},
 	}
 	a = s.call(2, "tools/call", map[string]any{"name": "plan_amend", "arguments": amend})
 	if text, isError := toolText(t, a); isError {
@@ -58,8 +58,22 @@ func TestServeCallPlanToolGrants(t *testing.T) {
 	if got := grantsOf("extra"); got != `["Bash(git restore:*)"]` {
 		t.Errorf("added tool_grants = %q, want the restore grant", got)
 	}
-	if got := grantsOf("ship"); got != `["Bash(git cherry-pick:*)"]` {
+	if got := grantsOf("ship"); got != `["Bash(git cherry-pick -n:*)"]` {
 		t.Errorf("respecced tool_grants = %q, want the cherry-pick grant", got)
+	}
+
+	// An old prefix spelling (issue #277) is accepted and stored as its
+	// narrow form.
+	legacy := map[string]any{
+		"plan":   1,
+		"respec": []any{map[string]any{"task": "ship", "spec": "ship it the old way", "tool_grants": []any{"Bash(git merge:*)"}}},
+	}
+	a = s.call(4, "tools/call", map[string]any{"name": "plan_amend", "arguments": legacy})
+	if text, isError := toolText(t, a); isError {
+		t.Fatalf("plan_amend with an old spelling errored: %s", text)
+	}
+	if got := grantsOf("ship"); got != `["Bash(git merge --no-commit:*)"]` {
+		t.Errorf("old-spelled tool_grants = %q, want the narrow merge grant", got)
 	}
 
 	// A pattern outside the allowlist refuses the whole call, named.
@@ -69,7 +83,7 @@ func TestServeCallPlanToolGrants(t *testing.T) {
 	}
 	a = s.call(3, "tools/call", map[string]any{"name": "plan_create", "arguments": bad})
 	text, isError := toolText(t, a)
-	if !isError || !strings.Contains(text, "Bash(git push:*)") {
+	if !isError || !strings.Contains(text, "Bash(git push:*)") || !strings.Contains(text, "Bash(git cherry-pick -n:*)") {
 		t.Errorf("off-allowlist pattern: isError=%v text=%q, want the refusal naming it", isError, text)
 	}
 }

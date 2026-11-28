@@ -47,7 +47,11 @@ func subject(it Item) string {
 // an event the fields its payload carries, as key=value. Unknown fields
 // stay in the payload the JSON item shows; the rendering keeps to the
 // vocabulary every engine event uses.
-func summary(it Item) string {
+func summary(it Item) string { return summaryOf(it, true) }
+
+// summaryOf is summary; withWork says whether a stopped run's task_failed
+// names its branch and size, which the readable views leave to their words.
+func summaryOf(it Item, withWork bool) string {
 	if it.Type == TypeMessage {
 		return it.Content
 	}
@@ -64,6 +68,9 @@ func summary(it Item) string {
 		Path       string `json:"path"`
 		Bytes      int64  `json:"bytes"`
 		Branch     string `json:"branch"`
+		Files      int64  `json:"files_changed"`
+		Added      int64  `json:"lines_added"`
+		Removed    int64  `json:"lines_removed"`
 		Commit     string `json:"commit"`
 		Pushed     string `json:"pushed"`
 		PushCmd    string `json:"push_cmd"`
@@ -130,6 +137,14 @@ func summary(it Item) string {
 		add("after_land_error", p.AfterLand)
 	}
 	add("reason", p.Reason)
+	// A time-capped or stalled run's task_failed names the branch its
+	// work sits on and that branch's size against the task's base
+	// (§5.6): what the foreman weighs a continue restart by.
+	if it.Kind == "task_failed" {
+		if withWork && p.Branch != "" {
+			parts = append(parts, "work="+StoppedWork(p.Branch, p.Files, p.Added, p.Removed))
+		}
+	}
 	if it.Kind == "task_note_set" {
 		if p.Note == "" {
 			p.Note = "(cleared)"

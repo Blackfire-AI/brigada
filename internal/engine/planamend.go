@@ -299,9 +299,12 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 		if err := validateTaskCaps(t.Caps); err != nil {
 			return AmendPlanResult{}, fmt.Errorf("added task %d %q: %w", i+1, t.Name, err)
 		}
-		if err := validateToolGrants(t.ToolGrants); err != nil {
+		grants, err := validateToolGrants(t.ToolGrants)
+		if err != nil {
 			return AmendPlanResult{}, fmt.Errorf("added task %d %q: %w", i+1, t.Name, err)
 		}
+		t.ToolGrants = grants
+		am.Add[i].ToolGrants = grants // stored, held and leased in the narrow form
 		if t.Spec == "" {
 			return AmendPlanResult{}, fmt.Errorf("added task %d: spec is required: the worker's task, verbatim (§1.4)", i+1)
 		}
@@ -508,9 +511,11 @@ func (e *Engine) amendPlanTx(tx *sql.Tx, project, plan int64, am PlanAmendment, 
 		default:
 			return AmendPlanResult{}, fmt.Errorf("respec %s: mode %q is not replace or append", nodes[i].label(), rs.Mode)
 		}
-		if err := validateToolGrants(rs.ToolGrants); err != nil {
+		grants, err := validateToolGrants(rs.ToolGrants)
+		if err != nil {
 			return AmendPlanResult{}, fmt.Errorf("respec %s: %w", nodes[i].label(), err)
 		}
+		rs.ToolGrants = grants
 		respecText[i] = rs.Spec
 		respecSkills[i] = rs.Skills
 		respecGrants[i] = rs.ToolGrants

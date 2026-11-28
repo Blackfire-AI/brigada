@@ -56,8 +56,8 @@ func runLogs(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		task    int64
 		noStart bool
 	)
-	fs.BoolVar(&check, "check", false, "print the job's check log instead of its transcript")
-	fs.BoolVar(&follow, "follow", false, "poll a running job's latest progress until it ends, then print the transcript tail")
+	fs.BoolVar(&check, "check", false, "print the job's check log instead of its transcript (refused with --follow)")
+	fs.BoolVar(&follow, "follow", false, "poll a running job's latest progress until it ends, then print the transcript tail (refused with --check)")
 	fs.IntVar(&tail, "tail", 0, "print only the last N lines")
 	fs.Int64Var(&task, "task", 0, "name a task's latest job instead of a job id")
 	fs.BoolVar(&noStart, "no-start", false, "do not start the engine on demand; fail when none is running")

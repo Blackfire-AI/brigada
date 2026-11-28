@@ -152,7 +152,71 @@ func withLogo(stdout io.Writer, line string) string {
 // path that submits a task without the foreman (§12.1), and `task
 // retire`, the user's settle of tasks that will not land (§6.2).
 func runTask(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	return dispatch(ctx, args, stdout, stderr, "task", "usage: brigada task submit --repo URL --spec FILE|- [--base REF] [--check CMD] [--title TITLE] [--harness HARNESS] | brigada task retire --reason TEXT <task-id>...", "submit or retire", taskCommands)
+	return dispatch(ctx, args, stdout, stderr, "task", "usage: brigada task submit --repo URL --spec FILE|- [--base REF] [--check CMD] [--title TITLE] [--harness HARNESS] | brigada task restart [--note TEXT] [--continue-stopped] <task-id> | brigada task retire --reason TEXT <task-id>...", "submit, restart or retire", taskCommands)
+}
+
+// taskRestarter is what task restart asks of the API client; tests stub it.
+type taskRestarter interface {
+	RestartTask(ctx context.Context, task int64, note string, stopRunning, continueStopped bool, idemKey string) (api.TaskRestartResult, error)
+}
+
+// runTaskRestart is `brigada task restart [--note TEXT]
+// [--continue-stopped] [--no-start] <task-id>` (§5.6): the foreman's
+// task_restart for the user — a fresh attempt for a task parked at
+// needs_foreman, the note handed to the worker verbatim. With
+// --continue-stopped the attempt starts from the pushed branch of the
+// time-capped or stalled run that parked the task instead of the base;
+// the engine refuses a task not parked by such a run. Task ids and flags
+// may interleave, as retire's do.
+func runTaskRestart(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	fs := newFlagSet("task restart",
+		"brigada task restart [--note TEXT] [--continue-stopped] [--no-start] <task-id>",
+		"Restart a parked task as a fresh attempt, optionally from its stopped run's pushed branch.")
+	stderr = commandStderr(stderr, fs.Name())
+	common := addCommon(fs)
+	note := fs.String("note", "", "the note for the fresh attempt, handed to the worker verbatim; empty = none")
+	cont := fs.Bool("continue-stopped", false, "continue from the time_capped or stalled run's pushed branch instead of the base; refused when the task was not parked by such a run")
+	noStart := fs.Bool("no-start", false, "do not start the engine on demand; fail when none is running")
+	var rest []string
+	remaining := args
+	for {
+		if code, stop := common.parse(stdout, stderr, remaining); stop {
+			return code
+		}
+		left := fs.Args()
+		if len(left) == 0 {
+			break
+		}
+		rest = append(rest, left[0])
+		remaining = left[1:]
+	}
+	if len(rest) != 1 {
+		return usagef(stderr, "usage: brigada task restart [--note TEXT] [--continue-stopped] <task-id>")
+	}
+	id, ok := parseID(stderr, "task id", rest[0])
+	if !ok {
+		return 2
+	}
+	rt, code := resolveRuntime(common, stderr)
+	if code != 0 {
+		return code
+	}
+	client, code := connect(ctx, rt, "client", *noStart, stderr)
+	if code != 0 {
+		return code
+	}
+	return printTaskRestart(ctx, client, id, *note, *cont, stdout, stderr)
+}
+
+// printTaskRestart restarts through the client and says what it did, in
+// the words the MCP task_restart tool uses.
+func printTaskRestart(ctx context.Context, client taskRestarter, id int64, note string, cont bool, stdout, stderr io.Writer) int {
+	res, err := client.RestartTask(ctx, id, note, false, cont, "")
+	if err != nil {
+		return fail(stderr, err)
+	}
+	fmt.Fprintf(stdout, "task %d restarted: work job %d %s\n", id, res.JobID, res.Answer)
+	return 0
 }
 
 // taskRetirer is what task retire asks of the API client; tests stub it.
@@ -160,7 +224,7 @@ type taskRetirer interface {
 	RetireTasks(ctx context.Context, tasks []int64, reason, idemKey string) (engine.RetireResult, error)
 }
 
-// runTaskRetire is `brigada task retire [--reason TEXT] [--no-start]
+// runTaskRetire is `brigada task retire --reason TEXT [--no-start]
 // <task-id>...` (§6.2): the user settles tasks that will not land —
 // their live jobs stop, their land holds drop, their branches stay
 // untouched, and they never land by any path — with the reason recorded
@@ -168,8 +232,8 @@ type taskRetirer interface {
 // ids and flags may interleave, as `land`'s do.
 func runTaskRetire(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := newFlagSet("task retire",
-		"brigada task retire [--reason TEXT] [--no-start] <task-id>...",
-		"Retire tasks that will not land; their branches stay and their plans close.")
+		"brigada task retire --reason TEXT [--no-start] <task-id>...",
+		"Retire tasks that will not land; their branches stay, and a plan closes once nothing else holds it open.")
 	stderr = commandStderr(stderr, fs.Name())
 	common := addCommon(fs)
 	reason := fs.String("reason", "", "why the tasks are retired, recorded verbatim with each")
@@ -260,7 +324,7 @@ func runTaskSubmit(ctx context.Context, args []string, stdout, stderr io.Writer)
 	fs.StringVar(&check, "check", "", "the check command the runner runs after the worker reports done; empty = none")
 	fs.StringVar(&title, "title", "", "the task's title; default is the spec's first line")
 	fs.StringVar(&harness, "harness", "", "the harness that must run the job (default: any)")
-	fs.Func("tool-grant", "a Claude Code permission pattern the worker is granted, from the allowlist (PATTERN, e.g. 'Bash(git merge:*)'); repeatable", func(v string) error {
+	fs.Func("tool-grant", "a Claude Code permission pattern the worker is granted, from the allowlist (PATTERN, e.g. 'Bash(git merge --no-commit:*)'); repeatable", func(v string) error {
 		if v == "" {
 			return errors.New("needs a pattern")
 		}

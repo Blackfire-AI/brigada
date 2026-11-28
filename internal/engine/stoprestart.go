@@ -60,7 +60,7 @@ func (e *Engine) restartStopRunningTx(tx *sql.Tx, project, taskID int64, note st
 	}
 	if live == nil {
 		// Nothing to stop: the plain restart, parked task and all.
-		return e.restartTaskTx(tx, project, taskID, note, now)
+		return e.restartTaskTx(tx, project, taskID, note, "", now)
 	}
 	if live.Kind != KindWork && live.Kind != KindFix && live.Kind != KindReview {
 		return RestartResult{}, fmt.Errorf("task %d's live job %d is a %s job; stop_running stops a work, fix or review job", taskID, live.ID, live.Kind)

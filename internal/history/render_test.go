@@ -130,6 +130,51 @@ func TestRenderLanding(t *testing.T) {
 	}
 }
 
+// TestRenderStoppedRunFailure: a time-capped or stalled run's task_failed
+// names the branch its work sits on and its size against the base
+// (§5.6); a failure without them renders as before.
+func TestRenderStoppedRunFailure(t *testing.T) {
+	for _, tc := range []struct{ payload, want string }{
+		{`{"status":"needs_foreman","reason":"time cap","branch":"brigada/task-7","files_changed":3,"lines_added":120,"lines_removed":8}`,
+			"status=needs_foreman reason=time cap work=branch brigada/task-7 (3 files changed, +120/-8 against the base)"},
+		{`{"status":"needs_foreman","reason":"stalled","branch":"brigada/task-7-salvage-9"}`,
+			"status=needs_foreman reason=stalled work=branch brigada/task-7-salvage-9"},
+		{`{"status":"needs_foreman","reason":"boom"}`, "status=needs_foreman reason=boom"},
+	} {
+		it := Item{Type: TypeEvent, Kind: "task_failed", Payload: []byte(tc.payload)}
+		if got := summary(it); got != tc.want {
+			t.Errorf("task_failed summary = %q, want %q", got, tc.want)
+		}
+	}
+}
+
+// TestStoppedWorkWording: the words and columns top and the history table
+// show name the stopped run's branch and size in the history's wording.
+func TestStoppedWorkWording(t *testing.T) {
+	it := Item{Type: TypeEvent, Kind: "task_failed", TaskID: 7,
+		Payload: []byte(`{"branch":"brigada/task-7","files_changed":3,"lines_added":120,"lines_removed":8}`)}
+	clock := func(s string) string { return s }
+	size := "branch brigada/task-7 (3 files changed, +120/-8 against the base)"
+	if got, _ := EventWords(it, clock); got != "#7 failed; the stopped run's work is on "+size {
+		t.Errorf("words = %q", got)
+	}
+	if got, _ := EventColumns(it, clock); got.What != "failed" || got.Subject != size {
+		t.Errorf("columns = %+v", got)
+	}
+}
+
+// TestReadableStoppedRunFailure: the readable line names the stopped run's
+// branch and size once, in its words.
+func TestReadableStoppedRunFailure(t *testing.T) {
+	it := Item{Type: TypeEvent, Kind: "task_failed", TaskID: 7,
+		Payload: []byte(`{"status":"needs_foreman","reason":"time cap","branch":"brigada/task-7","files_changed":3,"lines_added":120,"lines_removed":8}`)}
+	got := readableDetail(it, func(s string) string { return s })
+	want := "#7 failed; the stopped run's work is on branch brigada/task-7 (3 files changed, +120/-8 against the base): status=needs_foreman reason=time cap"
+	if got != want {
+		t.Errorf("readable = %q, want %q", got, want)
+	}
+}
+
 // TestRenderLeasedToolGrants: a lease event names the task's tool grants (§6.1).
 func TestRenderLeasedToolGrants(t *testing.T) {
 	it := Item{Type: TypeEvent, Kind: "job_leased", Payload: []byte(`{"lease":"abc","tool_grants":["Bash(git merge:*)","Bash(git add:*)"]}`)}

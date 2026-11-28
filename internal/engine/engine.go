@@ -286,6 +286,11 @@ type Config struct {
 	// repo at repoURL; a standalone review's author-family fallback.
 	// Nil keeps the git-backed default; tests inject it.
 	BranchTrailers func(ctx context.Context, repoURL, base, branch string) (string, error)
+	// RemoteBranchExists asks the repo at repoURL whether it holds the
+	// branch: how a continue restart confirms a stopped run's salvage
+	// branch before seeding from it (§5.6). Nil keeps the git ls-remote
+	// default; tests inject it.
+	RemoteBranchExists func(ctx context.Context, repoURL, branch string) (bool, error)
 	// IssueFetch reads one issue or pull request of the repository at
 	// repoURL (§12.2 issue_read) for a project whose tracker is github or
 	// unset; gitea reads through TrackerHTTP and none reads nothing. GET
@@ -568,6 +573,9 @@ func New(s *store.Store, cfg Config) *Engine {
 	def.DefaultReviewer = cfg.DefaultReviewer
 	if cfg.BranchTrailers != nil {
 		def.BranchTrailers = cfg.BranchTrailers
+	}
+	if cfg.RemoteBranchExists != nil {
+		def.RemoteBranchExists = cfg.RemoteBranchExists
 	}
 	if cfg.IssueFetch != nil {
 		def.IssueFetch = cfg.IssueFetch
