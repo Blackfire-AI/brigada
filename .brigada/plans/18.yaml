@@ -58,7 +58,7 @@ tasks:
     tier: heavy
     effort: medium
     wait_landed: true
-    state: pending
+    state: running
     branch: ""
     rounds: 0
   - id: 93
