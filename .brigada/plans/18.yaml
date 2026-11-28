@@ -33,8 +33,8 @@ tasks:
     tier: heavy
     effort: medium
     skills: ["bugfix"]
-    state: running
-    branch: ""
+    state: reviewing
+    branch: "brigada/task-90"
     rounds: 0
   - id: 91
     name: "grant-patterns"
