@@ -70,7 +70,7 @@ tasks:
     continue: "restart-continue"
     effort: medium
     skills: ["surface-parity", "cli-flag"]
-    state: ready
+    state: running
     branch: ""
     rounds: 0
   - id: 95
