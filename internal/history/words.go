@@ -2,6 +2,7 @@ package history
 
 import (
 	"encoding/json"
+	"fmt"
 	"strconv"
 )
 
@@ -18,6 +19,21 @@ type wordsPayload struct {
 	Account     string `json:"account"`
 	QuotaScope  string `json:"quota_scope"`
 	Until       string `json:"until"`
+	Files       int64  `json:"files_changed"`
+	Added       int64  `json:"lines_added"`
+	Removed     int64  `json:"lines_removed"`
+}
+
+// StoppedWork names a stopped run's pushed work on its task_failed event
+// (§5.6): the branch and, when known, its size against the base. It is
+// the one wording history, top and status share; the needs-you line adds
+// its restart hint after it.
+func StoppedWork(branch string, files, added, removed int64) string {
+	text := "branch " + branch
+	if files != 0 || added != 0 || removed != 0 {
+		text += fmt.Sprintf(" (%d files changed, +%d/-%d against the base)", files, added, removed)
+	}
+	return text
 }
 
 // EventWords is an event in plain words, or false when its kind is not on
@@ -60,6 +76,9 @@ func EventWords(it Item, clock func(stamp string) string) (string, bool) {
 	case "task_pushed":
 		return task + " pushed", true
 	case "task_failed":
+		if p.Branch != "" {
+			return task + " failed; the stopped run's work is on " + StoppedWork(p.Branch, p.Files, p.Added, p.Removed), true
+		}
 		return task + " failed", true
 	case "task_land_failed":
 		return task + " land failed", true
@@ -143,6 +162,10 @@ func EventColumns(it Item, clock func(stamp string) string) (EventCols, bool) {
 	case "task_pushed":
 		return task("pushed")
 	case "task_failed":
+		if p.Branch != "" {
+			return EventCols{Kind: "task", Number: it.TaskID, What: "failed",
+				Subject: StoppedWork(p.Branch, p.Files, p.Added, p.Removed)}, true
+		}
 		return task("failed")
 	case "task_land_failed":
 		return task("land failed")

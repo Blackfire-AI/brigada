@@ -338,7 +338,7 @@ var tools = []Tool{
 	},
 	{
 		Name:        "task_restart",
-		Description: "Restart a task parked at needs_foreman — failed, out of rounds, or one whose review keeps asking for changes — as a fresh attempt from the task's base on a new branch, with your note handed to the worker verbatim as feedback (what went wrong, what to avoid). Spends one of the task's restarts; the fresh attempt gets its rounds back. A task a plan rule holds at the plan gate is refused: the user releases it with brigada plan approve. With stop_running a task whose work, fix or review job is still live restarts too: a job still queued is replaced at once; a running job is not cancelled but told to stop, push its branch and complete stalled, and the fresh attempt queues when it does, its worktree started from that branch (a review pushes nothing, so it starts from the base). The task keeps running until then; the restart is spent at the call, and a second restart before it completes is refused. Use stop_running when the run is on a wrong path and its work so far is worth keeping; a plain restart once it parks when it is not; plan_amend's note when a hint for its next job is enough.",
+		Description: "Restart a task parked at needs_foreman — failed, out of rounds, or one whose review keeps asking for changes — as a fresh attempt from the task's base on a new branch, with your note handed to the worker verbatim as feedback (what went wrong, what to avoid). Spends one of the task's restarts; the fresh attempt gets its rounds back. A task a plan rule holds at the plan gate is refused: the user releases it with brigada plan approve. With stop_running a task whose work, fix or review job is still live restarts too: a job still queued is replaced at once; a running job is not cancelled but told to stop, push its branch and complete stalled, and the fresh attempt queues when it does, its worktree started from that branch (a review pushes nothing, so it starts from the base). The task keeps running until then; the restart is spent at the call, and a second restart before it completes is refused. Use stop_running when the run is on a wrong path and its work so far is worth keeping; a plain restart once it parks when it is not; plan_amend's note when a hint for its next job is enough. With continue_stopped a task parked by a time-capped or stalled run that pushed work restarts from that run's pushed branch instead of the base: the foreman's choice, weighed by the branch and size task_failed names; it is refused when the task was not parked by such a run, or the run pushed no work, and cannot be combined with stop_running.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -353,6 +353,10 @@ var tools = []Tool{
 				"stop_running": map[string]any{
 					"type":        "boolean",
 					"description": "restart a task whose job is still live: stop the running job keeping its branch, then the fresh attempt starts from it; default false, which takes a parked task only",
+				},
+				"continue_stopped": map[string]any{
+					"type":        "boolean",
+					"description": "continue from the time_capped or stalled run's pushed branch instead of the base; the foreman's choice; refused when the task was not parked by such a run; default false, which restarts from the base",
 				},
 			},
 			"required": []string{"task"},

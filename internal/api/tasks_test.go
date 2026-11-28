@@ -3,6 +3,7 @@ package api
 import (
 	"database/sql"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -427,5 +428,54 @@ func TestTaskRetireEndpoint(t *testing.T) {
 	foreign := seedParked(t, e, foreignPlan, "task_needs_help", `{"question":"mine?"}`)
 	if code, _, data = e.do(http.MethodPost, "/v1/tasks/retire", "foreman1", "", []byte(fmt.Sprintf(`{"tasks":[%d],"reason":"go"}`, foreign))); code != http.StatusForbidden {
 		t.Fatalf("foreman retires another project's task: %d %s, want 403", code, data)
+	}
+}
+
+// TestTaskRestartEndpointContinueStopped covers continue_stopped on
+// /v1/tasks/{id}/restart (§5.6): a task not parked by a time-capped or
+// stalled run is refused with the engine's reason and no job is queued,
+// and the option cannot be combined with stop_running.
+func TestTaskRestartEndpointContinueStopped(t *testing.T) {
+	e := newEnv(t)
+	task := seedParked(t, e, e.plan, "task_needs_help", `{"question":"x"}`)
+	path := fmt.Sprintf("/v1/tasks/%d/restart", task)
+
+	code, _, data := e.do(http.MethodPost, path, "foreman1", "", []byte(`{"continue_stopped":true}`))
+	if code != http.StatusBadRequest || !strings.Contains(decode[errBody](t, data).Error, "not by a time-capped or stalled run") {
+		t.Errorf("continue_stopped on a task a question parked: %d %s, want 400 naming the refusal", code, data)
+	}
+	code, _, data = e.do(http.MethodPost, path, "foreman1", "", []byte(`{"continue_stopped":true,"stop_running":true}`))
+	if code != http.StatusBadRequest || !strings.Contains(decode[errBody](t, data).Error, "cannot be combined") {
+		t.Errorf("continue_stopped with stop_running: %d %s, want 400 naming the conflict", code, data)
+	}
+	if n := e.str("SELECT COUNT(*) FROM jobs WHERE task_id = ?", task); n != "0" {
+		t.Errorf("jobs after the refusals = %s, want none", n)
+	}
+}
+
+// roundTripFunc is an http.RoundTripper made of a function.
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// TestClientRestartTaskContinueStopped: Client.RestartTask sends the
+// option as continue_stopped on the restart route, and omits it when off.
+func TestClientRestartTaskContinueStopped(t *testing.T) {
+	var path, body string
+	c := NewClientWithHTTPClient(&http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		b, _ := io.ReadAll(r.Body)
+		path, body = r.URL.Path, string(b)
+		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"application/json"}},
+			Body: io.NopCloser(strings.NewReader(`{"answer":"created","job_id":5,"run":2}`))}, nil
+	})}, "tok")
+	res, err := c.RestartTask(t.Context(), 7, "keep it", false, true, "key-1")
+	if err != nil || res.JobID != 5 {
+		t.Fatalf("RestartTask = %+v, %v", res, err)
+	}
+	if path != "/v1/tasks/7/restart" || !strings.Contains(body, `"continue_stopped":true`) || strings.Contains(body, "stop_running") {
+		t.Errorf("request %s %s, want continue_stopped true on the restart route", path, body)
+	}
+	if _, err := c.RestartTask(t.Context(), 7, "", false, false, "key-2"); err != nil || strings.Contains(body, "continue_stopped") {
+		t.Errorf("plain restart body %s (err %v), want no continue_stopped", body, err)
 	}
 }

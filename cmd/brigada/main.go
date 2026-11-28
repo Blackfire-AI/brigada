@@ -65,6 +65,10 @@ Commands:
 	                needs you (--line: one short line).
 	task submit     Submit one task directly, without the foreman (a
 	                debugging path).
+	task restart <task-id> [--note TEXT] [--continue-stopped]
+	                Restart a parked task as a fresh attempt; with
+	                --continue-stopped from its time-capped or stalled
+	                run's pushed branch instead of the base.
 	task retire <task-id>... --reason TEXT
 	                Retire tasks that will not land: their jobs stop,
 	                their branches stay, a plan closes once nothing

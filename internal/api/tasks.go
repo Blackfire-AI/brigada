@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+
+	"github.com/Blackfire-AI/brigada/internal/engine"
 )
 
 // handleTaskAnswer is the foreman's answer behind the API (§3, §12.1,
@@ -49,7 +51,10 @@ func (s *Server) handleTaskAnswer(w http.ResponseWriter, r *http.Request, id ide
 // needs_foreman, any parker, the foreman's note as the worker's
 // feedback. With stop_running a task whose job is live is restarted too:
 // a queued job is replaced now, a running one is asked to stop and push,
-// answering pending. Scoped and idempotent like the answer.
+// answering pending. With continue_stopped a task a time-capped or
+// stalled run parked restarts from that run's pushed branch instead of
+// the base; any other task is refused. Scoped and idempotent like the
+// answer.
 func (s *Server) handleTaskRestart(w http.ResponseWriter, r *http.Request, id identity) {
 	if !requireMethod(w, r, http.MethodPost) {
 		return
@@ -66,11 +71,20 @@ func (s *Server) handleTaskRestart(w http.ResponseWriter, r *http.Request, id id
 	if !ok {
 		return
 	}
-	restart := s.eng.RestartTask
-	if req.StopRunning {
-		restart = s.eng.RestartTaskStopRunning
+	if req.Continue && req.StopRunning {
+		writeError(w, http.StatusBadRequest, codeBadRequest, "continue_stopped and stop_running cannot be combined: continue_stopped takes a task a time-capped or stalled run already parked, stop_running one whose job is still live")
+		return
 	}
-	res, err := restart(r.Context(), project, taskID, req.Note)
+	var res engine.RestartResult
+	var err error
+	switch {
+	case req.Continue:
+		res, err = s.eng.RestartTaskWith(r.Context(), project, taskID, req.Note, engine.RestartOptions{Continue: true})
+	case req.StopRunning:
+		res, err = s.eng.RestartTaskStopRunning(r.Context(), project, taskID, req.Note)
+	default:
+		res, err = s.eng.RestartTask(r.Context(), project, taskID, req.Note)
+	}
 	if err != nil {
 		writeError(w, http.StatusBadRequest, codeBadRequest, err.Error())
 		return
@@ -275,10 +289,14 @@ type taskAnswerResponse struct {
 // taskRestartRequest is the task_restart body: the foreman's note for
 // the worker's fresh attempt, verbatim, optional, and stop_running (§5.6),
 // default false: true stops a task's live job keeping its branch and
-// seeds the fresh attempt from it.
+// seeds the fresh attempt from it; and continue_stopped (§5.6), default
+// false: true starts the fresh attempt from the pushed branch of the
+// time-capped or stalled run that parked the task, instead of the base,
+// and is refused for a task not parked by such a run.
 type taskRestartRequest struct {
 	Note        string `json:"note"`
 	StopRunning bool   `json:"stop_running,omitempty"`
+	Continue    bool   `json:"continue_stopped,omitempty"`
 }
 
 // taskRestartResponse names what the restart did: the fresh work job,
