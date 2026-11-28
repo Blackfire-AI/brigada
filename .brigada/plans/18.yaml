@@ -3,11 +3,11 @@
 # here are overwritten. It holds the graph, the task states, the branches
 # and the open questions — never transcripts.
 plan: 18
-title: "Extra repositories readable by every worker: claude --add-dir, opencode permission, absolute paths in the prompt"
+title: "Fix #277 tool-grant guard, then #51 part 2 restart from a capped run"
 repo: "github.com/Blackfire-AI/brigada"
-state: done
-created: 2026-10-20T17:53:42.366042Z
-updated: 2026-10-20T18:01:17.280819Z
+state: reviewing
+created: 2026-11-28T06:04:33.069542811Z
+updated: 2026-11-28T06:04:33.069542811Z
 # §6.1: the graph. A task waits (pending) until every task named in deps is
 # done; its work starts from the branch of base, one of deps — the continued
 # dep when base is empty and continue is set, else the default branch; merge a
@@ -19,15 +19,58 @@ updated: 2026-10-20T18:01:17.280819Z
 # describe the model needed and how hard it should think (§6.1);
 # review_tier and review_effort do the same for its reviews (§7, §8); caps
 # override the task's fix_rounds, review_rounds and restart budgets (§6.1);
-# skills name the project's skills the task carries, in order (§5.10).
+# skills name the project's skills the task carries, in order (§5.10);
+# tool_grants name the permission patterns its worker is granted (§6.1);
+# wait_landed holds a dependent pending until its implement deps have
+# actually landed on the target, not merely been done (§6.1).
 tasks:
-  - id: 57
-    name: "extras-readable"
-    title: "Workers and reviewers can read the job's extra repository checkouts"
+  - id: 90
+    name: "grant-guard"
+    title: "Runner guard: a job that left its task branch or committed under a grant fails as a new non-agent error kind (Refs #277)"
     class: "implement"
     deps: []
     base: ""
+    tier: heavy
     effort: medium
-    state: done
-    branch: "brigada/task-57"
+    skills: ["bugfix"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 91
+    name: "grant-patterns"
+    title: "Narrow the tool-grant patterns, keep old ones loading, docs and CHANGELOG (Closes #277)"
+    class: "implement"
+    deps: ["grant-guard"]
+    base: "grant-guard"
+    continue: "grant-guard"
+    tier: heavy
+    effort: medium
+    skills: ["bugfix"]
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 92
+    name: "restart-continue"
+    title: "task_restart may continue from a time_capped or stalled run's pushed branch; task_failed names it and its size (Refs #51)"
+    class: "implement"
+    deps: ["grant-patterns"]
+    base: "grant-patterns"
+    tier: heavy
+    effort: medium
+    skills: ["bugfix"]
+    wait_landed: true
+    state: pending
+    branch: ""
+    rounds: 0
+  - id: 93
+    name: "restart-surfaces"
+    title: "The continue-from-stopped-run option on MCP, HTTP, client and CLI; CHANGELOG (Closes #51)"
+    class: "implement"
+    deps: ["restart-continue"]
+    base: "restart-continue"
+    continue: "restart-continue"
+    effort: medium
+    skills: ["surface-parity", "cli-flag"]
+    state: pending
+    branch: ""
     rounds: 0
