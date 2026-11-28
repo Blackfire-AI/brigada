@@ -100,23 +100,25 @@ func (e *Engine) agentOutcomeTx(tx *sql.Tx, job *jobRow, c Completion, now time.
 		return e.markBrokenTx(tx, job, job.AgentID, brokenAuth, now)
 	case string(adapter.ErrModel):
 		return e.markBrokenTx(tx, job, job.AgentID, modelReason(c.Error), now)
-	case ErrorKindSetup, ErrorKindInfra:
+	case ErrorKindSetup, ErrorKindInfra, ErrorKindPublish:
 		// The environment or the runner's own plumbing failed, not the
-		// agent (§5.7, §5.1): the failure is neither quota nor health,
+		// agent (§5.7, §5.1), or the runner's push of a sound run's
+		// branch did (§5.4): the failure is neither quota nor health,
 		// and never counts toward the streak.
 		return nil
 	}
 	// The agent's last N completions all failed, the one just written
 	// included. The jobs table is the count: terminal done, failed and
 	// stalled jobs on the agent, newest first — less the failures that
-	// are not the agent's health: setup and infra (the environment) and
-	// a limit or a spent balance (quota), each of which sits between
+	// are not the agent's health: setup and infra (the environment), a
+	// publish failure (the runner's push of a sound run's branch, §5.4)
+	// and a limit or a spent balance (quota), each of which sits between
 	// real failures without padding or masking them.
 	n := e.cfg.FailureStreak
 	rows, err := tx.Query(`SELECT status FROM jobs
 		WHERE agent_id = ? AND status IN ('done', 'failed', 'stalled')
-		AND NOT (status = 'failed' AND (result LIKE '%"error":"setup failed%' OR error_kind IN (?, ?, ?)))
-		ORDER BY updated_at DESC, id DESC LIMIT ?`, job.AgentID, ErrorKindInfra, string(adapter.ErrLimit), string(adapter.ErrBalance), n)
+		AND NOT (status = 'failed' AND (result LIKE '%"error":"setup failed%' OR error_kind IN (?, ?, ?, ?)))
+		ORDER BY updated_at DESC, id DESC LIMIT ?`, job.AgentID, ErrorKindInfra, ErrorKindPublish, string(adapter.ErrLimit), string(adapter.ErrBalance), n)
 	if err != nil {
 		return fmt.Errorf("count the failures of agent %d: %w", job.AgentID, err)
 	}

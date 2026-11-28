@@ -98,6 +98,12 @@ type Job struct {
 	// sets no scope of its own. The adapter passes it to its CLI as that
 	// CLI's permission flag or argument; empty adds nothing.
 	Permission string
+	// ToolGrants are the task's per-task tool grants (§6.1), the Claude
+	// Code permission patterns its worker is granted; empty when the task
+	// grants none. A claude adapter whose permission is a pattern list
+	// appends them to its allowlist; every other scope and harness leaves
+	// them inert.
+	ToolGrants []string
 	// StatusLine is a shell command whose one line of output an
 	// interactive session shows in its status bar, re-run every few
 	// seconds (§10): the attach sets it to `brigada status --line`, so

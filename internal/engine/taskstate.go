@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Blackfire-AI/brigada/internal/adapter"
@@ -72,6 +73,15 @@ const minSubstantiveFindings = 80
 // on the infra backoff (§5.1), and neither the agent nor a round is
 // charged.
 const ErrorKindInfra = "infra"
+
+// ErrorKindPublish sorts a completion's Error as a failure in the
+// runner's publish step after the CLI finished (§5.4): the worker's
+// branch could not be pushed to the remote — the lease refused it
+// because the branch moved since the job started, or the push failed
+// for another reason. The worker's own run was sound, so the failure
+// is no verdict on the agent. The engine retries a work or fix job
+// once (retryPublishFailureTx), then parks it for the foreman.
+const ErrorKindPublish = "publish"
 
 // taskRunningTx moves a task off ready when one of its jobs is leased
 // (§6.1): running while the work happens. A fix round's lease also takes
@@ -165,6 +175,10 @@ func (e *Engine) workCompletedTx(tx *sql.Tx, job *jobRow, c Completion, class st
 			if retried, err := e.retryInfraFailureTx(tx, job, c, now); err != nil || retried {
 				return err
 			}
+		case c.ErrorKind == ErrorKindPublish:
+			if retried, err := e.retryPublishFailureTx(tx, job, c, now); err != nil || retried {
+				return err
+			}
 		case transientCLIError(c.ErrorKind):
 			if retried, err := e.autoRestartTaskTx(tx, job, c.ErrorKind, c.Error, now); err != nil || retried {
 				return err
@@ -238,6 +252,11 @@ func (e *Engine) workCompletedTx(tx *sql.Tx, job *jobRow, c Completion, class st
 			// The infra retries are spent (§5.1): the outage, not the
 			// work, is what the foreman and the needs-you queue read.
 			reason = infraOutageText(c.Error)
+		}
+		if c.ErrorKind == ErrorKindPublish {
+			// The one publish retry is spent (§5.4): the push, not the
+			// work, failed, and the work is still the runner's alone.
+			reason = publishFailureText(job, c.Error)
 		}
 		if c.Error == "" && c.Outcome == "" && (wr.Status == workerFailed || !haveResult) {
 			why := workerFailed
@@ -408,6 +427,7 @@ func infraStreakTx(tx *sql.Tx, key string) (n int, began string, err error) {
 		if err := rows.Scan(&status, &kind, &created); err != nil {
 			return 0, "", fmt.Errorf("read the jobs of key %s: %w", key, err)
 		}
+		// A publish failure is not an infra failure: it ends the streak.
 		if status != statusFailed || kind != ErrorKindInfra {
 			break
 		}
@@ -526,6 +546,81 @@ func (e *Engine) retryInfraFailureTx(tx *sql.Tx, job *jobRow, c Completion, now 
 		return false, fmt.Errorf("queue the infra retry of task %d: submit %s answered %s", job.TaskID, job.Key, sr.Answer)
 	}
 	_, err = appendEventTx(tx, evTaskInfraRetry, job.ProjectID, job.TaskID, sr.JobID,
+		eventPayload{Run: int64(sr.Run), Reason: boundNote(c.Error)}, now)
+	return err == nil, err
+}
+
+// publishFailureText words the park of a publish failure whose one
+// retry is spent (§5.4): a lease refusal or another push failure, and
+// that the worker's work is on the job's branch in the runner's local
+// worktree, not on the remote.
+func publishFailureText(job *jobRow, text string) string {
+	what := "the push failed"
+	if strings.Contains(text, "lease refused") {
+		what = "the lease refused the push: the branch moved on the remote since the job started"
+	}
+	branch := "the job's branch"
+	if job.Branch != "" {
+		branch = "the job's branch " + job.Branch
+	}
+	return fmt.Sprintf("publish failure, retried once: %s; the worker's work is on %s locally, not on the remote: %s",
+		what, branch, boundNote(text))
+}
+
+// retryPublishFailureTx answers a publish failure of a work or fix job
+// (§5.4): the worker's run was sound but the runner could not push its
+// branch, so the job is queued again once on the same key — the same
+// question, the same placement and labels, leasable at once with no
+// infra backoff — and a fix round's retry spends no round. A publish
+// failure whose key's newest terminal job before it was itself a
+// publish failure is not retried: it falls through to the foreman's
+// park, with no restart and no tier escalation.
+func (e *Engine) retryPublishFailureTx(tx *sql.Tx, job *jobRow, c Completion, now time.Time) (bool, error) {
+	switch job.Kind {
+	case KindWork, KindFix:
+	default:
+		return false, nil
+	}
+	var status, kind string
+	err := tx.QueryRow(`SELECT status, COALESCE(error_kind, '') FROM jobs
+		WHERE key = ? AND id < ? AND status IN (?, ?, ?, ?)
+		ORDER BY id DESC LIMIT 1`, job.Key, job.ID,
+		statusDone, statusFailed, statusCancelled, statusStalled).Scan(&status, &kind)
+	switch {
+	case err == sql.ErrNoRows:
+	case err != nil:
+		return false, fmt.Errorf("read the jobs of key %s: %w", job.Key, err)
+	case status == statusFailed && kind == ErrorKindPublish:
+		return false, nil // the one retry is spent
+	}
+	p := SubmitParams{
+		Key:           job.Key,
+		ProjectID:     job.ProjectID,
+		TaskID:        job.TaskID,
+		Kind:          job.Kind,
+		Mode:          job.Mode,
+		Prompt:        job.Prompt,
+		PromptMeta:    job.PromptMeta,
+		Harness:       job.Harness,
+		Labels:        jobLabels(job),
+		ExcludeFamily: job.ExcludeFamily,
+		ExcludeAgents: job.ExcludeAgents,
+		RequireAgent:  job.RequireAgent,
+		NotBefore:     now,
+	}
+	if job.Kind == KindFix {
+		// The round's work was done but never published, so the retry
+		// spends none of the task's rounds (§3).
+		p.Round = roundNone
+	}
+	sr, err := e.submitTx(tx, p, now)
+	if err != nil {
+		return false, err
+	}
+	if sr.Answer != AnsCreated {
+		return false, fmt.Errorf("queue the publish retry of task %d: submit %s answered %s", job.TaskID, job.Key, sr.Answer)
+	}
+	_, err = appendEventTx(tx, evTaskPublishRetry, job.ProjectID, job.TaskID, sr.JobID,
 		eventPayload{Run: int64(sr.Run), Reason: boundNote(c.Error)}, now)
 	return err == nil, err
 }

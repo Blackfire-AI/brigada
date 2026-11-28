@@ -35,6 +35,8 @@ Commands:
 	                one, the repositories under it: probe, plan, confirm.
 	                (init --take-default <role|skill> resets one default
 	                role file or skill to the new default.)
+	doctor          Check this repository's pre-flight facts: git identity,
+	                remote, push probe, harness sign-in (experimental).
 	remove          Remove brigada from this repository; keep its history.
 	instructions diff <role|skill>
 	                Compare a role file or skill with the default it was
@@ -158,6 +160,7 @@ type command struct {
 
 var commands = map[string]command{
 	"init":         {name: "init", run: runInit},
+	"doctor":       {name: "doctor", run: runDoctor},
 	"remove":       {name: "remove", run: runRemove},
 	"instructions": {name: "instructions", run: runInstructions, subcommands: instructionsCommands},
 	"attach":       {name: "attach", run: runAttach},

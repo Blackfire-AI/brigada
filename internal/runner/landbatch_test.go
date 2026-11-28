@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -114,7 +115,7 @@ func TestLandBatchMiddleConflictParksAlone(t *testing.T) {
 	members := []engine.LandMember{a, b, c, d}
 	r, dir := batchRun(t, remote, engine.GateAuto, "", members...)
 
-	settled, errMsg, _ := r.landBatchLoop(context.Background(), dir)
+	settled, errMsg, _ := batchLoop(r, dir)
 	if errMsg != "" {
 		t.Fatalf("the batch stopped: %s", errMsg)
 	}
@@ -155,7 +156,7 @@ func TestLandBatchCheckFailureParksTheMemberJustAdded(t *testing.T) {
 	members := []engine.LandMember{a, b, c, d}
 	r, dir := batchRun(t, remote, engine.GateAuto, `test ! -e bad.txt || { echo "bad.txt is here"; exit 1; }`, members...)
 
-	settled, errMsg, _ := r.landBatchLoop(context.Background(), dir)
+	settled, errMsg, _ := batchLoop(r, dir)
 	if errMsg != "" {
 		t.Fatalf("the batch stopped: %s", errMsg)
 	}
@@ -190,7 +191,7 @@ func TestLandBatchAskWaitsInLandingOrder(t *testing.T) {
 			members := []engine.LandMember{a, b, c}
 			r, dir := batchRun(t, remote, gate, "", members...)
 
-			settled, errMsg, _ := r.landBatchLoop(context.Background(), dir)
+			settled, errMsg, _ := batchLoop(r, dir)
 			if errMsg != "" {
 				t.Fatalf("the batch stopped: %s", errMsg)
 			}
@@ -238,7 +239,7 @@ func TestLandBatchEnvironmentFailureStopsTheBatch(t *testing.T) {
 	r, dir := batchRun(t, remote, engine.GateAuto, "", members...)
 	git(t, dir, "config", "remote.origin.pushurl", filepath.Join(t.TempDir(), "gone.git"))
 
-	settled, errMsg, _ := r.landBatchLoop(context.Background(), dir)
+	settled, errMsg, _ := batchLoop(r, dir)
 	if errMsg == "" {
 		t.Fatal("the batch did not stop on the unreachable push")
 	}
@@ -262,7 +263,7 @@ func TestLandBatchLostRunnerResumes(t *testing.T) {
 	// Lost before publication: the push never happened.
 	r, dir := batchRun(t, remote, engine.GateAuto, "", members...)
 	git(t, dir, "config", "remote.origin.pushurl", filepath.Join(t.TempDir(), "gone.git"))
-	if _, errMsg, _ := r.landBatchLoop(context.Background(), dir); errMsg == "" {
+	if _, errMsg, _ := batchLoop(r, dir); errMsg == "" {
 		t.Fatal("the first lease published")
 	}
 	if got := commitCount(t, remote, "main"); got != "1" {
@@ -271,7 +272,7 @@ func TestLandBatchLostRunnerResumes(t *testing.T) {
 
 	// The next lease lands both once.
 	r, dir = batchRun(t, remote, engine.GateAuto, "", members...)
-	first, errMsg, _ := r.landBatchLoop(context.Background(), dir)
+	first, errMsg, _ := batchLoop(r, dir)
 	if errMsg != "" {
 		t.Fatalf("the second lease stopped: %s", errMsg)
 	}
@@ -280,7 +281,7 @@ func TestLandBatchLostRunnerResumes(t *testing.T) {
 
 	// Lost after publication: a third lease finds both on the target.
 	r, dir = batchRun(t, remote, engine.GateAuto, "", members...)
-	again, errMsg, _ := r.landBatchLoop(context.Background(), dir)
+	again, errMsg, _ := batchLoop(r, dir)
 	if errMsg != "" {
 		t.Fatalf("the recovering lease stopped: %s", errMsg)
 	}
@@ -309,7 +310,7 @@ func TestLandBatchRejectedPushRetriesTheRemainder(t *testing.T) {
 	members := []engine.LandMember{a, b}
 	r, dir := batchRun(t, remote, engine.GateAuto, "true", members...)
 
-	settled, errMsg, _ := r.landBatchLoop(context.Background(), dir)
+	settled, errMsg, _ := batchLoop(r, dir)
 	if errMsg != "" {
 		t.Fatalf("the batch stopped: %s", errMsg)
 	}
@@ -328,7 +329,7 @@ func TestLandBatchReconciledMembersSurviveAnError(t *testing.T) {
 	a := batchMember(t, remote, 1, "main", nil, map[string]string{"a.txt": "a\n"})
 	b := batchMember(t, remote, 2, "main", nil, map[string]string{"b.txt": "b\n"})
 	r, dir := batchRun(t, remote, engine.GateAuto, "", a)
-	first, errMsg, _ := r.landBatchLoop(context.Background(), dir)
+	first, errMsg, _ := batchLoop(r, dir)
 	if errMsg != "" {
 		t.Fatalf("the first lease stopped: %s", errMsg)
 	}
@@ -336,7 +337,7 @@ func TestLandBatchReconciledMembersSurviveAnError(t *testing.T) {
 	members := []engine.LandMember{a, b}
 	r, dir = batchRun(t, remote, engine.GateAuto, "", members...)
 	git(t, dir, "config", "remote.origin.pushurl", filepath.Join(t.TempDir(), "gone.git"))
-	settled, errMsg, _ := r.landBatchLoop(context.Background(), dir)
+	settled, errMsg, _ := batchLoop(r, dir)
 	if errMsg == "" {
 		t.Fatal("the batch did not stop on the unreachable push")
 	}
@@ -363,7 +364,7 @@ func TestLandBatchLostPushResponseIsReconciled(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	settled, errMsg, _ := r.landBatchLoop(context.Background(), dir)
+	settled, errMsg, _ := batchLoop(r, dir)
 	if errMsg != "" {
 		t.Fatalf("the batch stopped though its push landed: %s", errMsg)
 	}
@@ -390,7 +391,7 @@ func TestLandBatchPushBoundParksTheSurvivors(t *testing.T) {
 	members := []engine.LandMember{a, b, c}
 	r, dir := batchRun(t, remote, engine.GateAuto, "test ! -e bad.txt", members...)
 
-	settled, errMsg, _ := r.landBatchLoop(context.Background(), dir)
+	settled, errMsg, _ := batchLoop(r, dir)
 	if errMsg != "" {
 		t.Fatalf("the batch stopped: %s", errMsg)
 	}
@@ -425,7 +426,7 @@ func TestLandBatchPushApprovalReleasesAPrefix(t *testing.T) {
 			c := batchMember(t, remote, 3, "main", nil, map[string]string{"c.txt": "c\n"})
 			members := []engine.LandMember{a, b, c}
 			r, dir := batchRun(t, remote, gate, "", members...)
-			settled, errMsg, _ := r.landBatchLoop(context.Background(), dir)
+			settled, errMsg, _ := batchLoop(r, dir)
 			if errMsg != "" {
 				t.Fatalf("the batch stopped: %s", errMsg)
 			}
@@ -465,4 +466,223 @@ func readFile(t *testing.T, path string) string {
 		t.Fatal(err)
 	}
 	return string(b)
+}
+
+// batchLoop runs the batch's attempts with nothing settled before them.
+func batchLoop(r *jobRun, dir string) (map[int64]landMemberJSON, string, string) {
+	settled := map[int64]landMemberJSON{}
+	errMsg, kind := r.landBatchLoop(context.Background(), dir, settled)
+	return settled, errMsg, kind
+}
+
+// capturingClient answers every call ok and keeps each request body.
+func capturingClient(bodies *[]string) *api.Client {
+	return api.NewClientWithHTTPClient(&http.Client{Transport: usageTransport(func(req *http.Request) (*http.Response, error) {
+		if req.Body != nil {
+			b, _ := io.ReadAll(req.Body)
+			*bodies = append(*bodies, string(b))
+		}
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"answer":"ok"}`)), Header: make(http.Header)}, nil
+	})}, "test-token")
+}
+
+// TestLandBatchMixedGateHoldsOnlyTheUnreleased (§7.1 "Deciding a batch
+// hold"): in a batch whose members' gates are partly released, the
+// command runs once and its exit 1 holds only the member subject to it,
+// with the command's line; the released member lands in this batch, and
+// a released dependent of the newly held member drops to wait. A batch
+// whose every gate is released runs no command; one with none released
+// completes the job with the command's own answer.
+func TestLandBatchMixedGateHoldsOnlyTheUnreleased(t *testing.T) {
+	markers := markerDir(t)
+	remote := landReadyRemote(t, "echo x >> '"+markers+"/ran'\necho 'CI is red'\nexit 1\n")
+	a := batchMember(t, remote, 1, "main", nil, map[string]string{"a.txt": "a\n"})
+	b := batchMember(t, remote, 2, "main", nil, map[string]string{"b.txt": "b\n"})
+	c := batchMember(t, remote, 3, b.Branch, []int64{2}, map[string]string{"c.txt": "c\n"})
+	a.SkipLandReady, c.SkipLandReady = true, true
+	members := []engine.LandMember{a, b, c}
+	r, dir := batchRun(t, remote, engine.GateAuto, "", members...)
+	r.grant.LandReady = ".brigada/land-ready.sh"
+	r.cfg.CheckTimeout = 30 * time.Second
+
+	settled := map[int64]landMemberJSON{}
+	if !r.runLandBatchReady(context.Background(), dir, settled) {
+		t.Fatal("the mixed batch's gate completed the job; want the released members to go on")
+	}
+	if errMsg, _ := r.landBatchLoop(context.Background(), dir, settled); errMsg != "" {
+		t.Fatalf("the batch stopped: %s", errMsg)
+	}
+	wantOutcomes(t, settled, members, "1:landed", "2:held", "3:dropped")
+	if got := settled[2].Line; got != "CI is red" {
+		t.Errorf("the held member's line = %q, want the command's first line", got)
+	}
+	if settled[3].BlockedBy != 2 {
+		t.Errorf("the released dependent = %+v, want dropped behind the held member", settled[3])
+	}
+	if got := remoteBranchCommit(t, remote, "main"); got != settled[1].Record.Commit {
+		t.Errorf("main = %s, want only the released member's commit %s", got, settled[1].Record.Commit)
+	}
+	if got := strings.Count(readFile(t, filepath.Join(markers, "ran")), "x"); got != 1 {
+		t.Errorf("the command ran %d times, want once for the batch", got)
+	}
+
+	// Every gate released: nothing runs, nothing is settled by the gate.
+	if err := os.Remove(filepath.Join(markers, "ran")); err != nil {
+		t.Fatal(err)
+	}
+	b.SkipLandReady = true
+	r2, dir2 := batchRun(t, remote, engine.GateAuto, "", a, b, c)
+	r2.grant.LandReady, r2.cfg.CheckTimeout = ".brigada/land-ready.sh", 30*time.Second
+	none := map[int64]landMemberJSON{}
+	if !r2.runLandBatchReady(context.Background(), dir2, none) || len(none) != 0 {
+		t.Errorf("an all-released batch's gate = %v, want nothing settled", none)
+	}
+	if _, err := os.Stat(filepath.Join(markers, "ran")); err == nil {
+		t.Error("the command ran for a batch whose every gate is released")
+	}
+
+	// No gate released: the command's hold is the batch's, the job done.
+	a.SkipLandReady, b.SkipLandReady, c.SkipLandReady = false, false, false
+	r3, dir3 := batchRun(t, remote, engine.GateAuto, "", a, b, c)
+	var bodies []string
+	r3.client = capturingClient(&bodies)
+	r3.grant.LandReady, r3.cfg.CheckTimeout = ".brigada/land-ready.sh", 30*time.Second
+	if r3.runLandBatchReady(context.Background(), dir3, map[int64]landMemberJSON{}) {
+		t.Fatal("an unreleased batch's gate let it go on; want the batch held")
+	}
+	if !slices.ContainsFunc(bodies, func(s string) bool { return strings.Contains(s, `"outcome":"held"`) }) {
+		t.Errorf("completions %q, want the batch's held outcome", bodies)
+	}
+}
+
+// TestLandRecheckLandsNothing (§7.1 "Deciding a batch hold"): the
+// engine's re-check of a squash-phase hold runs the command and, on its
+// yes, completes with the ready outcome — nothing squashed or pushed —
+// for the engine to release the member into the next batch.
+func TestLandRecheckLandsNothing(t *testing.T) {
+	remote := landReadyRemote(t, "exit 0\n")
+	a := batchMember(t, remote, 1, "main", nil, map[string]string{"a.txt": "a\n"})
+	r, _ := batchRun(t, remote, engine.GateAuto, "", a)
+	var bodies []string
+	r.client = capturingClient(&bodies)
+	r.grant.LandBatch, r.grant.LandMembers = false, nil
+	r.grant.Branch, r.grant.BaseRef, r.grant.ApprovedHead, r.grant.LandMessage = a.Branch, a.BaseRef, a.ApprovedHead, a.Message
+	r.grant.LandReady, r.grant.LandRecheck = ".brigada/land-ready.sh", true
+	r.cfg.CheckTimeout = 30 * time.Second
+	before := remoteBranchCommit(t, remote, "main")
+	r.runLandSquashPhase(context.Background())
+	if got := remoteBranchCommit(t, remote, "main"); got != before {
+		t.Errorf("main moved to %s on a re-check, want %s: a re-check lands nothing", got, before)
+	}
+	if !slices.ContainsFunc(bodies, func(s string) bool { return strings.Contains(s, `"outcome":"ready"`) }) {
+		t.Errorf("completions %q, want the ready outcome", bodies)
+	}
+}
+
+// TestLandBatchReportsProgress (§7.1): the run reports each park and skip
+// as it is reached and, before the push, every survivor's input, check
+// and publication intent with its place in the stack.
+func TestLandBatchReportsProgress(t *testing.T) {
+	remote := newRemote(t)
+	a := batchMember(t, remote, 1, "main", nil, map[string]string{"a.txt": "a\n"})
+	b := batchMember(t, remote, 2, "main", nil, map[string]string{"README.md": "# b's seed\n"})
+	c := batchMember(t, remote, 3, b.Branch, []int64{2}, map[string]string{"c.txt": "c\n"})
+	d := batchMember(t, remote, 4, "main", nil, map[string]string{"d.txt": "d\n"})
+	pushToMain(t, remote, "README.md", "# another engineer's seed\n")
+	members := []engine.LandMember{a, b, c, d}
+	r, dir := batchRun(t, remote, engine.GateAuto, "", members...)
+	var bodies []string
+	r.client = capturingClient(&bodies)
+	if _, errMsg, _ := batchLoop(r, dir); errMsg != "" {
+		t.Fatalf("the batch stopped: %s", errMsg)
+	}
+	var progress []string
+	for _, b := range bodies {
+		if strings.Contains(b, `"members":[`) && !strings.Contains(b, `"result"`) {
+			progress = append(progress, b)
+		}
+	}
+	joined := strings.Join(progress, "\n")
+	for _, want := range []string{`"task_id":2,"outcome":"parked"`, `"task_id":3,"outcome":"dropped","blocked_by":2`,
+		`"intent":"target","position":1`, `"intent":"target","position":2`} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("progress reports %s lack %s", joined, want)
+		}
+	}
+}
+
+// TestLandBatchRecoversByRecordedInput (§7.1 "A lost runner resumes by
+// remote evidence"): a lease lost after its push published leaves the
+// next lease to find each member on the remote by the input the earlier
+// attempt recorded — even when the member's approved head has moved since
+// — and to record it with its own commit, no new squash.
+func TestLandBatchRecoversByRecordedInput(t *testing.T) {
+	remote := newRemote(t)
+	a := batchMember(t, remote, 1, "main", nil, map[string]string{"a.txt": "a\n"})
+	b := batchMember(t, remote, 2, "main", nil, map[string]string{"b.txt": "b\n"})
+	members := []engine.LandMember{a, b}
+	r, dir := batchRun(t, remote, engine.GateAuto, "", members...)
+	first, errMsg, _ := batchLoop(r, dir)
+	if errMsg != "" {
+		t.Fatalf("the first lease stopped: %s", errMsg)
+	}
+	tip := remoteBranchCommit(t, remote, "main")
+
+	moved := a
+	moved.RecordedHead, moved.ApprovedHead = a.ApprovedHead, strings.Repeat("f", 40)
+	r, dir = batchRun(t, remote, engine.GateAuto, "", moved, b)
+	again, errMsg, _ := batchLoop(r, dir)
+	if errMsg != "" {
+		t.Fatalf("the recovering lease stopped: %s", errMsg)
+	}
+	wantOutcomes(t, again, members, "1:landed", "2:landed")
+	for _, id := range []int64{1, 2} {
+		if again[id].Record.Commit != first[id].Record.Commit || again[id].Record.Pushed != "pushed" {
+			t.Errorf("task %d recovered as %+v, want its published %s", id, again[id].Record, first[id].Record.Commit)
+		}
+	}
+	if got := remoteBranchCommit(t, remote, "main"); got != tip {
+		t.Errorf("main moved on recovery: %s, want %s", got, tip)
+	}
+
+	if got := commitCount(t, remote, "main"); got != "3" {
+		t.Errorf("commits on main = %s, want the seed and each member once", got)
+	}
+}
+
+// TestLandBatchLostAfterWaitingPublication (§7.1 acceptance): under ask, a
+// lease lost after its stack reached the waiting ref, before any record
+// was written, leaves the next lease to record every member waiting with
+// its own commit; the waiting ref and the target do not move, and no
+// member is squashed twice.
+func TestLandBatchLostAfterWaitingPublication(t *testing.T) {
+	remote := newRemote(t)
+	seed := remoteBranchCommit(t, remote, "main")
+	a := batchMember(t, remote, 1, "main", nil, map[string]string{"a.txt": "a\n"})
+	b := batchMember(t, remote, 2, a.Branch, []int64{1}, map[string]string{"b.txt": "b\n"})
+	members := []engine.LandMember{a, b}
+	r, dir := batchRun(t, remote, engine.GateAsk, "", members...)
+	first, errMsg, _ := batchLoop(r, dir)
+	if errMsg != "" {
+		t.Fatalf("the first lease stopped: %s", errMsg)
+	}
+	wait := remoteRefCommit(t, remote, landWaitRef("main"))
+
+	r, dir = batchRun(t, remote, engine.GateAsk, "", members...)
+	again, errMsg, _ := batchLoop(r, dir)
+	if errMsg != "" {
+		t.Fatalf("the recovering lease stopped: %s", errMsg)
+	}
+	wantOutcomes(t, again, members, "1:landed", "2:landed")
+	for _, id := range []int64{1, 2} {
+		if rec := again[id].Record; rec.Commit != first[id].Record.Commit || rec.Pushed != "waiting" {
+			t.Errorf("task %d recovered as %+v, want its waiting commit %s", id, rec, first[id].Record.Commit)
+		}
+	}
+	if got := remoteRefCommit(t, remote, landWaitRef("main")); got != wait {
+		t.Errorf("the waiting ref moved on recovery: %s, want %s", got, wait)
+	}
+	if got := remoteBranchCommit(t, remote, "main"); got != seed {
+		t.Errorf("main moved under ask: %s, want the seed", got)
+	}
 }

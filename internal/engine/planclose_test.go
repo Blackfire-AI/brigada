@@ -553,7 +553,7 @@ func TestPushPhaseHoldLetsThePlanClose(t *testing.T) {
 	if ans := e.complete(pg, landHeld("the release window is closed")); ans != AnsOK {
 		t.Fatalf("hold base's push: %s", ans)
 	}
-	if reason := e.str("SELECT reason FROM land_holds WHERE task_id = ? AND state = 'held'", base); reason != "held by rule land_ready: the release window is closed" {
+	if reason := e.str("SELECT reason FROM land_holds WHERE task_id = ? AND state = 'held'", base); reason != "held by rule land_ready: the release window is closed; suspects unknown" {
 		t.Fatalf("base land hold reason = %q, want the land_ready rule beside the waiting record", reason)
 	}
 	if got := e.str("SELECT pushed FROM landings WHERE task_id = ?", base); got != "waiting" {

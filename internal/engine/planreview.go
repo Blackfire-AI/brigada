@@ -80,7 +80,7 @@ type planReviewSkillView struct {
 // planReviewTaskView is one task of the plan under review, as the input
 // names it: the spec verbatim, the check, the state, the class, the tier
 // and the effort, the graph — deps by name, the base and the continued
-// dep — and the ordered skills the task named.
+// dep — the ordered skills the task named and its tool grants.
 type planReviewTaskView struct {
 	ID       int64
 	Name     string
@@ -99,6 +99,10 @@ type planReviewTaskView struct {
 	// Caps is the task's round-caps override (§6.1), nil for the engine
 	// defaults, as the shape's invocation count reads it.
 	Caps map[string]int
+	// ToolGrants are the Claude Code permission patterns the task grants
+	// its worker (§6.1), nil for none; the reason for them is the spec's
+	// own text.
+	ToolGrants []string
 }
 
 // planReviewPlanView is the plan under review: its id, title and tasks,
@@ -307,6 +311,9 @@ func composePlanReviewInput(round int, plan planReviewPlanView, others []otherPl
 		} else {
 			b.WriteString("skills: none\n")
 		}
+		if len(t.ToolGrants) > 0 {
+			b.WriteString("tool grants: " + strings.Join(t.ToolGrants, ", ") + "\n")
+		}
 		b.WriteString("spec, verbatim:\n" + t.Spec + "\n")
 	}
 	if len(others) == 0 {
@@ -385,16 +392,16 @@ func planReviewTierTx(tx *sql.Tx, cfg *Config, j *jobRow) (string, error) {
 
 // planReviewPlanTx loads the plan under review as the input's views: its
 // title, and each task with the spec verbatim, the check, the state, the
-// class, the tier and effort, the graph by name and the ordered skills
+// class, the tier and effort, the graph by name, the ordered skills
 // the task named (§5.10) — names and descriptions, the text never: the
-// reviewer opens the SKILL.md itself.
+// reviewer opens the SKILL.md itself — and its tool grants (§6.1).
 func planReviewPlanTx(tx *sql.Tx, plan int64) (planReviewPlanView, error) {
 	var view planReviewPlanView
 	if err := tx.QueryRow("SELECT id, title FROM plans WHERE id = ?", plan).Scan(&view.ID, &view.Title); err != nil {
 		return planReviewPlanView{}, fmt.Errorf("read plan %d: %w", plan, err)
 	}
 	rows, err := tx.Query(`SELECT t.id, t.name, t.title, t.spec, COALESCE(t.check_cmd, ''), t.state, t.class,
-			t.tier, COALESCE(NULLIF(t.effort, ''), 'default'), COALESCE(t.skills, ''), COALESCE(t.caps, '')
+			t.tier, COALESCE(NULLIF(t.effort, ''), 'default'), COALESCE(t.skills, ''), COALESCE(t.caps, ''), t.tool_grants
 		FROM tasks t WHERE t.plan_id = ? ORDER BY t.id`, plan)
 	if err != nil {
 		return planReviewPlanView{}, fmt.Errorf("read the tasks of plan %d: %w", plan, err)
@@ -402,12 +409,13 @@ func planReviewPlanTx(tx *sql.Tx, plan int64) (planReviewPlanView, error) {
 	var tasks []planReviewTaskView
 	for rows.Next() {
 		var t planReviewTaskView
-		var rawSkills, rawCaps string
-		if err := rows.Scan(&t.ID, &t.Name, &t.Title, &t.Spec, &t.Check, &t.State, &t.Class, &t.Tier, &t.Effort, &rawSkills, &rawCaps); err != nil {
+		var rawSkills, rawCaps, rawGrants string
+		if err := rows.Scan(&t.ID, &t.Name, &t.Title, &t.Spec, &t.Check, &t.State, &t.Class, &t.Tier, &t.Effort, &rawSkills, &rawCaps, &rawGrants); err != nil {
 			rows.Close()
 			return planReviewPlanView{}, fmt.Errorf("read the tasks of plan %d: %w", plan, err)
 		}
 		t.Caps = parseTaskCaps(rawCaps)
+		t.ToolGrants = parseTaskToolGrants(rawGrants)
 		if rawSkills != "" {
 			var recorded []TaskSkill
 			if err := json.Unmarshal([]byte(rawSkills), &recorded); err != nil {
@@ -1129,7 +1137,7 @@ func (e *Engine) planReviewAppliedTx(tx *sql.Tx, project, plan int64, batch []in
 		var tasks []PlanTask
 		for _, n := range nodes {
 			if n.state != taskCancelled {
-				tasks = append(tasks, PlanTask{Spec: n.spec, Check: n.check, Class: n.class, ExtraRepos: n.extra})
+				tasks = append(tasks, PlanTask{Spec: n.spec, Check: n.check, Class: n.class, ExtraRepos: n.extra, ToolGrants: n.grants})
 			}
 		}
 		verdict := settings.evaluate(tasks)
@@ -1156,9 +1164,9 @@ func (e *Engine) planReviewAppliedTx(tx *sql.Tx, project, plan int64, batch []in
 		// amendment's own verdict would hold it.
 		for _, id := range batch {
 			var state, spec, check, class string
-			var extraRec string
-			err := tx.QueryRow(`SELECT state, spec, COALESCE(check_cmd, ''), class, COALESCE(extra_repos, '')
-				FROM tasks WHERE id = ?`, id).Scan(&state, &spec, &check, &class, &extraRec)
+			var extraRec, grants string
+			err := tx.QueryRow(`SELECT state, spec, COALESCE(check_cmd, ''), class, COALESCE(extra_repos, ''), tool_grants
+				FROM tasks WHERE id = ?`, id).Scan(&state, &spec, &check, &class, &extraRec, &grants)
 			if errors.Is(err, sql.ErrNoRows) {
 				continue
 			}
@@ -1172,7 +1180,7 @@ func (e *Engine) planReviewAppliedTx(tx *sql.Tx, project, plan int64, batch []in
 			if specRec := parseExtraReposRecord(extraRec); specRec != nil && specRec.Source == ExtraSourceTask {
 				extra = specRec.Repos
 			}
-			reasons := settings.taskHoldReasons(PlanTask{Spec: spec, Check: check, Class: class, ExtraRepos: extra})
+			reasons := settings.taskHoldReasons(PlanTask{Spec: spec, Check: check, Class: class, ExtraRepos: extra, ToolGrants: parseTaskToolGrants(grants)})
 			if len(reasons) == 0 {
 				continue
 			}

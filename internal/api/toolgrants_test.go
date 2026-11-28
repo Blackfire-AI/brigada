@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"slices"
 	"strconv"
@@ -16,6 +17,13 @@ import (
 // point, named, and a task without the field grants none.
 func TestToolGrantsRoundTrip(t *testing.T) {
 	e := newEnv(t)
+	// The whole allowlist pre-approved (§6.3), so the plan runs and the
+	// round trip reads its tasks rather than an approval hold.
+	allow, err := json.Marshal(map[string][]string{engine.SettingApprovalToolGrants: engine.ToolGrantAllowlist})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.exec(`UPDATE projects SET settings = ? WHERE id = ?`, string(allow), e.project1)
 	grants := []string{"Bash(git merge:*)", "Bash(git restore:*)"}
 	read := func(task int64) []string {
 		t.Helper()

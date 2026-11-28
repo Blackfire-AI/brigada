@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -876,5 +877,215 @@ func TestMirrorRefusesPushByOriginButFetchesAndPushesByURL(t *testing.T) {
 	}
 	if remoteBranchCommit(t, remote, ws.branch) == "" {
 		t.Error("the runner's push did not land the branch")
+	}
+}
+
+// publishFixRound prepares the work round's workspace, pushes its work,
+// and returns the fix round's workspace on the same branch: the setting
+// of the lease push (§5.4), where the fix worker may rewrite what the
+// work round pushed.
+func publishFixRound(t *testing.T, remote string, taskID int64) (fix *workspace, branch string) {
+	t.Helper()
+	ctx := context.Background()
+	cfg := &Config{StateDir: t.TempDir()}
+	branch = fmt.Sprintf("brigada/task-%d", taskID)
+	ws, err := prepareWorkspace(ctx, cfg, &api.JobGrant{
+		JobID: 100 + taskID, TaskID: taskID, Kind: "work", Attempt: 1,
+		RepoURL: remote, BaseRef: "main", Branch: branch,
+	})
+	if err != nil {
+		t.Fatalf("prepare the work workspace: %v", err)
+	}
+	git(t, ws.dir, "commit", "--allow-empty", "-m", "the work")
+	if err := ws.ensurePushed(ctx); err != nil {
+		t.Fatalf("ship the work: %v", err)
+	}
+	ws.remove(ctx)
+	fix, err = prepareWorkspace(ctx, cfg, &api.JobGrant{
+		JobID: 200 + taskID, TaskID: taskID, Kind: "fix", Attempt: 1,
+		RepoURL: remote, BaseRef: "main", Branch: branch,
+	})
+	if err != nil {
+		t.Fatalf("prepare the fix workspace: %v", err)
+	}
+	t.Cleanup(func() { fix.remove(context.Background()) })
+	return fix, branch
+}
+
+// TestEnsurePushedPublishesAnAmendedBranch: a fix round that amends the
+// commit the work round pushed publishes it, where a plain push would be
+// refused as non-fast-forward (issue #275).
+func TestEnsurePushedPublishesAnAmendedBranch(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	remote := newRemote(t)
+	fix, branch := publishFixRound(t, remote, 1)
+	pushed := remoteHead(t, remote, branch)
+	git(t, fix.dir, "-c", "user.name=w", "-c", "user.email=w@brigada.invalid", "commit", "--amend", "--allow-empty", "-m", "the work, amended")
+	if err := fix.ensurePushed(ctx); err != nil {
+		t.Fatalf("publish the amended branch: %v", err)
+	}
+	head := strings.TrimSpace(git(t, fix.dir, "rev-parse", "HEAD"))
+	if got := remoteHead(t, remote, branch); got != head || got == pushed {
+		t.Errorf("remote branch = %s, want the amended head %s (was %s)", got, head, pushed)
+	}
+}
+
+// TestEnsurePushedPublishesABranchRebuiltOnANewBase: a fix round that
+// rebuilds its branch on a base that moved publishes it.
+func TestEnsurePushedPublishesABranchRebuiltOnANewBase(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	remote := newRemote(t)
+	fix, branch := publishFixRound(t, remote, 2)
+	// main moves on the remote; the worker rebases its branch onto it.
+	mover := t.TempDir()
+	git(t, "", "clone", "-q", "--branch", "main", remote, mover)
+	git(t, mover, "-c", "user.name=seed", "-c", "user.email=seed@brigada.invalid", "commit", "--allow-empty", "-m", "main moved")
+	git(t, mover, "push", "-q", "origin", "main")
+	git(t, fix.dir, "fetch", "-q", remote, "main")
+	git(t, fix.dir, "-c", "user.name=w", "-c", "user.email=w@brigada.invalid", "rebase", "FETCH_HEAD")
+	if err := fix.ensurePushed(ctx); err != nil {
+		t.Fatalf("publish the rebuilt branch: %v", err)
+	}
+	head := strings.TrimSpace(git(t, fix.dir, "rev-parse", "HEAD"))
+	if got := remoteHead(t, remote, branch); got != head {
+		t.Errorf("remote branch = %s, want the rebuilt head %s", got, head)
+	}
+	if out := git(t, fix.dir, "log", "--format=%s", head); !strings.Contains(out, "main moved") {
+		t.Errorf("the published history = %q, want the new base under the work", out)
+	}
+}
+
+// TestEnsurePushedRefusesABranchMovedByAnotherWriter: a branch someone
+// else moved since the job started is refused with the lease error, and
+// the remote keeps what the other writer pushed.
+func TestEnsurePushedRefusesABranchMovedByAnotherWriter(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	remote := newRemote(t)
+	fix, branch := publishFixRound(t, remote, 3)
+	other := t.TempDir()
+	git(t, "", "clone", "-q", "--branch", branch, remote, other)
+	git(t, other, "-c", "user.name=o", "-c", "user.email=o@brigada.invalid", "commit", "--allow-empty", "-m", "someone else")
+	git(t, other, "push", "-q", "origin", branch)
+	theirs := remoteHead(t, remote, branch)
+	git(t, fix.dir, "-c", "user.name=w", "-c", "user.email=w@brigada.invalid", "commit", "--amend", "--allow-empty", "-m", "the work, amended")
+	err := fix.ensurePushed(ctx)
+	if err == nil {
+		t.Fatal("a rewrite over a branch another writer moved was published; want the lease refusal")
+	}
+	if !isLeaseRefused(err) {
+		t.Errorf("error = %v, want a lease refusal", err)
+	}
+	if got := remoteHead(t, remote, branch); got != theirs {
+		t.Errorf("remote branch = %s, want the other writer's %s kept", got, theirs)
+	}
+
+	// Any other push failure is no lease refusal.
+	broken := &workspace{dir: fix.dir, branch: branch, repoURL: "file:///nonexistent/remote.git", leased: true, leaseSHA: theirs}
+	if err := broken.ensurePushed(ctx); err == nil || isLeaseRefused(err) {
+		t.Errorf("a push to an unreachable remote = %v, want an error that is not a lease refusal", err)
+	}
+}
+
+// TestEnsurePushedFirstPushOfANewBranch: a branch the remote does not
+// hold is created under the empty lease, and a branch someone created
+// since the job started is refused with the lease error.
+func TestEnsurePushedFirstPushOfANewBranch(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	remote := newRemote(t)
+	cfg := &Config{StateDir: t.TempDir()}
+	prep := func(jobID, taskID int64, branch string) *workspace {
+		t.Helper()
+		ws, err := prepareWorkspace(ctx, cfg, &api.JobGrant{
+			JobID: jobID, TaskID: taskID, Kind: "work", Attempt: 1,
+			RepoURL: remote, BaseRef: "main", Branch: branch,
+		})
+		if err != nil {
+			t.Fatalf("prepare the workspace: %v", err)
+		}
+		t.Cleanup(func() { ws.remove(context.Background()) })
+		if !ws.leased || ws.leaseSHA != "" {
+			t.Fatalf("lease = (%v, %q), want the empty lease of a branch the remote lacks", ws.leased, ws.leaseSHA)
+		}
+		return ws
+	}
+	ws := prep(61, 4, "brigada/task-4")
+	git(t, ws.dir, "commit", "--allow-empty", "-m", "first")
+	if err := ws.ensurePushed(ctx); err != nil {
+		t.Fatalf("first push of a new branch: %v", err)
+	}
+	if got, want := remoteHead(t, remote, "brigada/task-4"), strings.TrimSpace(git(t, ws.dir, "rev-parse", "HEAD")); got != want {
+		t.Errorf("remote branch = %s, want %s", got, want)
+	}
+	// The same workspace pushes again on top of what it published.
+	git(t, ws.dir, "commit", "--allow-empty", "-m", "second")
+	if err := ws.ensurePushed(ctx); err != nil {
+		t.Errorf("second push of the same workspace: %v", err)
+	}
+
+	// Someone creates the branch after the job started: the empty lease
+	// refuses to replace it.
+	late := prep(62, 5, "brigada/task-5")
+	other := t.TempDir()
+	git(t, "", "clone", "-q", "--branch", "main", remote, other)
+	git(t, other, "checkout", "-q", "-b", "brigada/task-5")
+	git(t, other, "-c", "user.name=o", "-c", "user.email=o@brigada.invalid", "commit", "--allow-empty", "-m", "created meanwhile")
+	git(t, other, "push", "-q", "origin", "brigada/task-5")
+	git(t, late.dir, "commit", "--allow-empty", "-m", "mine")
+	if err := late.ensurePushed(ctx); err == nil || !isLeaseRefused(err) {
+		t.Errorf("push over a branch created meanwhile = %v, want a lease refusal", err)
+	}
+}
+
+// TestPublishFailureCompletesWithThePublishKind: every ensurePushed
+// failure completes under the publish kind (§5.4), and its text says
+// whether the lease refused the push.
+func TestPublishFailureCompletesWithThePublishKind(t *testing.T) {
+	t.Parallel()
+	lease := publishCompletion(&leaseRefusedError{errors.New("stale info")})
+	if lease.ErrorKind != engine.ErrorKindPublish || !strings.Contains(lease.Error, "lease refused") || strings.Contains(lease.Error, "not a lease refusal") {
+		t.Errorf("lease refusal completion = %+v, want the publish kind and the refusal named", lease)
+	}
+	other := publishCompletion(errors.New("could not resolve host"))
+	if other.ErrorKind != engine.ErrorKindPublish || !strings.Contains(other.Error, "not a lease refusal") {
+		t.Errorf("other failure completion = %+v, want the publish kind and no refusal", other)
+	}
+	if engine.ErrorKindPublish != "publish" {
+		t.Errorf("ErrorKindPublish = %q, want publish", engine.ErrorKindPublish)
+	}
+}
+
+// TestEnsurePushedRefusesToOverwriteABranchTheWorktreeDidNotStartFrom: a
+// job built on the base while the remote already holds its branch has
+// the empty lease, so its push is refused instead of dropping the
+// branch's earlier commits.
+func TestEnsurePushedRefusesToOverwriteABranchTheWorktreeDidNotStartFrom(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	remote := newRemote(t)
+	other := t.TempDir()
+	git(t, "", "clone", "-q", "--branch", "main", remote, other)
+	git(t, other, "checkout", "-q", "-b", "brigada/task-7")
+	git(t, other, "-c", "user.name=o", "-c", "user.email=o@brigada.invalid", "commit", "--allow-empty", "-m", "earlier work")
+	git(t, other, "push", "-q", "origin", "brigada/task-7")
+	theirs := remoteHead(t, remote, "brigada/task-7")
+
+	ws, err := prepareWorkspace(ctx, &Config{StateDir: t.TempDir()}, &api.JobGrant{
+		JobID: 71, TaskID: 7, Kind: "work", Attempt: 1,
+		RepoURL: remote, BaseRef: "main", Branch: "brigada/task-7",
+	})
+	if err != nil {
+		t.Fatalf("prepare the workspace: %v", err)
+	}
+	defer ws.remove(ctx)
+	git(t, ws.dir, "commit", "--allow-empty", "-m", "fresh work")
+	if err := ws.ensurePushed(ctx); err == nil || !isLeaseRefused(err) {
+		t.Errorf("push over a branch the worktree did not start from = %v, want a lease refusal", err)
+	}
+	if got := remoteHead(t, remote, "brigada/task-7"); got != theirs {
+		t.Errorf("remote branch = %s, want the earlier work %s kept", got, theirs)
 	}
 }

@@ -233,6 +233,39 @@ func TestComposeReReviewPrompt(t *testing.T) {
 	}
 }
 
+// TestReReviewPromptSaysARewrittenBranchIsRewritten: a fix round may
+// amend or rebuild its branch (§5.4), which leaves the reviewed head out
+// of the branch's history; the prompt then says the since-diff is not the
+// fix round alone and points at the whole change, base...branch.
+func TestReReviewPromptSaysARewrittenBranchIsRewritten(t *testing.T) {
+	got := strings.Join(strings.Fields(ComposeReReviewPrompt("fixed", "", "main", "brigada/task-1", "abc123")), " ")
+	for _, want := range []string{
+		"the fix round either added commits on top of the head you reviewed or rewrote the branch",
+		"abc123..brigada/task-1 is not the fix round alone",
+		"opens with a line saying the branch was rewritten",
+		"read the whole change, the base to the branch, git diff main...brigada/task-1",
+	} {
+		if !strings.Contains(strings.ToLower(got), want) && !strings.Contains(got, want) {
+			t.Errorf("re-review prompt lacks %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "what the branch gained since the head you reviewed — into") {
+		t.Errorf("re-review prompt still says the file always holds a since-diff:\n%s", got)
+	}
+}
+
+// TestWorkerPromptAllowsRewritingTheOwnBranch: the worker template says a
+// fix round may amend or rebase its own task branch and the runner
+// publishes it (§5.4).
+func TestWorkerPromptAllowsRewritingTheOwnBranch(t *testing.T) {
+	got := strings.Join(strings.Fields(ComposeWorkerPrompt("spec", "", "")), " ")
+	for _, want := range []string{"may amend or rebase its own task branch", "the runner publishes the branch"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the worker prompt lacks %q:\n%s", want, got)
+		}
+	}
+}
+
 func TestReReviewTemplateVersion(t *testing.T) {
 	if ReReviewTemplateVersion <= 0 {
 		t.Errorf("ReReviewTemplateVersion = %d, want a positive version", ReReviewTemplateVersion)

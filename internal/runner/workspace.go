@@ -1,9 +1,11 @@
 package runner
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -70,6 +72,13 @@ type workspace struct {
 	holdsDir bool
 	repoURL  string
 	gitEnv   []string
+	// leased is whether leaseSHA was recorded; leaseSHA is the commit the
+	// remote's branch held when the job's worktree was prepared ("" when
+	// the remote had no such branch), the lease ensurePushed publishes
+	// under (§5.4). A workspace built without it publishes with a plain
+	// push.
+	leased   bool
+	leaseSHA string
 }
 
 // prepareWorkspace materializes the workspace for a leased job (§5.1):
@@ -120,13 +129,18 @@ func prepareWorkspace(ctx context.Context, cfg *Config, grant *api.JobGrant) (*w
 		return nil, err
 	}
 	start := baseRef
+	// leaseFromStart is whether the worktree starts at the remote head of
+	// its own branch, which then is the lease; otherwise the worktree did
+	// not start from the remote's branch, and the lease stays empty: only
+	// a branch that does not exist yet is created, and one that exists is
+	// refused rather than overwritten.
+	leaseFromStart := false
 	if isFixJob(grant) && grant.Branch != "" {
 		// The round continues the task's branch (§3): the worktree
 		// starts at the branch's head as the remote holds it, fetched by
 		// name — the mirror's own fetch skips the runners' brigada/
 		// namespace — so the round's work builds on the work before it
-		// and its push is a fast-forward of the branch, never a force.
-		// A remote that answers cleanly that it holds no such branch —
+		// and its push is the lease push of §5.4. A remote that answers cleanly that it holds no such branch —
 		// nothing was ever pushed — leaves the round on the base ref,
 		// where the work itself starts. A remote that cannot be asked at
 		// all fails the job instead: reading that as absence would
@@ -139,6 +153,7 @@ func prepareWorkspace(ctx context.Context, cfg *Config, grant *api.JobGrant) (*w
 				return nil, err
 			}
 			start = grant.Branch
+			leaseFromStart = true
 		}
 	} else if grant.SeedBranch != "" {
 		// A stop-running restart's fresh attempt (§5.6) carries on the
@@ -156,6 +171,7 @@ func prepareWorkspace(ctx context.Context, cfg *Config, grant *api.JobGrant) (*w
 			start = grant.SeedBranch
 		}
 	}
+	w.leased = true
 	// A worktree left behind by a crashed run of the same job would make
 	// the add below fail on the path; the path is the task's and one
 	// live job holds its key (§12.1), so what sits at this path now is
@@ -182,6 +198,9 @@ func prepareWorkspace(ctx context.Context, cfg *Config, grant *api.JobGrant) (*w
 		return nil, fmt.Errorf("read the worktree's base commit: %w", trimCmdError(out, err))
 	}
 	w.base = strings.TrimSpace(string(out))
+	if leaseFromStart {
+		w.leaseSHA = w.base // the head the worktree really started from
+	}
 	named := baseRef
 	if grant.SeedBranch != "" && start == grant.SeedBranch {
 		named = start // the seeded attempt is told the branch it carries on
@@ -553,6 +572,33 @@ func brigadaRef(ref string) string {
 	return ""
 }
 
+// leaseRefusedError is a publish the remote refused because the branch
+// no longer holds the commit the job started from (§5.4): someone else
+// moved it, and the runner's rewrite would have discarded their work.
+type leaseRefusedError struct{ err error }
+
+func (e *leaseRefusedError) Error() string {
+	return "the branch moved on the remote since the job started: " + e.err.Error()
+}
+
+func (e *leaseRefusedError) Unwrap() error { return e.err }
+
+// isLeaseRefused reports whether err is a refused lease push, as against
+// any other failure to publish.
+func isLeaseRefused(err error) bool {
+	var l *leaseRefusedError
+	return errors.As(err, &l)
+}
+
+// leaseRejected reads git's push output for the lease's refusal: a
+// rejected ref whose stale info is the lease's own words. A hook's or a
+// protected branch's "[remote rejected]" is another failure.
+func leaseRejected(out []byte) bool {
+	s := string(out)
+	return strings.Contains(s, "(stale info)") ||
+		(strings.Contains(s, "[rejected]") && !strings.Contains(s, "[remote rejected]"))
+}
+
 // ensurePushed verifies the branch on the remote holds exactly the
 // worktree's commit, and makes it so when it does not (§5.4). The
 // template tells the worker to leave the commit and the push to the
@@ -565,25 +611,54 @@ func brigadaRef(ref string) string {
 // worker left uncommitted are committed, then the remote's SHA is
 // compared with the worktree's HEAD, and a mismatch is pushed. A
 // ls-remote that still disagrees after the push was no push.
+//
+// The push is a lease push: it replaces the remote branch only while
+// the branch still holds the commit the job started from (or still does
+// not exist, when it did not), so a worker that rewrote its own pushed
+// branch — an amend, a rebuild on a new base — publishes, and a branch
+// someone else moved meanwhile is refused with a *leaseRefusedError.
 func (w *workspace) ensurePushed(ctx context.Context) error {
-	if err := w.commitLeftovers(ctx); err != nil {
+	if err := w.commitLeftovers(ctx, false); err != nil {
 		return err
 	}
 	head, err := w.worktreeHead(ctx)
 	if err != nil {
 		return err
 	}
-	if remote, ok := w.remoteBranchSHA(ctx); ok && remote == head {
+	remote, remoteOK := w.remoteBranchSHA(ctx)
+	if remoteOK && remote == head {
+		w.leaseSHA = head
 		return nil // the worker pushed exactly what sits in the worktree
 	}
-	if out, err := w.git(ctx, "-C", w.dir, "push", w.repoURL, "HEAD:refs/heads/"+w.branch); err != nil {
-		return fmt.Errorf("push %s to %s: %w", w.branch, redactURL(w.repoURL), trimCmdError(out, err))
+	lease := w.leaseSHA
+	if remoteOK && remote != lease {
+		// A remote head the worktree's own history holds — the worker's
+		// early push, followed by more work — is a plain fast-forward:
+		// nothing of anyone's is lost, so it is the lease. A head the
+		// worktree lacks is another writer's, and the job's start stays
+		// the lease.
+		if _, err := w.git(ctx, "-C", w.dir, "merge-base", "--is-ancestor", remote, head); err == nil {
+			lease = remote
+		}
+	}
+	args := []string{"-C", w.dir, "push"}
+	if w.leased {
+		args = append(args, "--force-with-lease=refs/heads/"+w.branch+":"+lease)
+	}
+	args = append(args, w.repoURL, "HEAD:refs/heads/"+w.branch)
+	if out, err := w.git(ctx, args...); err != nil {
+		err = fmt.Errorf("push %s to %s: %w", w.branch, redactURL(w.repoURL), trimCmdError(out, err))
+		if w.leased && leaseRejected(out) {
+			return &leaseRefusedError{err}
+		}
+		return err
 	}
 	remote, ok := w.remoteBranchSHA(ctx)
 	if !ok || remote != head {
 		return fmt.Errorf("branch %s on %s does not hold the worktree's commit after pushing it",
 			w.branch, redactURL(w.repoURL))
 	}
+	w.leaseSHA = head // a later push of this workspace leases on what this one published
 	return nil
 }
 
@@ -591,7 +666,7 @@ func (w *workspace) ensurePushed(ctx context.Context) error {
 // the task's remote branch alone. A clean checkout with no commits
 // beyond the task's remote (or its base, if never pushed) saves nothing.
 func (w *workspace) salvage(ctx context.Context, branch string) (bool, error) {
-	if err := w.commitLeftovers(ctx); err != nil {
+	if err := w.commitLeftovers(ctx, true); err != nil {
 		return false, err
 	}
 	head, err := w.worktreeHead(ctx)
@@ -636,8 +711,41 @@ func (w *workspace) salvage(ctx context.Context, branch string) (bool, error) {
 
 // commitLeftovers commits whatever the worker left uncommitted, so a
 // done run cannot ship a branch that is missing its own edits. A clean
-// tree is left alone.
-func (w *workspace) commitLeftovers(ctx context.Context) error {
+// tree is left alone. A merge the worker left in progress is finished by
+// the commit when it is finished — no unmerged index entries, and none of
+// the merge's conflicted paths still carrying a conflict marker — and git
+// records the two-parent merge. An unfinished merge is handled by the
+// caller's mode: on the done path (salvage false) it fails the job,
+// naming the files, and nothing is committed; on the salvage path it is
+// aborted first, so the original failure is not masked, and the commit
+// records the abort.
+func (w *workspace) commitLeftovers(ctx context.Context, salvage bool) error {
+	aborted := false
+	// Git's own unmerged index entries are checked whether or not a merge
+	// is in progress: a cherry-pick, stash pop, checkout -m or restore
+	// --merge conflict leaves them with no MERGE_HEAD, and git add -A
+	// would clear them and commit the markers.
+	merging, err := w.merging(ctx)
+	if err != nil {
+		return err
+	}
+	unfinished, err := w.unfinishedMerge(ctx, merging)
+	if err != nil {
+		return err
+	}
+	if unfinished != "" {
+		if !salvage {
+			return fmt.Errorf("the worker left an unfinished merge (%s); resolve or abort it before the runner commits", unfinished)
+		}
+		abort := []string{"-C", w.dir, "merge", "--abort"}
+		if !merging {
+			abort = []string{"-C", w.dir, "reset", "--merge"}
+		}
+		if out, err := w.git(ctx, abort...); err != nil {
+			return fmt.Errorf("abort the unfinished merge: %w", trimCmdError(out, err))
+		}
+		aborted = true
+	}
 	out, err := w.git(ctx, "-C", w.dir, "status", "--porcelain")
 	if err != nil {
 		return fmt.Errorf("read the worktree's status: %w", trimCmdError(out, err))
@@ -655,10 +763,135 @@ func (w *workspace) commitLeftovers(ctx context.Context) error {
 	if out, err := w.git(ctx, "-C", w.dir, "add", "-A"); err != nil {
 		return fmt.Errorf("stage the worker's uncommitted changes: %w", trimCmdError(out, err))
 	}
-	if out, err := w.git(ctx, "-C", w.dir, "commit", "-m", "brigada runner: the worker's uncommitted changes"); err != nil {
+	msg := "brigada runner: the worker's uncommitted changes"
+	if aborted {
+		msg = "brigada runner: the worker's uncommitted changes (an unfinished merge was aborted)"
+	}
+	if out, err := w.git(ctx, "-C", w.dir, "commit", "-m", msg); err != nil {
 		return fmt.Errorf("commit the worker's uncommitted changes: %w", trimCmdError(out, err))
 	}
 	return nil
+}
+
+// merging reports whether a merge is in progress in the worktree: git
+// sets MERGE_HEAD when `git merge` began and has not yet been committed
+// or aborted.
+func (w *workspace) merging(ctx context.Context) (bool, error) {
+	out, err := w.git(ctx, "-C", w.dir, "rev-parse", "--verify", "--quiet", "MERGE_HEAD")
+	if err != nil {
+		var exit *exec.ExitError
+		if errors.As(err, &exit) && exit.ExitCode() == 1 {
+			return false, nil // no MERGE_HEAD: no merge in progress
+		}
+		return false, fmt.Errorf("look for a merge in progress: %w", trimCmdError(out, err))
+	}
+	return strings.TrimSpace(string(out)) != "", nil
+}
+
+// unfinishedMerge describes why the merge in progress is unfinished, or
+// returns "" when it is finished. The gate is git's own signal: any
+// unmerged index entry (unmergedPaths) leaves the merge
+// unfinished, whatever its content — a modify/delete, binary or add/add
+// conflict carries no marker at all. A path the worker staged clears its
+// entry, so a git add of an unresolved file would hide it: for that case
+// only the merge's own conflicted paths (mergeConflictPaths) are read for
+// a conflict marker, never the whole tree, where a legitimate file may
+// hold one.
+func (w *workspace) unfinishedMerge(ctx context.Context, merging bool) (string, error) {
+	unmerged, err := w.unmergedPaths(ctx)
+	if err != nil {
+		return "", err
+	}
+	if len(unmerged) > 0 {
+		return "unmerged: " + listPaths(unmerged, maxListedPaths), nil
+	}
+	if !merging {
+		return "", nil
+	}
+	conflicted, err := w.mergeConflictPaths(ctx)
+	if err != nil {
+		return "", err
+	}
+	if marked := pathsWithMarkers(w.dir, conflicted); len(marked) > 0 {
+		return "conflict markers staged in: " + listPaths(marked, maxListedPaths), nil
+	}
+	return "", nil
+}
+
+// unmergedPaths names the paths git holds unmerged in the index. A git
+// that cannot be asked is an error, never an empty list that would read
+// as nothing unmerged. Only stdout is read: stderr's warnings are not
+// paths.
+func (w *workspace) unmergedPaths(ctx context.Context) ([]string, error) {
+	cmd := exec.CommandContext(ctx, "git", "-C", w.dir, "diff", "--name-only", "-z", "--diff-filter=U")
+	cmd.Env = append(append(os.Environ(), "GIT_TERMINAL_PROMPT=0"), w.gitEnv...)
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("read the unmerged paths: %w", trimCmdError([]byte(stderr.String()), err))
+	}
+	var files []string
+	for _, p := range strings.Split(string(out), "\x00") {
+		if p != "" {
+			files = append(files, p)
+		}
+	}
+	return files, nil
+}
+
+// mergeConflictPaths names the paths the merge in progress conflicted on
+// — the paths git held unmerged before the worker staged them — by
+// replaying the merge of HEAD and MERGE_HEAD in memory with
+// `git merge-tree --write-tree --name-only`, which touches neither the
+// index nor the tree. It exits 1 when the merge conflicts, listing the
+// paths after the result tree's line.
+func (w *workspace) mergeConflictPaths(ctx context.Context) ([]string, error) {
+	out, err := w.git(ctx, "-C", w.dir, "merge-tree", "--write-tree", "--name-only", "--no-messages", "HEAD", "MERGE_HEAD")
+	if err != nil {
+		var exit *exec.ExitError
+		if !errors.As(err, &exit) || exit.ExitCode() != 1 {
+			return nil, fmt.Errorf("read the merge's conflicted paths: %w", trimCmdError(out, err))
+		}
+	} else {
+		return nil, nil // the merge is clean: nothing conflicted
+	}
+	lines := strings.Split(string(out), "\n")
+	var files []string
+	for _, l := range lines[1:] { // the first line is the result tree
+		if l = strings.TrimSpace(l); l != "" {
+			files = append(files, l)
+		}
+	}
+	return files, nil
+}
+
+// pathsWithMarkers returns the subset of files whose content still
+// carries a git conflict marker. A file that is gone (a resolved
+// modify/delete) carries none.
+func pathsWithMarkers(dir string, files []string) []string {
+	var out []string
+	for _, f := range files {
+		data, err := os.ReadFile(filepath.Join(dir, f))
+		if err != nil {
+			continue
+		}
+		if hasConflictMarkers(data) {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// hasConflictMarkers reports whether a file's content carries a git
+// conflict marker — a line that begins with <<<<<<<.
+func hasConflictMarkers(data []byte) bool {
+	for _, line := range bytes.Split(data, []byte("\n")) {
+		if bytes.HasPrefix(line, []byte("<<<<<<<")) {
+			return true
+		}
+	}
+	return false
 }
 
 // worktreeHead is the commit the worktree's branch points at.

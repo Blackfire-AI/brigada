@@ -759,8 +759,20 @@ func TestWriteReviewDiffSince(t *testing.T) {
 	if err := w.writeReviewDiffSince(ctx, "main", strings.Repeat("0", 40)); err != nil {
 		t.Fatal(err)
 	}
-	if got := read(); !strings.HasPrefix(got, "# The reviewed head ") || !strings.Contains(got, "+the fix") || !strings.Contains(got, "+first round") {
-		t.Errorf("diff file = %q, want the whole change under a note", got)
+	if got := read(); !strings.HasPrefix(got, "# The reviewed head ") || strings.Contains(got, "rewritten") || !strings.Contains(got, "+the fix") || !strings.Contains(got, "+first round") {
+		t.Errorf("diff file = %q, want the whole change under a missing-head note, not a rewrite note", got)
+	}
+
+	// A fix round that squashed or amended the branch leaves the reviewed head out of
+	// its history: the file says the branch was rewritten and holds the
+	// whole change, never a since-diff.
+	git(t, w.dir, "reset", "-q", "--soft", "main")
+	git(t, w.dir, "-c", "user.name=seed", "-c", "user.email=seed@brigada.invalid", "commit", "-q", "-m", "change and fix, squashed")
+	if err := w.writeReviewDiffSince(ctx, "main", reviewed); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(); !strings.HasPrefix(got, "# The branch was rewritten") || !strings.Contains(got, "+the fix") || !strings.Contains(got, "+first round") {
+		t.Errorf("diff file = %q, want the whole change under the rewritten note", got)
 	}
 
 	if err := w.writeReviewDiffSince(ctx, "main", ""); err != nil {

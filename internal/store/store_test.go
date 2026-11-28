@@ -168,7 +168,7 @@ func TestOpenCreatesEveryTable(t *testing.T) {
 	}
 	want := []string{
 		"agents", "artifacts", "attach_holds", "class_cooldown", "events", "foreman_inbox", "hold_tokens",
-		"idempotency", "jobs", "land_holds", "land_syncs", "landings", "lease_tokens", "messages", "meta", "outcomes", "pauses", "plan_mirror_dirty", "plans",
+		"idempotency", "jobs", "land_baselines", "land_batch_progress", "land_holds", "land_publications", "land_syncs", "landings", "lease_tokens", "messages", "meta", "outcomes", "pauses", "plan_mirror_dirty", "plans",
 		"projects", "questions", "role_instructions", "runners", "sessions", "skills", "stale_land_refs", "task_deps", "tasks", "tokens",
 	}
 	got := queryStrings(t, s.db, "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")

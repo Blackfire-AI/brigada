@@ -125,16 +125,16 @@ var yamlKeyRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 // configSettingKeys are the project settings schema 1 of the shared file
 // may carry (§13.1): the approval rules (the task count, the plan budget,
-// the classes and protected paths), the gates and land rules (§6.3),
-// the default check, the worker tool policy, the environment step (§5.7),
-// the extra repositories (§5.8), the foreman session's rotation
-// threshold (§4.2), the branch-retention window (§13.2) and the issue
-// tracker (§12.2: the forge's kind and base URL, never its token), and
-// nothing else. It is its own
-// list, never SettingKeys: a setting added for the local store (the wake
-// budget, for one) does not become shared-file policy by being editable.
+// the classes, protected paths and pre-approved tool grants), the gates
+// and land rules (§6.3), the default check, the worker tool policy, the
+// environment step (§5.7), the extra repositories (§5.8), the foreman
+// session's rotation threshold (§4.2), the branch-retention window
+// (§13.2) and the issue tracker (§12.2: the forge's kind and base URL,
+// never its token), and nothing else. It is its own list, never
+// SettingKeys: a setting added for the local store (the wake budget, for
+// one) does not become shared-file policy by being editable.
 var configSettingKeys = []string{SettingApprovalMaxTasks, SettingApprovalBudget, SettingApprovalClasses, SettingApprovalProtectedPaths,
-	SettingGatePlan, SettingGateLand, SettingGatePush, SettingApprovalTiers, SettingApprovalRestarted, SettingLandTarget, SettingAfterLand, SettingLandReady, SettingLandBatchMax,
+	SettingApprovalToolGrants, SettingGatePlan, SettingGateLand, SettingGatePush, SettingApprovalTiers, SettingApprovalRestarted, SettingLandTarget, SettingAfterLand, SettingLandReady, SettingLandBatchMax,
 	SettingDefaultCheck, SettingWorkerTools, SettingSetup, SettingSetupCacheKeyFiles, SettingSetupTimeout,
 	SettingExtraRepos, SettingForemanRotateTokens, SettingPlanFiles, SettingPlanFileBranch, SettingBranchRetentionDays,
 	SettingTracker, SettingTrackerURL}

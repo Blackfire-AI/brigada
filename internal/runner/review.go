@@ -132,17 +132,23 @@ func (w *workspace) writeReviewDiff(ctx context.Context, base string) error {
 // writeReviewDiffSince is writeReviewDiff for a re-review (§7) when since
 // names the head the reviewer last judged: the file then holds the fix
 // round alone, since..HEAD. A since the branch's history does not hold —
-// a rewritten branch, a commit the mirror lacks — leaves the whole change
-// in the file under a line saying so, never a diff the prompt misdescribes.
+// a rewritten branch (an amend, a rebuild on a new base, §5.4) — leaves
+// the whole change, base...HEAD, in the file under a line saying the
+// branch was rewritten; a since the mirror lacks altogether leaves it
+// under a line saying so. Never a diff the prompt misdescribes.
 func (w *workspace) writeReviewDiffSince(ctx context.Context, base, since string) error {
 	rng := base + "...HEAD"
 	var note string
 	if since != "" {
 		if _, err := w.git(ctx, "-C", w.dir, "merge-base", "--is-ancestor", since, "HEAD"); err == nil {
 			rng = since + "..HEAD"
+		} else if _, err := w.git(ctx, "-C", w.dir, "cat-file", "-e", since+"^{commit}"); err != nil {
+			note = fmt.Sprintf("# The reviewed head %s is not in the runner's copy of the repository,\n"+
+				"# so there is no since-diff. This is the whole change (%s); judge all of it.\n\n", since, rng)
 		} else {
-			note = fmt.Sprintf("# The reviewed head %s is not in the branch's history, so this is the\n"+
-				"# whole change (%s), not the fix round alone.\n\n", since, rng)
+			note = fmt.Sprintf("# The branch was rewritten: the reviewed head %s is not in its history,\n"+
+				"# so %s..HEAD is not the fix round alone. This is the whole change\n"+
+				"# (%s); judge all of it.\n\n", since, since, rng)
 		}
 	}
 	diffArgs := []string{"diff", "--no-color", "--no-ext-diff", "--no-textconv"}

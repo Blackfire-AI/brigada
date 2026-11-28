@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -111,5 +112,116 @@ func TestToolGrantsRefused(t *testing.T) {
 	}
 	if got := e.int("SELECT COUNT(*) FROM tasks WHERE spec = 'refused submit'"); got != 0 {
 		t.Errorf("tasks after the refused submit = %d, want 0", got)
+	}
+}
+
+// TestToolGrantsApprovalTrigger (§6.3): a task with tool grants holds
+// its plan for approval, one reason naming the patterns outside
+// approval_tool_grants; a setting that lists them releases the rule; an
+// approval with --and-stop-asking adds the plan's patterns to the
+// setting, so the same plan runs without asking again; an added task's
+// grant in an active plan holds that task alone.
+func TestToolGrantsApprovalTrigger(t *testing.T) {
+	e := newEnv(t)
+	grants := []string{"Bash(git merge:*)", "Bash(git add:*)"}
+	tasks := []PlanTask{{Name: "merge", Spec: "merge the branches", ToolGrants: grants}}
+	res := e.createPlan(tasks)
+	e.assertAwaits(res, "tool_grants Bash(git merge:*), Bash(git add:*) outside approval_tool_grants")
+
+	dec, err := e.eng.ApprovePlanVersion(e.ctx, 0, res.PlanID, 0, true)
+	if err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+	if want := []string{"approval_tool_grants=Bash(git merge:*)+Bash(git add:*)"}; !slices.Equal(dec.Settings, want) {
+		t.Fatalf("settings changed = %v, want %v", dec.Settings, want)
+	}
+	if settings := e.str("SELECT settings FROM projects WHERE id = ?", e.project); !strings.Contains(settings, `"approval_tool_grants":["Bash(git merge:*)","Bash(git add:*)"]`) {
+		t.Errorf("settings %s lack the granted patterns", settings)
+	}
+	next := e.createPlan(tasks)
+	if next.State != "active" || len(next.Reasons) != 0 {
+		t.Errorf("the same plan again = %s %v, want active with no reasons", next.State, next.Reasons)
+	}
+
+	// A pattern the setting does not list still asks, naming that one.
+	other := e.createPlan([]PlanTask{{Spec: "restore a file", ToolGrants: []string{"Bash(git merge:*)", "Bash(git restore:*)"}}})
+	if reasons := strings.Join(other.Reasons, "; "); other.State != planAwaitingApproval || !strings.Contains(reasons, "tool_grants Bash(git restore:*) outside approval_tool_grants") || strings.Contains(reasons, "git merge") {
+		t.Errorf("a plan with an unlisted pattern = %s %v, want it awaiting on that pattern alone", other.State, other.Reasons)
+	}
+
+	// An added task's grant in an active plan holds that task alone.
+	am := e.amend(next.PlanID, PlanAmendment{Add: []PlanTask{{Name: "pick", Spec: "pick a commit", ToolGrants: []string{"Bash(git cherry-pick:*)"}}}})
+	if am.State != "active" || len(am.Held) != 1 || !strings.Contains(am.Held[0].Reason, "tool_grants Bash(git cherry-pick:*)") {
+		t.Errorf("amendment = %s, held %+v; want the plan active and the added task held for its grant", am.State, am.Held)
+	}
+
+	// A setting set by hand releases the rule: every pattern listed.
+	f := newEnv(t)
+	f.set(map[string]string{SettingApprovalToolGrants: strings.Join(ToolGrantAllowlist, "+")})
+	f.assertRuns(f.createPlan(tasks), 1)
+}
+
+// TestApprovalToolGrantsSetting: the setting takes a +-separated subset
+// of the allowlist, refuses a pattern outside it by name, and shows none
+// when unset.
+func TestApprovalToolGrantsSetting(t *testing.T) {
+	e := newEnv(t)
+	got := e.set(map[string]string{SettingApprovalToolGrants: ""})
+	if s := settingOf(t, got, SettingApprovalToolGrants); s.Value != "none" || !s.Default {
+		t.Errorf("unset approval_tool_grants = %+v, want none by default", s)
+	}
+	for _, g := range ToolGrantAllowlist {
+		got = e.set(map[string]string{SettingApprovalToolGrants: g})
+		if s := settingOf(t, got, SettingApprovalToolGrants); s.Value != g || s.Default {
+			t.Errorf("approval_tool_grants=%s reads %+v", g, s)
+		}
+	}
+	_, err := e.eng.SetProjectSettings(e.ctx, envRepo, map[string]string{SettingApprovalToolGrants: "Bash(git merge:*)+Bash(git push:*)"})
+	if !errors.Is(err, ErrInvalidSetting) || !strings.Contains(err.Error(), `"Bash(git push:*)" is not in the tool-grant allowlist`) {
+		t.Errorf("a pattern outside the allowlist: err = %v, want the refusal naming it", err)
+	}
+}
+
+// TestPlanReviewShowsToolGrants: the plan review's input names each
+// task's tool grants beside its tier, effort and skills (§6.2); a task
+// without grants names none.
+func TestPlanReviewShowsToolGrants(t *testing.T) {
+	e := newPlanReviewEnv(t)
+	e.offerForeman(e.runner1)
+	e.offerReviewer()
+	res := e.createPlan([]PlanTask{
+		{Name: "merge", Spec: "merge the release branch: its conflicts need git merge", ToolGrants: []string{"Bash(git merge:*)", "Bash(git add:*)"}},
+		{Name: "plain", Spec: "no grants here"},
+	})
+	reviewPrompt := e.str("SELECT prompt FROM jobs WHERE key = ?", planReviewKey(res.PlanID))
+	if !strings.Contains(reviewPrompt, "tool grants: Bash(git merge:*), Bash(git add:*)\nspec, verbatim:\nmerge the release branch") {
+		t.Errorf("the plan review input lacks the task's tool grants:\n%s", reviewPrompt)
+	}
+	if strings.Count(reviewPrompt, "tool grants:") != 1 {
+		t.Errorf("the plan review input names grants for a task without them:\n%s", reviewPrompt)
+	}
+}
+
+// TestLeaseGrantCarriesToolGrants: a task's tool grants ride its lease
+// grant, so the runner can hand them to the adapter (§6.1, §12.3); a task
+// without grants carries none.
+func TestLeaseGrantCarriesToolGrants(t *testing.T) {
+	e := newEnv(t)
+	sr := e.submitTask(TaskParams{RepoURL: envRepo, BaseRef: "main", Spec: "a change", ToolGrants: []string{"Bash(git checkout:*)"}})
+	g := e.leaseAny(e.runner1)
+	if g == nil || g.JobID != sr.JobID {
+		t.Fatalf("lease = %+v, want job %d", g, sr.JobID)
+	}
+	if !slices.Equal(g.ToolGrants, []string{"Bash(git checkout:*)"}) {
+		t.Errorf("lease grant tool_grants = %v, want the checkout grant", g.ToolGrants)
+	}
+	// A task with no grants leases none.
+	plain := e.submitTask(TaskParams{RepoURL: envRepo, BaseRef: "main", Spec: "plain"})
+	pg := e.leaseAny(e.runner1)
+	if pg == nil || pg.JobID != plain.JobID {
+		t.Fatalf("lease = %+v, want job %d", pg, plain.JobID)
+	}
+	if len(pg.ToolGrants) != 0 {
+		t.Errorf("grantless lease tool_grants = %v, want none", pg.ToolGrants)
 	}
 }

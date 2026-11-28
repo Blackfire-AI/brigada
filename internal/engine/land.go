@@ -38,6 +38,10 @@ type landRecord struct {
 	AfterLandErr  string   `json:"after_land_error,omitempty"`
 	ConflictFiles []string `json:"conflict_files,omitempty"`
 	CheckLog      string   `json:"check_log,omitempty"`
+	// Predecessor is the target head the landing's push moved from (§7.1),
+	// set when it pushed to the target; Gate the land_ready evidence.
+	Predecessor string            `json:"predecessor,omitempty"`
+	Gate        *landGateEvidence `json:"gate,omitempty"`
 }
 
 // pushRecord is a push phase's completion (§7.1): the land job, reused
@@ -50,6 +54,11 @@ type pushRecord struct {
 	Commit       string `json:"commit"`
 	Pushed       string `json:"pushed"` // 'pushed' on success
 	AfterLandErr string `json:"after_land_error,omitempty"`
+	// Predecessor is the target head the push moved from (§7.1), empty
+	// when the target already held the commit; Gate the land_ready
+	// evidence.
+	Predecessor string            `json:"predecessor,omitempty"`
+	Gate        *landGateEvidence `json:"gate,omitempty"`
 }
 
 // landHeldRecord is the payload a land job's held outcome carries
@@ -58,6 +67,14 @@ type pushRecord struct {
 type landHeldRecord struct {
 	Outcome string `json:"outcome"` // 'held'
 	Line    string `json:"line"`    // the command's first output line
+	// Suspects is the suspect line the gate evidence words (§7.1 "Gate
+	// evidence and batch holds"), "suspects unknown" among its answers;
+	// empty when the runner reports none. The hold's reason carries it
+	// after the line, verbatim.
+	Suspects string `json:"suspects,omitempty"`
+	// Gate is the run's evidence; the engine words the suspect line from
+	// it when the runner reports none (§7.1).
+	Gate *landGateEvidence `json:"gate,omitempty"`
 }
 
 // landNotReadyRecord is the payload a land job's not-ready outcome
@@ -589,11 +606,11 @@ func landReadyHold(reason string) bool {
 // a landing record — its own land job landed it, or a detected trailer
 // did — has nothing left to squash, so no land job is queued for it; a
 // task a live batch reserves (§12.3) coalesces behind that batch.
-// skipLandReady marks the job an approval of the land_ready gate's hold
-// queues (issue #87): its grant carries the gate as skipped, so the
-// runner lands without re-running the command — the batch grant carries
-// no per-member skip yet, so that landing runs alone on the task's own
-// key. The submit's answer says what happened: created with the new
+// skipLandReady marks the landing an approval of the land_ready gate's
+// hold, or the engine's passing re-check of it, releases (issue #87, §7.1
+// "Deciding a batch hold"): the task's land_skip_ready is set and the
+// landing joins one next batch, whose grant exempts this member from the
+// command — the other members stay subject to it. The submit's answer says what happened: created with the new
 // job, pending behind the live job or batch that holds the key, or the
 // zero answer for a task already landed. A task whose
 // recorded base is a superseded round of its stacked dependency is
@@ -619,24 +636,12 @@ func (e *Engine) queueLandJobTx(tx *sql.Tx, project, taskID int64, skipLandReady
 	} else if stale {
 		return SubmitResult{}, e.parkStaleBaseTx(tx, project, taskID, dep, baseRef, depBranch, "the landing is refused", true, now)
 	}
-	if !skipLandReady {
-		return e.formLandBatchTx(tx, project, taskID, now)
+	if skipLandReady {
+		if err := markLandSkipReadyTx(tx, taskID, now); err != nil {
+			return SubmitResult{}, err
+		}
 	}
-	// The landing's squash consumes the target (§7.1): queue the sync
-	// ahead of it, so the land job leases only once the target is current.
-	if err := e.maybeQueueSyncTx(tx, project, now); err != nil {
-		return SubmitResult{}, err
-	}
-	return e.submitTx(tx, SubmitParams{
-		Key:           fmt.Sprintf("task:%d", taskID),
-		ProjectID:     project,
-		TaskID:        taskID,
-		Kind:          KindLand,
-		Mode:          ModeFresh,
-		Prompt:        "", // no worker: nothing is composed (§1.4)
-		Labels:        []string{"git"},
-		SkipLandReady: skipLandReady,
-	}, now)
+	return e.formLandBatchTx(tx, project, taskID, now)
 }
 
 // queuePushJobTx creates the push phase's land job (§7.1): the land job
@@ -781,6 +786,8 @@ func (e *Engine) landOutcomeTx(tx *sql.Tx, job *jobRow, c Completion, now time.T
 		return e.landHeldTx(tx, job, c, now)
 	case OutcomeLandNotReady:
 		return e.landNotReadyTx(tx, job, c, now)
+	case OutcomeLandReady:
+		return e.landRecheckPassedTx(tx, job, c, now)
 	}
 	if c.Error != "" {
 		return e.landErrorTx(tx, job, c, now)
@@ -845,7 +852,20 @@ func (e *Engine) landRecordTx(tx *sql.Tx, job *jobRow, c Completion, now time.Ti
 		if err := rec.validate(); err != nil {
 			return e.needsForemanTx(tx, job, evTaskLandFailed, eventPayload{Reason: boundNote(err.Error())}, now)
 		}
-		return e.landSucceededTx(tx, job, rec, now)
+		// The gate's pass may verify a baseline (§7.1), judged before the
+		// landing's own publication leaves the checked head.
+		if err := noteLandBaselineTx(tx, job.ProjectID, rec.TargetBranch, rec.Gate, now); err != nil {
+			return err
+		}
+		if err := e.landSucceededTx(tx, job, rec, now); err != nil {
+			return err
+		}
+		if rec.Pushed != "pushed" {
+			return nil
+		}
+		return recordLandPublicationTx(tx, job.ProjectID, rec.TargetBranch, job.ID, landPublication{
+			Predecessor: rec.Predecessor, Final: rec.Commit,
+			Members: []landPublicationMember{{TaskID: job.TaskID, Commit: rec.Commit}}}, now)
 	}
 }
 
@@ -1419,6 +1439,27 @@ func (e *Engine) pushCompletedTx(tx *sql.Tx, job *jobRow, existing *landingRow, 
 	if pr.Pushed != "pushed" {
 		return e.needsForemanTx(tx, job, evTaskLandFailed, eventPayload{Reason: "the push did not push"}, now)
 	}
+	// The gate's pass may verify a baseline (§7.1), judged before this
+	// push's publication; the publication records the members it actually
+	// released — the waiting landings beneath the commit, then its own.
+	if err := noteLandBaselineTx(tx, job.ProjectID, existing.TargetBranch, pr.Gate, now); err != nil {
+		return err
+	}
+	released := landPublication{Predecessor: pr.Predecessor, Final: pr.Commit}
+	if pr.Predecessor != "" {
+		covered, err := coveredWaitingTx(tx, job.TaskID)
+		if err != nil {
+			return err
+		}
+		for _, id := range covered {
+			l, err := landingTx(tx, id)
+			if err != nil {
+				return err
+			}
+			released.Members = append(released.Members, landPublicationMember{TaskID: id, Commit: l.Commit})
+		}
+		released.Members = append(released.Members, landPublicationMember{TaskID: job.TaskID, Commit: pr.Commit})
+	}
 	if _, err := tx.Exec(`UPDATE landings SET pushed = 'pushed', after_land_error = ? WHERE task_id = ?`,
 		pr.AfterLandErr, job.TaskID); err != nil {
 		return fmt.Errorf("record the push of task %d: %w", job.TaskID, err)
@@ -1433,6 +1474,14 @@ func (e *Engine) pushCompletedTx(tx *sql.Tx, job *jobRow, existing *landingRow, 
 	if _, err := appendEventTx(tx, evTaskPushed, job.ProjectID, job.TaskID, job.ID,
 		eventPayload{Status: taskDone, Branch: pr.TargetBranch, Commit: pr.Commit, Pushed: "pushed",
 			AfterLandError: pr.AfterLandErr}, now); err != nil {
+		return err
+	}
+	// The push carried every waiting commit beneath this one (§7.1): the
+	// recorded prefix lands with it, and no later commit.
+	if err := e.carryCoveredPushesTx(tx, job, pr.TargetBranch, now); err != nil {
+		return err
+	}
+	if err := recordLandPublicationTx(tx, job.ProjectID, existing.TargetBranch, job.ID, released, now); err != nil {
 		return err
 	}
 	// The push moved a waiting landing to the target, which releases a
@@ -1532,6 +1581,20 @@ func (e *Engine) landHeldTx(tx *sql.Tx, job *jobRow, c Completion, now time.Time
 	if json.Unmarshal([]byte(c.Result), &rec) == nil && rec.Line != "" {
 		reason += ": " + boundNote(rec.Line)
 	}
+	// The hold always carries the suspect line after the command's line
+	// (§7.1): tasks named only from a known baseline and a complete
+	// recorded chain, "suspects unknown" otherwise.
+	suspects := rec.Suspects
+	if suspects == "" {
+		target, err := landJobTargetTx(tx, job.ProjectID, job.TaskID)
+		if err != nil {
+			return err
+		}
+		if suspects, err = landSuspectsTx(tx, job.ProjectID, target, rec.Gate); err != nil {
+			return err
+		}
+	}
+	reason += "; " + boundNote(suspects)
 	var state string
 	if err := tx.QueryRow("SELECT state FROM tasks WHERE id = ?", job.TaskID).Scan(&state); err != nil {
 		return fmt.Errorf("read task %d: %w", job.TaskID, err)
@@ -1576,6 +1639,14 @@ func (e *Engine) landHeldTx(tx *sql.Tx, job *jobRow, c Completion, now time.Time
 				return err
 			}
 			recheck = true
+		}
+	}
+	if recheck {
+		// A push-phase hold holds the one push (§7.1 "Deciding a batch
+		// hold"): every waiting landing beneath the held commit is covered
+		// by that push, and waits with the same reason on its own line.
+		if err := e.holdCoveredPushesTx(tx, job.ProjectID, job.TaskID, reason, now); err != nil {
+			return err
 		}
 	}
 	if recheck {
@@ -1854,6 +1925,26 @@ func (e *Engine) landLeaseGrantTx(tx *sql.Tx, j *jobRow, owner int64, leaseID st
 	if err != nil {
 		return nil, err
 	}
+	// A land job on a member's own key under its squash-phase land_ready
+	// hold is the engine's re-check (§7.1 "Deciding a batch hold"): the
+	// runner runs the command and lands nothing, and a pass releases the
+	// member into one next batch. A batch whose every member's gate was
+	// released runs no command at all.
+	recheck := false
+	skipReady := j.SkipLandReady
+	if isLandBatchKey(j.Key) {
+		all := len(members) > 0
+		for _, m := range members {
+			all = all && m.SkipLandReady
+		}
+		skipReady = skipReady || all
+	} else if !skipReady {
+		if reason, held, err := heldLandHoldTx(tx, j.TaskID); err != nil {
+			return nil, err
+		} else if held && landReadyHold(reason) {
+			recheck = true
+		}
+	}
 	// The target's waiting ref may be stale in the engine's record
 	// (issue #205): a restart forgot the landings that sat on it, so
 	// their commits must not be stacked on again. The grant says so, and
@@ -1892,7 +1983,8 @@ func (e *Engine) landLeaseGrantTx(tx *sql.Tx, j *jobRow, owner int64, leaseID st
 		DropWaitingRef: staleRef,
 		AfterLand:      s.AfterLand,
 		LandReady:      s.LandReady,
-		SkipLandReady:  j.SkipLandReady,
+		SkipLandReady:  skipReady,
+		LandRecheck:    recheck,
 		LandBatch:      isLandBatchKey(j.Key),
 		LandMembers:    members,
 		Attempt:        j.Attempts + 1,
@@ -2057,6 +2149,19 @@ func (e *Engine) landDecisionTx(tx *sql.Tx, project, taskID int64, approve, stop
 		// landed. A live job on the task's key queues nothing: the
 		// decision names that job instead of a land job it did not queue.
 		res := LandDecision{TaskID: taskID, Released: true, Settings: changed}
+		existing, err := landingTx(tx, taskID)
+		if err != nil {
+			return LandDecision{}, err
+		}
+		if skip && existing == nil {
+			// The member is released exactly once, into one next batch with
+			// its gate skipped (§7.1 "Deciding a batch hold"): a batch
+			// already live over it carries the release when it settles the
+			// member again.
+			if err := markLandSkipReadyTx(tx, taskID, now); err != nil {
+				return LandDecision{}, err
+			}
+		}
 		live, err := liveTaskOwnerTx(tx, taskID)
 		if err != nil {
 			return LandDecision{}, err
@@ -2068,12 +2173,9 @@ func (e *Engine) landDecisionTx(tx *sql.Tx, project, taskID int64, approve, stop
 		// A hold beside a landing record is the push phase's (issue #87):
 		// the gate refused the push of a commit already squashed and
 		// waiting, so the release re-queues the push — not a new squash —
-		// with the gate skipped. A hold with no landing is the squash
-		// phase's, and the landing is re-queued whole.
-		existing, err := landingTx(tx, taskID)
-		if err != nil {
-			return LandDecision{}, err
-		}
+		// with the gate skipped, and its push carries only the waiting
+		// commits beneath it, never a later one (§7.1). A hold with no
+		// landing is the squash phase's: the member joins one next batch.
 		var sr SubmitResult
 		if existing != nil {
 			sr, err = e.queuePushJobTx(tx, project, taskID, skip, now)

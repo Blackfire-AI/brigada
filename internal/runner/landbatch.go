@@ -38,6 +38,10 @@ const (
 	landMemberLanded  = "landed"
 	landMemberParked  = "parked"
 	landMemberDropped = "dropped"
+	// A mixed batch's gate answer for a member subject to it (§7.1
+	// "Deciding a batch hold").
+	landMemberHeld     = engine.OutcomeLandHeld
+	landMemberNotReady = engine.OutcomeLandNotReady
 )
 
 // landBatchJSON is a batch land job's completion (§12.3): every granted
@@ -48,6 +52,26 @@ type landBatchJSON struct {
 	Members   []landMemberJSON `json:"members"`
 	Error     string           `json:"error,omitempty"`
 	ErrorKind string           `json:"error_kind,omitempty"`
+	// Gate is the land_ready gate's evidence, nil when none ran.
+	Gate *landGateJSON `json:"gate,omitempty"`
+	// Publication is the push that moved the target (§7.1): the head it
+	// moved from, the head it left and the members it published in
+	// landing order with their own commits. nil when nothing reached the
+	// target — under ask and never the stack waits.
+	Publication *landPublicationJSON `json:"publication,omitempty"`
+}
+
+// landPublicationJSON is one recorded publication to the target.
+type landPublicationJSON struct {
+	Predecessor string                  `json:"predecessor"`
+	Final       string                  `json:"final"`
+	Members     []landPublicationMember `json:"members"`
+}
+
+// landPublicationMember is one published member and its own commit.
+type landPublicationMember struct {
+	TaskID int64  `json:"task_id"`
+	Commit string `json:"commit"`
 }
 
 // landMemberJSON is one member's outcome.
@@ -57,12 +81,51 @@ type landMemberJSON struct {
 	Record    *landRecordJSON `json:"record,omitempty"`
 	Reason    string          `json:"reason,omitempty"`
 	BlockedBy int64           `json:"blocked_by,omitempty"`
+	Line      string          `json:"line,omitempty"`
+	Suspects  string          `json:"suspects,omitempty"`
+	Exit      int             `json:"exit,omitempty"`
 }
 
 // isLandBatch reports whether the grant is a batch land job's squash
 // phase (§12.3).
 func isLandBatch(grant *api.JobGrant) bool {
 	return grant.LandBatch && !grant.Push
+}
+
+// landIntentJSON is one survivor's pre-push progress (§7.1): its input,
+// its local commit and check, and where the push publishes it.
+type landIntentJSON struct {
+	TaskID       int64  `json:"task_id"`
+	ApprovedHead string `json:"approved_head,omitempty"`
+	BaseRef      string `json:"base_ref,omitempty"`
+	Commit       string `json:"commit"`
+	CheckPassed  bool   `json:"check_passed"`
+	Intent       string `json:"intent"` // 'target' or 'waiting'
+	Position     int    `json:"position"`
+}
+
+// reportLandProgress hands members' progress to the engine as it occurs
+// (§7.1): a settled park or skip, or a survivor's pre-push intent. It is
+// best effort — the completion still carries every outcome — so a failed
+// report is logged and the run goes on; the heartbeat decides whether
+// the lease is still ours.
+func (r *jobRun) reportLandProgress(ctx context.Context, entries ...any) {
+	if len(entries) == 0 || r.client == nil {
+		return
+	}
+	var raws []json.RawMessage
+	for _, e := range entries {
+		b, err := json.Marshal(e)
+		if err != nil {
+			r.cfg.Log.WarnContext(ctx, "encode the land batch's progress", "job_id", r.grant.JobID, "err", err)
+			return
+		}
+		raws = append(raws, b)
+	}
+	ans, err := r.client.LandProgress(ctx, r.grant.JobID, r.grant.LeaseID, raws)
+	if err != nil || ans != engine.AnsOK {
+		r.cfg.Log.WarnContext(ctx, "report the land batch's progress", "job_id", r.grant.JobID, "answer", ans, "err", err)
+	}
 }
 
 // landStackMember is one member's place in this attempt's stack: its
@@ -110,8 +173,10 @@ func (r *jobRun) runLandBatch(ctx context.Context) {
 	}
 	// land_ready runs once per land job, before the first squash (§7.1),
 	// never again for a rejected push's retries; its answer covers the
-	// whole batch.
-	if !r.runLandReady(ctx, dir) {
+	// members subject to it — every member but those whose gate an
+	// approval or a re-check released.
+	settled := map[int64]landMemberJSON{}
+	if !r.runLandBatchReady(ctx, dir, settled) {
 		return
 	}
 	defer r.cleanupSetup()
@@ -122,23 +187,58 @@ func (r *jobRun) runLandBatch(ctx context.Context) {
 		}
 		return
 	}
-	settled, errMsg, kind := r.landBatchLoop(ctx, dir)
+	errMsg, kind := r.landBatchLoop(ctx, dir, settled)
 	r.finishLandBatch(ctx, settled, errMsg, kind)
+}
+
+// runLandBatchReady runs the batch's land_ready gate (§7.1 "Deciding a
+// batch hold"). With every member subject to the command its answer is
+// the batch's, completing the job as a one-task landing's does; with
+// every member's gate released nothing runs. A mixed batch runs the
+// command once: exit 0 lets every member go on, and a refusal settles
+// only the members subject to it — each its own hold with the same line,
+// or its own retry — while the released members go on in this batch,
+// the dependents of a member it held dropping to wait. false when the
+// gate completed the job.
+func (r *jobRun) runLandBatchReady(ctx context.Context, dir string, settled map[int64]landMemberJSON) bool {
+	grant := r.grant
+	var subject []int64
+	for _, m := range grant.LandMembers {
+		if !m.SkipLandReady {
+			subject = append(subject, m.TaskID)
+		}
+	}
+	if len(subject) == len(grant.LandMembers) {
+		return r.runLandReady(ctx, dir)
+	}
+	if grant.LandReady == "" || grant.SkipLandReady || len(subject) == 0 {
+		return true
+	}
+	held, notReady := r.landReadyAnswer(ctx, dir)
+	for _, id := range subject {
+		switch {
+		case held != nil:
+			settled[id] = landMemberJSON{TaskID: id, Outcome: landMemberHeld, Line: held.Line, Suspects: held.Suspects}
+		case notReady != nil:
+			settled[id] = landMemberJSON{TaskID: id, Outcome: landMemberNotReady, Exit: notReady.Exit, Reason: notReady.Reason}
+		}
+	}
+	return true
 }
 
 // landBatchLoop runs the batch's attempts in the prepared clone (§7.1)
 // and returns every member's settled outcome and, when the batch stopped
 // partway, the error and its kind that settle the rest.
-func (r *jobRun) landBatchLoop(ctx context.Context, dir string) (settled map[int64]landMemberJSON, errMsg, kind string) {
+func (r *jobRun) landBatchLoop(ctx context.Context, dir string, settled map[int64]landMemberJSON) (errMsg, kind string) {
 	grant := r.grant
 	pause := landRetryPause
 	if r.cfg.landRetryPause != nil {
 		pause = r.cfg.landRetryPause
 	}
-	// settled holds every member's final outcome as it is reached: a
-	// content failure parks for good, its dependents drop for good, and a
-	// published member is landed — a retry re-squashes only the rest.
-	settled = map[int64]landMemberJSON{}
+	// settled holds every member's final outcome as it is reached — the
+	// gate's hold of a member subject to it, a content failure's park, a
+	// dropped dependent, a published member — so a retry re-squashes only
+	// the rest.
 	for attempt := 1; ; attempt++ {
 		res, err := r.landBatchAttempt(ctx, dir, settled)
 		// The attempt writes each member's outcome into settled as it is
@@ -152,7 +252,7 @@ func (r *jobRun) landBatchLoop(ctx context.Context, dir string) (settled map[int
 			if errors.As(err, &setup) {
 				kind = engine.ErrorKindSetup
 			}
-			return settled, err.Error(), kind
+			return err.Error(), kind
 		}
 		if !res.rejected {
 			break
@@ -172,16 +272,17 @@ func (r *jobRun) landBatchLoop(ctx context.Context, dir string) (settled map[int
 		case <-time.After(pause(attempt)):
 		case <-ctx.Done():
 			r.gone(ctx, "waiting to retry the land batch's push")
-			return settled, "the run was no longer ours while the land batch waited to retry its push", ""
+			return "the run was no longer ours while the land batch waited to retry its push", ""
 		}
 	}
-	return settled, "", ""
+	return "", ""
 }
 
 // finishLandBatch completes the batch with every settled member in batch
 // order and, when the run stopped, the error that settles the rest.
 func (r *jobRun) finishLandBatch(ctx context.Context, settled map[int64]landMemberJSON, errMsg, kind string) {
-	rec := landBatchJSON{Batch: true, Members: []landMemberJSON{}, Error: errMsg, ErrorKind: kind}
+	rec := landBatchJSON{Batch: true, Members: []landMemberJSON{}, Error: errMsg, ErrorKind: kind,
+		Gate: r.landGate, Publication: r.landPub}
 	for _, m := range r.grant.LandMembers {
 		if s, ok := settled[m.TaskID]; ok {
 			rec.Members = append(rec.Members, s)
@@ -308,6 +409,7 @@ func (r *jobRun) landBatchAttempt(ctx context.Context, dir string, settled map[i
 		return nil, err
 	}
 	last = strings.TrimSpace(last)
+	from := last
 	// failed names the members that will not publish in this batch — a
 	// park, a drop, settled before or now — so their dependents drop.
 	failed := func(id int64) bool {
@@ -326,6 +428,7 @@ func (r *jobRun) landBatchAttempt(ctx context.Context, dir string, settled map[i
 			// A dependent of a member that will not land waits (§7.1): left
 			// out of the push, nothing recorded, never parked.
 			settled[m.TaskID] = landMemberJSON{TaskID: m.TaskID, Outcome: landMemberDropped, BlockedBy: blocker}
+			r.reportLandProgress(ctx, settled[m.TaskID])
 			continue
 		}
 		commit, conflict, refusal, err := r.landSquashOnto(ctx, dir, last, landSquashSpec{
@@ -341,12 +444,14 @@ func (r *jobRun) landBatchAttempt(ctx context.Context, dir string, settled map[i
 		}
 		if refusal != "" {
 			settled[m.TaskID] = landMemberJSON{TaskID: m.TaskID, Outcome: landMemberParked, Reason: refusal}
+			r.reportLandProgress(ctx, settled[m.TaskID])
 			r.landResetTo(ctx, dir, last)
 			continue
 		}
 		if conflict != nil {
 			settled[m.TaskID] = landMemberJSON{TaskID: m.TaskID, Outcome: landMemberParked,
 				Record: &landRecordJSON{TargetBranch: target, Commit: last, ConflictFiles: conflict}}
+			r.reportLandProgress(ctx, settled[m.TaskID])
 			r.landResetTo(ctx, dir, last)
 			continue
 		}
@@ -361,6 +466,7 @@ func (r *jobRun) landBatchAttempt(ctx context.Context, dir string, settled map[i
 		if bad {
 			settled[m.TaskID] = landMemberJSON{TaskID: m.TaskID, Outcome: landMemberParked,
 				Record: &landRecordJSON{TargetBranch: target, Commit: commit, CheckLog: output}}
+			r.reportLandProgress(ctx, settled[m.TaskID])
 			r.landResetTo(ctx, dir, last)
 			continue
 		}
@@ -370,6 +476,21 @@ func (r *jobRun) landBatchAttempt(ctx context.Context, dir string, settled map[i
 	if len(res.survivors) == 0 {
 		return res, nil // every member dropped out: nothing pushes, nothing records
 	}
+	// Before the push the engine keeps each survivor's input, local check
+	// and publication intent (§7.1): a runner lost from here on leaves a
+	// next lease, or the job's terminal failure, to reconcile these members
+	// from the remote rather than park them over a push that may have
+	// published. A local commit is still no landing record.
+	intent := "target"
+	if stack {
+		intent = "waiting"
+	}
+	var intents []any
+	for i, s := range res.survivors {
+		intents = append(intents, landIntentJSON{TaskID: s.member.TaskID, ApprovedHead: s.member.ApprovedHead,
+			BaseRef: s.member.BaseRef, Commit: s.commit, CheckPassed: true, Intent: intent, Position: i + 1})
+	}
+	r.reportLandProgress(ctx, intents...)
 	// One fast-forward push publishes the stack (§7.1).
 	var pushErr error
 	if stack {
@@ -396,6 +517,13 @@ func (r *jobRun) landBatchAttempt(ctx context.Context, dir string, settled map[i
 		res.rejected = true
 		res.pushErr = pushErr.Error()
 		return res, nil
+	}
+	if !stack {
+		pub := &landPublicationJSON{Predecessor: from, Final: last}
+		for _, s := range res.survivors {
+			pub.Members = append(pub.Members, landPublicationMember{TaskID: s.member.TaskID, Commit: s.commit})
+		}
+		r.landPub = pub
 	}
 	for _, s := range res.survivors {
 		rec := &landRecordJSON{TargetBranch: target, Commit: s.commit, CheckPassed: true}
@@ -439,10 +567,14 @@ func (r *jobRun) landStackPublished(ctx context.Context, dir string, stack bool,
 
 // publishedSHA picks the candidate that is the member's own published
 // landing (§7.1): its Brigada-Branch trailer naming the member's branch
-// at the approved head. "" when none is.
+// at the approved head, or at the head an earlier lease recorded as the
+// input of its pre-push attempt. "" when none is.
 func publishedSHA(cands []landing.Candidate, m engine.LandMember) string {
 	for _, c := range cands {
-		if c.Branch == m.Branch && (m.ApprovedHead == "" || c.Head == m.ApprovedHead) {
+		if c.Branch != m.Branch {
+			continue
+		}
+		if m.ApprovedHead == "" || c.Head == m.ApprovedHead || (m.RecordedHead != "" && c.Head == m.RecordedHead) {
 			return c.SHA
 		}
 	}

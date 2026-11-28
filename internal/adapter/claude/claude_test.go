@@ -389,6 +389,43 @@ func TestCommandPermissionPassThrough(t *testing.T) {
 	}
 }
 
+// TestCommandAppendsToolGrants: a task's tool grants widen a
+// pattern-scoped claude worker's allowlist — appended, its own patterns
+// kept — while a mode-valued permission (bypassPermissions included) keeps
+// its scope unchanged (§6.1, §5.2).
+func TestCommandAppendsToolGrants(t *testing.T) {
+	stubCLI(t)
+	flags := func(job adapter.Job) []string {
+		cmd, err := (&Adapter{}).Command(job, t.TempDir(), "")
+		if err != nil {
+			t.Fatalf("build command: %v", err)
+		}
+		return cmd.Args
+	}
+	grants := []string{"Bash(git merge:*)", "Bash(git checkout:*)"}
+
+	pattern := flags(adapter.Job{Prompt: "p", Permission: "Bash(go test:*)", ToolGrants: grants})
+	i := slices.Index(pattern, "--allowedTools")
+	if i < 0 {
+		t.Fatalf("pattern scope has no --allowedTools: %v", pattern)
+	}
+	for _, g := range grants {
+		if !slices.Contains(pattern[i+1:], g) {
+			t.Errorf("pattern scope did not append %q: %v", g, pattern)
+		}
+	}
+	if !slices.Contains(pattern[i+1:], "Bash(go test:*)") {
+		t.Errorf("pattern scope lost its own pattern: %v", pattern)
+	}
+
+	for _, perm := range []string{"", "acceptEdits", "plan", "none"} {
+		got := flags(adapter.Job{Prompt: "p", Permission: perm, ToolGrants: grants})
+		if slices.Contains(got, "Bash(git merge:*)") || slices.Contains(got, "Bash(git checkout:*)") {
+			t.Errorf("permission %q gained a grant: %v", perm, got)
+		}
+	}
+}
+
 // TestCommandForemanPermission: the foreman takes acceptEdits when the
 // agent names no mode, a plain mode otherwise, under brigada's own scope.
 func TestCommandForemanPermission(t *testing.T) {

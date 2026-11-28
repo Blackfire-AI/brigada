@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -189,9 +190,10 @@ func (s *Server) handleComplete(w http.ResponseWriter, r *http.Request, runnerID
 	}
 	if req.Outcome != "" &&
 		(req.Outcome != engine.OutcomeStalled && req.Outcome != engine.OutcomeTimeCap &&
-			req.Outcome != engine.OutcomeLandHeld && req.Outcome != engine.OutcomeLandNotReady || req.Error != "") {
+			req.Outcome != engine.OutcomeLandHeld && req.Outcome != engine.OutcomeLandNotReady &&
+			req.Outcome != engine.OutcomeLandReady || req.Error != "") {
 		writeError(w, http.StatusBadRequest, codeBadRequest,
-			"outcome must be stalled, time_cap, held or not ready, with a result")
+			"outcome must be stalled, time_cap, held, not ready or ready, with a result")
 		return
 	}
 	c := engine.Completion{
@@ -351,6 +353,42 @@ type jobLeaseRequest struct {
 	LeaseID string `json:"lease_id"`
 }
 
+// landProgressRequest is a batch land job's progress report (§7.1, §12.3):
+// each member entry its settled outcome — parked or dropped, the member
+// result a completion would carry — or its pre-push input, local check
+// result and publication intent.
+type landProgressRequest struct {
+	jobLeaseRequest
+	Members []json.RawMessage `json:"members"`
+}
+
+// handleLandProgress records a batch land job's per-member progress as it
+// occurs (§7.1 "A lost runner resumes by remote evidence"), so a lost
+// runner's next lease and a terminal failure keep what the run decided.
+// The answer is the lease's, as a heartbeat's is; a member the batch does
+// not own refuses the report naming it.
+func (s *Server) handleLandProgress(w http.ResponseWriter, r *http.Request, runnerID int64) {
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	var req landProgressRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	ans, err := s.eng.LandProgress(r.Context(), runnerID, req.JobID, req.LeaseID, req.Members)
+	if errors.Is(err, engine.ErrLandProgressRefused) {
+		writeError(w, http.StatusBadRequest, codeBadRequest, err.Error())
+		return
+	}
+	if err != nil {
+		s.writeInternal(w, r, fmt.Sprintf("record the progress of land batch %d", req.JobID), err)
+		return
+	}
+	writeJSON(w, http.StatusOK, struct {
+		Answer string `json:"answer"`
+	}{string(ans)})
+}
+
 // heartbeatRequest is a jobLeaseRequest plus the worker's progress
 // (§5.6): when it last made progress, the last sign of life, the last
 // few progress events, and the loop signal once the runner's watch has
@@ -434,6 +472,10 @@ type jobGrant struct {
 	// which the runner hands the harness as its own permission mode; empty
 	// when the agent has none to pass. A review's grant carries it as well.
 	Permission string `json:"permission,omitempty"`
+	// ToolGrants are the task's per-task tool grants (§6.1), the Claude
+	// Code permission patterns its worker is granted; empty when the task
+	// grants none. The runner hands them to the adapter.
+	ToolGrants []string `json:"tool_grants,omitempty"`
 	// Setup is the environment step (§5.7) the runner runs before the
 	// worker and again before the check; absent when the task has none.
 	Setup *engine.SetupSpec `json:"setup,omitempty"`
@@ -494,6 +536,11 @@ type jobGrant struct {
 	// (issue #87): the engine sets it when an approval already released
 	// the gate's hold.
 	SkipLandReady bool `json:"skip_land_ready,omitempty"`
+	// LandRecheck marks the engine's re-check of a squash-phase
+	// land_ready hold (§7.1 "Deciding a batch hold"): the runner runs the
+	// command alone and lands nothing; its exit 0 completes with the
+	// outcome ready, which releases the member into one next batch.
+	LandRecheck bool `json:"land_recheck,omitempty"`
 	// DropWaitingRef tells a land job's squash phase (issue #205) that
 	// the engine marked the target's waiting ref stale: the landings
 	// that sat on it are forgotten, and the runner deletes
@@ -556,6 +603,7 @@ func jobGrantOf(g *engine.LeaseGrant) *jobGrant {
 		BaseRef:         g.BaseRef,
 		CheckCmd:        g.CheckCmd,
 		Permission:      g.Permission,
+		ToolGrants:      g.ToolGrants,
 		Setup:           g.Setup,
 		ExtraRepos:      g.ExtraRepos,
 		ReviewBranch:    g.ReviewBranch,
@@ -571,6 +619,7 @@ func jobGrantOf(g *engine.LeaseGrant) *jobGrant {
 		AfterLand:       g.AfterLand,
 		LandReady:       g.LandReady,
 		SkipLandReady:   g.SkipLandReady,
+		LandRecheck:     g.LandRecheck,
 		DropWaitingRef:  g.DropWaitingRef,
 		LandBatch:       g.LandBatch,
 		LandMembers:     g.LandMembers,

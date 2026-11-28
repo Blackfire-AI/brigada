@@ -55,10 +55,10 @@ const tailDefaults = "setup=none (default)\n" + "setup_cache_key_files=none (def
 	"extra_repos=none (default)\n" + "foreman_rotate_tokens=400000 (default)\n" + "foreman_wakes_per_day=20 (default)\n" + "plan_files=on (default)\n" + "plan_file_branch=brigada/plans (default)\n" +
 	"branch_retention_days=7 (default)\n" + "tracker=auto (default)\n" + "tracker_url=none (default)\n" + "instructions=none (default)\n" + "skills_dir=.brigada/skills (default)\n"
 
-// gateDefaults are the gates and land rules (§6.3) and the plan review
-// (§6.2) at their defaults, printed between the approval keys and
-// default_check.
-const gateDefaults = "gate_plan=auto (default)\n" + "gate_land=auto (default)\n" + "gate_push=auto (default)\n" +
+// gateDefaults are the pre-approved tool grants, the gates and land
+// rules (§6.3) and the plan review (§6.2) at their defaults, printed
+// between the approval keys and default_check.
+const gateDefaults = "approval_tool_grants=none (default)\n" + "gate_plan=auto (default)\n" + "gate_land=auto (default)\n" + "gate_push=auto (default)\n" +
 	"plan_review=true (default)\n" + "plan_review.tier=standard (default)\n" + "plan_review.effort=medium (default)\n" +
 	"approval_tiers=none (default)\n" + "approval_restarted=false (default)\n" +
 	"land_target=main (default)\n" + "after_land=none (default)\n" + "land_ready=none (default)\n" + "land_batch_max=5 (default)\n"
@@ -74,7 +74,7 @@ const guidanceDefaults = "instructions.foreman: not configured, file none\n" +
 	"instructions.reviewer: not configured, file none\n" +
 	"skills: none imported\n"
 
-const validSettingKeys = "approval_max_tasks, approval_budget, approval_classes, approval_protected_paths, gate_plan, gate_land, gate_push, plan_review, plan_review.tier, plan_review.effort, approval_tiers, approval_restarted, land_target, after_land, land_ready, land_batch_max, default_check, worker_tools, setup, setup_cache_key_files, setup_timeout_minutes, extra_repos, foreman_rotate_tokens, foreman_wakes_per_day, plan_files, plan_file_branch, branch_retention_days, tracker, tracker_url, instructions"
+const validSettingKeys = "approval_max_tasks, approval_budget, approval_classes, approval_protected_paths, approval_tool_grants, gate_plan, gate_land, gate_push, plan_review, plan_review.tier, plan_review.effort, approval_tiers, approval_restarted, land_target, after_land, land_ready, land_batch_max, default_check, worker_tools, setup, setup_cache_key_files, setup_timeout_minutes, extra_repos, foreman_rotate_tokens, foreman_wakes_per_day, plan_files, plan_file_branch, branch_retention_days, tracker, tracker_url, instructions"
 
 // TestProjectSettingsGolden covers project set and show: the defaults,
 // one override, the reset, and the usage errors for a bad key and value.
